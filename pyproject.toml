@@ -1,0 +1,13 @@
+[project]
+name = "irealstudio"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accessible-output3>=0.1.2",
+    "mido>=1.3.3",
+    "pychord>=1.3.2",
+    "pygame>=2.6.1",
+    "python-rtmidi>=1.5.8",
+]
