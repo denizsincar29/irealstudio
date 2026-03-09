@@ -48,7 +48,7 @@ from chords import (
 from sound import make_beep
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
-from dialogs import prompt_input
+from dialogs import prompt_input, new_project_dialog
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -162,16 +162,18 @@ class App:
         self._key_item:   wx.MenuItem | None = None
         self._style_item: wx.MenuItem | None = None
 
-        # Load saved progression if it exists
+        # Load saved progression if it exists; otherwise flag for new-project dialog
         if Path(SAVE_FILE).exists():
             try:
                 with open(SAVE_FILE) as f:
                     self.progression = ChordProgression.from_json(f.read())
+                self._is_new_project = False
                 self.speak(f"Loaded {self.progression.title}")
             except Exception as e:
+                self._is_new_project = True
                 self.speak(f"Could not load: {e}")
         else:
-            self.speak("IReal Studio ready. Press R to record.")
+            self._is_new_project = True
 
     # ------------------------------------------------------------------
     # MIDI chord callback
@@ -501,9 +503,42 @@ class App:
 
     def run(self) -> None:
         wx_app = wx.App(False)
+
+        # --- New-project dialog (shown before the main window) ---
+        if self._is_new_project:
+            data = new_project_dialog(
+                parent=None,
+                defaults={
+                    'title':    self.progression.title,
+                    'composer': self.progression.composer,
+                    'key':      self.progression.key,
+                    'style':    self.progression.style,
+                    'bpm':      self.progression.bpm,
+                },
+            )
+            if data:
+                self.progression.title    = data['title']
+                self.progression.composer = data['composer']
+                self.progression.key      = data['key']
+                self.progression.style    = data['style']
+                try:
+                    bpm = int(data['bpm'])
+                    if 40 <= bpm <= 240:
+                        self.progression.bpm = bpm
+                    else:
+                        self.speak(
+                            f"BPM {bpm} out of range (40–240); "
+                            f"using {self.progression.bpm}")
+                except ValueError:
+                    self.speak(
+                        f"Invalid BPM '{data['bpm']}'; "
+                        f"using {self.progression.bpm}")
+        self.speak(f"IReal Studio ready. {self.progression.title}. Press R to record.")
+
         self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
-        panel = wx.Panel(self._frame)
+        # style=0 removes wx.TAB_TRAVERSAL so navigation keys reach _on_keydown
+        panel = wx.Panel(self._frame, style=0)
         sizer = wx.BoxSizer(wx.VERTICAL)
         self._status_labels = []
 
@@ -534,6 +569,8 @@ class App:
         self._refresh_menu_state()
 
         self._frame.Show()
+        # Give keyboard focus to the panel so key events are received immediately
+        panel.SetFocus()
 
         self._schedule_display_update()
 
