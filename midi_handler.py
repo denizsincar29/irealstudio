@@ -52,13 +52,19 @@ class MidiHandler:
     def init(self) -> None:
         """Auto-connect to the first available MIDI input port."""
         if not MIDO_AVAILABLE:
+            self._speak("MIDI not available: install mido and python-rtmidi")
             return
         try:
             names = mido.get_input_names()
-            if names:
-                self.open_by_name(names[0])
-        except Exception:
-            pass
+        except Exception as e:
+            self._speak(f"MIDI init error: {e}")
+            return
+        if not names:
+            self._speak("No MIDI input devices found")
+            return
+        count = len(names)
+        self._speak(f"MIDI: {count} device{'s' if count != 1 else ''} found")
+        self.open_by_name(names[0])
 
     def open_by_name(self, name: str) -> None:
         """Close any open port and open *name*."""
@@ -76,6 +82,7 @@ class MidiHandler:
             self.midi_input = mido.open_input(name)
             self.midi_input_name = name
             threading.Thread(target=self._loop, daemon=True).start()
+            self._speak(f"MIDI connected: {name}")
         except Exception as e:
             self.midi_input_name = ''
             self._speak(f"MIDI open failed: {e}")

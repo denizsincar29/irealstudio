@@ -255,11 +255,19 @@ else:
 # Helper: parse a settings value from a simple input dialog
 # ---------------------------------------------------------------------------
 
-def prompt_input(title: str, prompt: str, default: str = '') -> str | None:
+def prompt_input(title: str, prompt: str, default: str = '',
+                 parent=None) -> str | None:
     """
-    Show a simple modal input prompt using a Win32 dialog on Windows, or
-    fall back to stdout/stdin on other platforms.  Returns the entered string,
-    or None if the user cancelled.
+    Show a simple modal input prompt.
+
+    On Windows a ``tkinter.simpledialog`` dialog is used.  Pass the
+    application's existing ``tk.Tk()`` root as *parent* so the dialog is
+    properly anchored and accessible to screen readers.  When *parent* is
+    ``None`` a temporary invisible root is created as a fallback.
+
+    On non-Windows the user is prompted via stdout/stdin.
+
+    Returns the entered string, or ``None`` if the user cancelled.
     """
     if not _IS_WINDOWS:
         print(f"{title}: {prompt} [{default}]", flush=True)
@@ -269,17 +277,22 @@ def prompt_input(title: str, prompt: str, default: str = '') -> str | None:
         except (KeyboardInterrupt, EOFError):
             return None
 
-    # Windows: use a simple tkinter dialog to avoid the overhead of a custom
-    # Win32 dialog template while still being accessible.
     try:
         import tkinter as tk
         from tkinter import simpledialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        result = simpledialog.askstring(title, prompt, initialvalue=default,
-                                        parent=root)
-        root.destroy()
+
+        _own_root = False
+        if parent is None:
+            parent = tk.Tk()
+            parent.withdraw()
+            parent.attributes('-topmost', True)
+            _own_root = True
+
+        result = simpledialog.askstring(title, prompt,
+                                        initialvalue=default,
+                                        parent=parent)
+        if _own_root:
+            parent.destroy()
         return result
     except Exception:
         return None

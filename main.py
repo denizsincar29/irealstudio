@@ -11,6 +11,7 @@ Keyboard shortcuts:
   Ctrl+Right    - Move cursor right one measure
   Ctrl+Home     - Go to beginning of progression
   Ctrl+End      - Go to end of progression
+  P             - Speak full position: section, ending, chord, bar, beat
   S + (a/b/c/d/v/i) - Add section mark at current measure
   V             - Add volta/ending mark at current measure
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
@@ -231,23 +232,32 @@ class App:
         self._announce_position()
 
     def _announce_position(self) -> None:
-        parts = []
+        """Speak a brief position: chord (if any) then 'bar N beat M'."""
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        chord_part = chords_here[0].chord_name() if chords_here else ""
+        pos_part = f"bar {self.cursor.measure} beat {self.cursor.beat}"
+        self.speak(f"{chord_part} {pos_part}".strip())
+
+    def _announce_position_verbose(self) -> None:
+        """Speak full context: section, ending, chord (if any), bar, beat."""
+        parts: list[str] = []
+        mark_names = {
+            '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
+            '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
+        }
         sm = self.progression.get_section_mark(self.cursor.measure)
         if sm:
-            mark_names = {
-                '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-                '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
-            }
             parts.append(mark_names.get(sm, sm))
         for vb in self.progression.volta_brackets:
             if self.cursor.measure == vb.ending1_start:
-                parts.append("Ending 1")
+                parts.append("ending 1")
             elif vb.is_complete() and self.cursor.measure == vb.ending2_start:
-                parts.append("Ending 2")
+                parts.append("ending 2")
         chords_here = self.progression.find_chords_at_position(self.cursor)
-        parts.append(chords_here[0].chord_name() if chords_here else "Empty")
-        parts.append(f"Measure {self.cursor.measure} beat {self.cursor.beat}")
-        self.speak(", ".join(parts))
+        if chords_here:
+            parts.append(chords_here[0].chord_name())
+        parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
+        self.speak(" ".join(parts))
 
     # ------------------------------------------------------------------
     # Editing helpers
@@ -361,7 +371,7 @@ class App:
 
     def _menu_change_bpm(self) -> None:
         val = prompt_input("BPM", "Enter new BPM (40–240):",
-                           str(self.progression.bpm))
+                           str(self.progression.bpm), parent=self.root)
         if val is not None:
             try:
                 bpm = int(val)
@@ -378,7 +388,7 @@ class App:
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
         val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
-                           self.progression.key)
+                           self.progression.key, parent=self.root)
         if val is not None:
             key = val.strip()
             if key in KEY_SIGNATURES:
@@ -393,7 +403,7 @@ class App:
         from pyrealpro import STYLES_ALL
         val = prompt_input("Style",
                            "Enter style (e.g. Medium Swing, Bossa Nova):",
-                           self.progression.style)
+                           self.progression.style, parent=self.root)
         if val is not None:
             style = val.strip()
             if style in STYLES_ALL:
@@ -536,6 +546,10 @@ class App:
         # / held for slash chords
         elif key == 'slash':
             self.slash_held = True
+
+        # P – verbose position (section, ending, chord, bar, beat)
+        elif key == 'p' and not ctrl and not self.s_held:
+            self._announce_position_verbose()
 
         # V key – volta (only when not using S modifier)
         elif key == 'v' and not ctrl and not self.s_held:
