@@ -48,7 +48,7 @@ from chords import (
 from sound import make_beep
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
-from dialogs import prompt_input, new_project_dialog
+from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -456,17 +456,17 @@ class App:
             self.speak(f"MIDI: {names[idx]}")
 
     def _menu_change_bpm(self) -> None:
-        val = prompt_input("BPM", "Enter new BPM (40–240):",
+        val = prompt_input(f"BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
                            str(self.progression.bpm), parent=self._frame)
         if val is not None:
             try:
                 bpm = int(val)
-                if 40 <= bpm <= 240:
+                if BPM_MIN <= bpm <= BPM_MAX:
                     self.progression.bpm = bpm
                     self._update_settings_labels()
                     self.speak(f"BPM set to {bpm}")
                 else:
-                    self.speak("BPM must be between 40 and 240")
+                    self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
             except ValueError:
                 self.speak("Invalid BPM value")
 
@@ -523,11 +523,11 @@ class App:
                 self.progression.style    = data['style']
                 try:
                     bpm = int(data['bpm'])
-                    if 40 <= bpm <= 240:
+                    if BPM_MIN <= bpm <= BPM_MAX:
                         self.progression.bpm = bpm
                     else:
                         self.speak(
-                            f"BPM {bpm} out of range (40–240); "
+                            f"BPM {bpm} out of range ({BPM_MIN}–{BPM_MAX}); "
                             f"using {self.progression.bpm}")
                 except ValueError:
                     self.speak(

@@ -7,8 +7,15 @@ prompted via stdout/stdin as a fallback.
 """
 
 import sys
+import time
+import threading
 
 _IS_WINDOWS = sys.platform == 'win32'
+
+# BPM constraints — kept here so the dialog and main.py share one source.
+BPM_MIN = 40
+BPM_MAX = 240
+_BPM_PREVIEW_BARS = 2   # bars of metronome played as a preview
 
 
 def prompt_input(title: str, prompt: str, default: str = '',
@@ -93,8 +100,96 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                           flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
                           border=12)
                 self.SetSizerAndFit(outer)
+
+                # BPM-specific state
+                self._preview_stop: threading.Event | None = None
+                self._tap_times: list[float] = []
+
+                # Bind special key handling to the BPM field
+                self._ctrls['bpm'].Bind(wx.EVT_KEY_DOWN, self._on_bpm_key)
+
                 # Focus first field for screen readers
                 list(self._ctrls.values())[0].SetFocus()
+
+            # ----------------------------------------------------------
+            # BPM helpers
+            # ----------------------------------------------------------
+
+            def _get_bpm(self) -> int:
+                try:
+                    return max(BPM_MIN, min(BPM_MAX, int(self._ctrls['bpm'].GetValue())))
+                except ValueError:
+                    return 120
+
+            def _set_bpm(self, bpm: int) -> None:
+                bpm = max(BPM_MIN, min(BPM_MAX, bpm))
+                self._ctrls['bpm'].SetValue(str(bpm))
+
+            def _on_bpm_key(self, event: wx.KeyEvent) -> None:
+                key = event.GetKeyCode()
+                if key == wx.WXK_UP:
+                    step = 10 if event.ControlDown() else 1
+                    self._set_bpm(self._get_bpm() + step)
+                    self._preview_metronome()
+                elif key == wx.WXK_DOWN:
+                    step = 10 if event.ControlDown() else 1
+                    self._set_bpm(self._get_bpm() - step)
+                    self._preview_metronome()
+                elif key == wx.WXK_SPACE:
+                    self._tap_tempo()
+                    # Consume the event so no space is typed into the field
+                elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+                    # Play a quick preview on Enter before confirming
+                    self._preview_metronome()
+                    event.Skip()
+                else:
+                    event.Skip()
+
+            def _preview_metronome(self) -> None:
+                """Play _BPM_PREVIEW_BARS bars of 4/4 metronome at the current BPM."""
+                # Cancel any already-running preview
+                if self._preview_stop is not None:
+                    self._preview_stop.set()
+
+                bpm = self._get_bpm()
+                stop_ev = threading.Event()
+                self._preview_stop = stop_ev
+                interval = 60.0 / bpm
+                total_beats = 4 * _BPM_PREVIEW_BARS
+
+                def _run() -> None:
+                    try:
+                        from sound import make_beep, play_sound
+                        tick = make_beep(1200, 30)
+                        tock = make_beep(800, 25)
+                    except Exception:
+                        return
+                    for i in range(total_beats):
+                        if stop_ev.is_set():
+                            break
+                        play_sound(tick if i % 4 == 0 else tock)
+                        time.sleep(interval)
+
+                threading.Thread(target=_run, daemon=True).start()
+
+            def _tap_tempo(self) -> None:
+                """Record a tap; update BPM from average inter-tap interval."""
+                now = time.monotonic()
+                # Reset if the user paused more than 3 seconds between taps
+                if self._tap_times and (now - self._tap_times[-1]) > 3.0:
+                    self._tap_times.clear()
+                self._tap_times.append(now)
+                # Keep at most the 10 most recent taps
+                if len(self._tap_times) > 10:
+                    self._tap_times = self._tap_times[-10:]
+                if len(self._tap_times) >= 2:
+                    intervals = [
+                        self._tap_times[i + 1] - self._tap_times[i]
+                        for i in range(len(self._tap_times) - 1)
+                    ]
+                    avg = sum(intervals) / len(intervals)
+                    self._set_bpm(round(60.0 / avg))
+                    self._preview_metronome()
 
             def get_values(self) -> dict:
                 return {k: ctrl.GetValue() for k, ctrl in self._ctrls.items()}
