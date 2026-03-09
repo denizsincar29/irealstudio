@@ -19,6 +19,11 @@ Keyboard shortcuts:
   Ctrl+E        - Export to iReal Pro format (HTML file)
   Escape        - Stop recording/playback
   Ctrl+Q        - Quit
+
+On Windows a native menu bar is available (use Alt to activate):
+  File          - Save / Export to iReal Pro
+  MIDI Device   - Select MIDI input port, refresh device list
+  Settings      - Change BPM, Key, Style interactively
 """
 import os
 import sys
@@ -40,6 +45,13 @@ except ImportError:
 from chords import (
     ChordProgression, TimeSignature, Position,
     SECTION_KEYS, NOTE_NAMES,
+)
+from windows_menu import (
+    create_menu,
+    prompt_input,
+    CMD_FILE_SAVE, CMD_FILE_EXPORT,
+    CMD_MIDI_REFRESH, CMD_SETTINGS_BPM, CMD_SETTINGS_KEY, CMD_SETTINGS_STYLE,
+    _MIDI_DEVICE_BASE, _index_from_id,
 )
 
 # ---------------------------------------------------------------------------
@@ -107,6 +119,7 @@ class App:
 
         # MIDI
         self.midi_input = None
+        self.midi_input_name: str = ''
         self.midi_stop_event = threading.Event()
         self._init_midi()
 
@@ -114,6 +127,16 @@ class App:
         self.screen = pygame.display.set_mode((500, 110))
         pygame.display.set_caption("IReal Studio")
         self.clock = pygame.time.Clock()
+
+        # Native Windows menu bar
+        self._menu = create_menu()
+        try:
+            hwnd = pygame.display.get_wm_info().get('window', 0)
+            if hwnd:
+                self._menu.install(hwnd)
+                self._refresh_menu_state()
+        except Exception:
+            pass
 
         # Sounds
         self.tick_sound = self._make_beep(880, 60)
@@ -155,11 +178,65 @@ class App:
         try:
             names = mido.get_input_names()
             if names:
-                self.midi_input = mido.open_input(names[0])
-                t = threading.Thread(target=self._midi_loop, daemon=True)
-                t.start()
+                self._open_midi_by_name(names[0])
         except Exception:
             pass
+
+    def _open_midi_by_name(self, name: str) -> None:
+        """Close any open MIDI port and open *name*."""
+        # Signal the existing reader thread to stop and wait briefly for it to exit
+        self.midi_stop_event.set()
+        if self.metronome_thread and self.metronome_thread.is_alive():
+            pass  # metronome thread managed separately
+        if self.midi_input is not None:
+            try:
+                self.midi_input.close()
+            except Exception:
+                pass
+            self.midi_input = None
+        # Give the old midi_loop thread a moment to notice the stop event
+        time.sleep(0.02)
+
+        self.midi_stop_event.clear()
+        try:
+            self.midi_input = mido.open_input(name)
+            self.midi_input_name = name
+            t = threading.Thread(target=self._midi_loop, daemon=True)
+            t.start()
+        except Exception as e:
+            self.midi_input_name = ''
+            self.speak(f"MIDI open failed: {e}")
+
+    def _refresh_midi_devices(self) -> None:
+        """Reopen MIDI device list and rebuild the menu."""
+        if not MIDO_AVAILABLE:
+            self._menu.refresh_devices([], None)
+            return
+        try:
+            names = mido.get_input_names()
+        except Exception as e:
+            self.speak(f"MIDI list error: {e}")
+            names = []
+
+        active: int | None = None
+        for i, n in enumerate(names):
+            if n == self.midi_input_name:
+                active = i
+                break
+
+        self._menu.refresh_devices(names, active)
+        if names and active is None:
+            self._open_midi_by_name(names[0])
+            self._menu.refresh_devices(names, 0)
+
+    def _refresh_menu_state(self) -> None:
+        """Push current app state into the menu labels."""
+        self._refresh_midi_devices()
+        self._menu.update_settings_labels(
+            self.progression.bpm,
+            self.progression.key,
+            self.progression.style,
+        )
 
     def _midi_loop(self):
         while not self.midi_stop_event.is_set():
@@ -516,6 +593,82 @@ class App:
             print(text)
 
     # ------------------------------------------------------------------
+    # Menu command handler
+    # ------------------------------------------------------------------
+
+    def _handle_menu_command(self, cmd_id: int) -> None:
+        """Dispatch a menu command (from the native menu bar)."""
+        if cmd_id == CMD_FILE_SAVE:
+            self.save_json()
+        elif cmd_id == CMD_FILE_EXPORT:
+            self.export_ireal()
+        elif cmd_id == CMD_MIDI_REFRESH:
+            self._refresh_midi_devices()
+            self.speak("MIDI devices refreshed")
+        elif cmd_id == CMD_SETTINGS_BPM:
+            self._menu_change_bpm()
+        elif cmd_id == CMD_SETTINGS_KEY:
+            self._menu_change_key()
+        elif cmd_id == CMD_SETTINGS_STYLE:
+            self._menu_change_style()
+        elif _MIDI_DEVICE_BASE <= cmd_id < _MIDI_DEVICE_BASE + 100:
+            idx = _index_from_id(cmd_id)
+            if MIDO_AVAILABLE:
+                try:
+                    names = mido.get_input_names()
+                    if 0 <= idx < len(names):
+                        self._open_midi_by_name(names[idx])
+                        self._menu.refresh_devices(names, idx)
+                        self.speak(f"MIDI: {names[idx]}")
+                except Exception as e:
+                    self.speak(f"MIDI error: {e}")
+
+    def _menu_change_bpm(self) -> None:
+        val = prompt_input("BPM", "Enter new BPM (40–240):",
+                           str(self.progression.bpm))
+        if val is not None:
+            try:
+                bpm = int(val)
+                if 40 <= bpm <= 240:
+                    self.progression.bpm = bpm
+                    self._menu.update_settings_labels(
+                        bpm, self.progression.key, self.progression.style)
+                    self.speak(f"BPM set to {bpm}")
+                else:
+                    self.speak("BPM must be between 40 and 240")
+            except ValueError:
+                self.speak("Invalid BPM value")
+
+    def _menu_change_key(self) -> None:
+        from pyrealpro import KEY_SIGNATURES
+        val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
+                           self.progression.key)
+        if val is not None:
+            key = val.strip()
+            if key in KEY_SIGNATURES:
+                self.progression.key = key
+                self._menu.update_settings_labels(
+                    self.progression.bpm, key, self.progression.style)
+                self.speak(f"Key set to {key}")
+            else:
+                self.speak(f"Unknown key: {key}")
+
+    def _menu_change_style(self) -> None:
+        from pyrealpro import STYLES_ALL
+        val = prompt_input("Style",
+                           "Enter style (e.g. Medium Swing, Bossa Nova):",
+                           self.progression.style)
+        if val is not None:
+            style = val.strip()
+            if style in STYLES_ALL:
+                self.progression.style = style
+                self._menu.update_settings_labels(
+                    self.progression.bpm, self.progression.key, style)
+                self.speak(f"Style set to {style}")
+            else:
+                self.speak(f"Unknown style: {style}")
+
+    # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
 
@@ -525,6 +678,13 @@ class App:
 
         while running:
             self.clock.tick(60)
+
+            # Poll native menu commands (Windows menu bar) — cap per frame
+            for _ in range(16):
+                cmd = self._menu.poll()
+                if cmd is None:
+                    break
+                self._handle_menu_command(cmd)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -635,6 +795,7 @@ class App:
             pygame.display.flip()
 
         self.stop_all()
+        self._menu.destroy()
         self.midi_stop_event.set()
         if self.midi_input:
             try:
