@@ -30,9 +30,11 @@ import sys
 import time
 import threading
 import webbrowser
+import tkinter as tk
 from pathlib import Path
 
-import pygame
+import numpy as np
+import sounddevice as sd
 from accessible_output3.outputs.auto import Auto
 from pychord import find_chords_from_notes
 
@@ -80,9 +82,6 @@ class AppState:
 # ---------------------------------------------------------------------------
 class App:
     def __init__(self):
-        pygame.init()
-        pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
-
         self.speech = Auto()
         self.state = AppState.IDLE
 
@@ -123,24 +122,16 @@ class App:
         self.midi_stop_event = threading.Event()
         self._init_midi()
 
-        # Pygame display
-        self.screen = pygame.display.set_mode((500, 110))
-        pygame.display.set_caption("IReal Studio")
-        self.clock = pygame.time.Clock()
-
-        # Native Windows menu bar
+        # Native Windows menu bar (window handle set in run())
         self._menu = create_menu()
-        try:
-            hwnd = pygame.display.get_wm_info().get('window', 0)
-            if hwnd:
-                self._menu.install(hwnd)
-                self._refresh_menu_state()
-        except Exception:
-            pass
 
-        # Sounds
+        # Sounds (numpy arrays, played via sounddevice)
         self.tick_sound = self._make_beep(880, 60)
         self.tock_sound = self._make_beep(440, 60)
+
+        # tkinter root window (created in run())
+        self.root: tk.Tk | None = None
+        self._status_labels: list[tk.Label] = []
 
         # Load saved progression if it exists
         if Path(SAVE_FILE).exists():
@@ -157,16 +148,17 @@ class App:
     # Audio helpers
     # ------------------------------------------------------------------
 
-    def _make_beep(self, freq: int, duration_ms: int) -> pygame.mixer.Sound:
-        import math
-        import array as arr
+    def _make_beep(self, freq: int, duration_ms: int) -> np.ndarray:
         sample_rate = 44100
         num_samples = int(sample_rate * duration_ms / 1000)
-        wave = arr.array('h', [
-            int(32767 * math.sin(2 * math.pi * freq * i / sample_rate))
-            for i in range(num_samples)
-        ])
-        return pygame.sndarray.make_sound(wave)
+        t = np.linspace(0, duration_ms / 1000, num_samples, endpoint=False)
+        return (np.sin(2 * np.pi * freq * t) * 32767).astype(np.int16)
+
+    def _play_sound(self, wave: np.ndarray) -> None:
+        try:
+            sd.play(wave, samplerate=44100)
+        except sd.PortAudioError:
+            pass
 
     # ------------------------------------------------------------------
     # MIDI
@@ -324,9 +316,9 @@ class App:
                 name = beat_names[b] if b < len(beat_names) else str(b + 1)
                 self.speak(name)
                 if b == 0:
-                    self.tick_sound.play()
+                    self._play_sound(self.tick_sound)
                 else:
-                    self.tock_sound.play()
+                    self._play_sound(self.tock_sound)
                 time.sleep(interval)
 
         if self.metronome_stop_event.is_set():
@@ -369,9 +361,9 @@ class App:
                                 and logical_measure not in _announced_ending2):
                             self.speak("Ending 2")
                             _announced_ending2.add(logical_measure)
-                self.tick_sound.play()
+                self._play_sound(self.tick_sound)
             else:
-                self.tock_sound.play()
+                self._play_sound(self.tock_sound)
 
             beat_count += 1
             time.sleep(interval)
@@ -415,9 +407,9 @@ class App:
                 self.speak(chords_here[0].chord_name())
 
             if cur.beat == 1:
-                self.tick_sound.play()
+                self._play_sound(self.tick_sound)
             else:
-                self.tock_sound.play()
+                self._play_sound(self.tock_sound)
 
             self.playback_stopped_at = Position(
                 cur.measure, cur.beat, self.progression.time_signature)
@@ -673,127 +665,43 @@ class App:
     # ------------------------------------------------------------------
 
     def run(self):
-        font = pygame.font.SysFont(None, 20)
-        running = True
+        self.root = tk.Tk()
+        self.root.title("IReal Studio")
+        self.root.configure(bg='#1e1e1e')
+        self.root.resizable(False, False)
 
-        while running:
-            self.clock.tick(60)
+        # Status labels
+        for _ in range(4):
+            lbl = tk.Label(
+                self.root, text="", bg='#1e1e1e', fg='#c8c8c8',
+                font=('Courier', 10), anchor='w', padx=8,
+            )
+            lbl.pack(fill='x', pady=1)
+            self._status_labels.append(lbl)
+        self.root.geometry("500x110")
 
-            # Poll native menu commands (Windows menu bar) — cap per frame
-            for _ in range(16):
-                cmd = self._menu.poll()
-                if cmd is None:
-                    break
-                self._handle_menu_command(cmd)
+        # Keyboard bindings
+        self.root.bind('<KeyPress>', self._on_keydown)
+        self.root.bind('<KeyRelease>', self._on_keyup)
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
+        # Attach native Windows menu bar
+        self.root.update()
+        try:
+            hwnd = self._get_hwnd()
+            if hwnd:
+                self._menu.install(hwnd)
+                self._refresh_menu_state()
+        except Exception:
+            pass
 
-                elif event.type == pygame.KEYDOWN:
-                    ctrl = bool(event.mod & pygame.KMOD_CTRL)
+        # Start periodic callbacks
+        self._schedule_display_update()
+        self._schedule_menu_poll()
 
-                    # Quit
-                    if ctrl and event.key == pygame.K_q:
-                        running = False
+        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
+        self.root.mainloop()
 
-                    # Escape – stop
-                    elif event.key == pygame.K_ESCAPE:
-                        self.stop_all()
-                        self.speak("Stopped")
-
-                    # R – record
-                    elif event.key == pygame.K_r and not ctrl:
-                        if self.state == AppState.IDLE:
-                            self.start_recording()
-                        else:
-                            self.speak("Already active")
-
-                    # Space – play / stop
-                    elif event.key == pygame.K_SPACE:
-                        if ctrl:
-                            if self.state == AppState.PLAYING:
-                                self.stop_all()
-                                time.sleep(0.05)
-                                if self.playback_stopped_at:
-                                    self.cursor = self.playback_stopped_at
-                                    self._announce_position()
-                        else:
-                            if self.state == AppState.IDLE:
-                                self.start_playback()
-                            elif self.state == AppState.PLAYING:
-                                self.stop_all()
-
-                    # Navigation
-                    elif event.key == pygame.K_LEFT and not self.s_held:
-                        if self.state == AppState.IDLE:
-                            self.navigate('left', by_measure=ctrl)
-                    elif event.key == pygame.K_RIGHT and not self.s_held:
-                        if self.state == AppState.IDLE:
-                            self.navigate('right', by_measure=ctrl)
-                    elif event.key == pygame.K_HOME and ctrl:
-                        if self.state == AppState.IDLE:
-                            self.navigate_home()
-                    elif event.key == pygame.K_END and ctrl:
-                        if self.state == AppState.IDLE:
-                            self.navigate_end()
-
-                    # Ctrl+S – save
-                    elif ctrl and event.key == pygame.K_s:
-                        self.save_json()
-
-                    # Ctrl+E – export
-                    elif ctrl and event.key == pygame.K_e:
-                        self.export_ireal()
-
-                    # Delete/Backspace
-                    elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
-                        if self.state == AppState.IDLE:
-                            self.delete_at_cursor()
-
-                    # S key held for section marks
-                    elif event.key == pygame.K_s and not ctrl:
-                        self.s_held = True
-
-                    # / held for slash chords
-                    elif event.key == pygame.K_SLASH:
-                        self.slash_held = True
-
-                    # V key – volta (only when not using S modifier)
-                    elif event.key == pygame.K_v and not ctrl and not self.s_held:
-                        self.add_volta()
-
-                    # Letter keys A-Z
-                    elif pygame.K_a <= event.key <= pygame.K_z:
-                        letter = chr(event.key)
-                        if self.s_held:
-                            self.add_section_mark(letter)
-                            self.s_held = False
-                        elif self.slash_held:
-                            self.add_bass_note(letter)
-                            self.slash_held = False
-
-                elif event.type == pygame.KEYUP:
-                    if event.key == pygame.K_s:
-                        self.s_held = False
-                    elif event.key == pygame.K_SLASH:
-                        self.slash_held = False
-
-            # Draw status
-            self.screen.fill((30, 30, 30))
-            lines = [
-                f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
-                f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self.state}",
-                f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
-            ]
-            chords_here = self.progression.find_chords_at_position(self.cursor)
-            if chords_here:
-                lines.append(f"Here: {chords_here[0].chord_name()}")
-            for i, line in enumerate(lines):
-                surf = font.render(line, True, (200, 200, 200))
-                self.screen.blit(surf, (8, 8 + i * 22))
-            pygame.display.flip()
-
+        # Cleanup after mainloop exits
         self.stop_all()
         self._menu.destroy()
         self.midi_stop_event.set()
@@ -802,7 +710,143 @@ class App:
                 self.midi_input.close()
             except Exception:
                 pass
-        pygame.quit()
+
+    def _get_hwnd(self) -> int:
+        """Return the Win32 HWND of the tkinter root window, or 0."""
+        if sys.platform != 'win32' or self.root is None:
+            return 0
+        import ctypes
+        child = self.root.winfo_id()
+        parent = ctypes.windll.user32.GetParent(child)
+        return parent if parent else child
+
+    def _on_quit(self) -> None:
+        if self.root is not None:
+            self.root.quit()
+
+    # ------------------------------------------------------------------
+    # Keyboard event handlers
+    # ------------------------------------------------------------------
+
+    def _on_keydown(self, event: tk.Event) -> None:
+        ctrl = bool(event.state & 0x4)
+        key = event.keysym.lower()
+
+        # Quit
+        if ctrl and key == 'q':
+            self._on_quit()
+
+        # Escape – stop
+        elif key == 'escape':
+            self.stop_all()
+            self.speak("Stopped")
+
+        # R – record
+        elif key == 'r' and not ctrl:
+            if self.state == AppState.IDLE:
+                self.start_recording()
+            else:
+                self.speak("Already active")
+
+        # Space – play / stop
+        elif key == 'space':
+            if ctrl:
+                if self.state == AppState.PLAYING:
+                    self.stop_all()
+                    time.sleep(0.05)
+                    if self.playback_stopped_at:
+                        self.cursor = self.playback_stopped_at
+                        self._announce_position()
+            else:
+                if self.state == AppState.IDLE:
+                    self.start_playback()
+                elif self.state == AppState.PLAYING:
+                    self.stop_all()
+
+        # Navigation
+        elif key == 'left' and not self.s_held:
+            if self.state == AppState.IDLE:
+                self.navigate('left', by_measure=ctrl)
+        elif key == 'right' and not self.s_held:
+            if self.state == AppState.IDLE:
+                self.navigate('right', by_measure=ctrl)
+        elif key == 'home' and ctrl:
+            if self.state == AppState.IDLE:
+                self.navigate_home()
+        elif key == 'end' and ctrl:
+            if self.state == AppState.IDLE:
+                self.navigate_end()
+
+        # Ctrl+S – save
+        elif ctrl and key == 's':
+            self.save_json()
+
+        # Ctrl+E – export
+        elif ctrl and key == 'e':
+            self.export_ireal()
+
+        # Delete/Backspace
+        elif key in ('delete', 'backspace'):
+            if self.state == AppState.IDLE:
+                self.delete_at_cursor()
+
+        # S key held for section marks
+        elif key == 's' and not ctrl:
+            self.s_held = True
+
+        # / held for slash chords
+        elif key == 'slash':
+            self.slash_held = True
+
+        # V key – volta (only when not using S modifier)
+        elif key == 'v' and not ctrl and not self.s_held:
+            self.add_volta()
+
+        # Letter keys A-Z
+        elif len(key) == 1 and key.isalpha():
+            if self.s_held:
+                self.add_section_mark(key)
+                self.s_held = False
+            elif self.slash_held:
+                self.add_bass_note(key)
+                self.slash_held = False
+
+    def _on_keyup(self, event: tk.Event) -> None:
+        key = event.keysym.lower()
+        if key == 's':
+            self.s_held = False
+        elif key == 'slash':
+            self.slash_held = False
+
+    # ------------------------------------------------------------------
+    # Periodic tkinter callbacks
+    # ------------------------------------------------------------------
+
+    def _schedule_display_update(self) -> None:
+        if self.root is None:
+            return
+        lines = [
+            f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
+            f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self.state}",
+            f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
+            "",
+        ]
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        if chords_here:
+            lines[3] = f"Here: {chords_here[0].chord_name()}"
+        for lbl, text in zip(self._status_labels, lines):
+            lbl.config(text=text)
+        self.root.after(50, self._schedule_display_update)
+
+    def _schedule_menu_poll(self) -> None:
+        if self.root is None:
+            return
+        for _ in range(16):
+            cmd = self._menu.poll()
+            if cmd is None:
+                break
+            self._handle_menu_command(cmd)
+        self.root.after(16, self._schedule_menu_poll)
 
 
 if __name__ == '__main__':

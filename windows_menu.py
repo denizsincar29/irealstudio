@@ -1,5 +1,5 @@
 """
-windows_menu.py - Native Win32 menu bar for the IReal Studio pygame window.
+windows_menu.py - Native Win32 menu bar for the IReal Studio window.
 
 On non-Windows platforms this module exposes only stubs so the rest of the
 code can always import and call it safely.
@@ -110,7 +110,7 @@ if _IS_WINDOWS:
         wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
 
     class WindowsMenu:
-        """Attaches a native Win32 menu bar to a pygame window."""
+        """Attaches a native Win32 menu bar to the application window."""
 
         def __init__(self):
             self._hwnd: int = 0
@@ -129,7 +129,7 @@ if _IS_WINDOWS:
         # ----------------------------------------------------------------
 
         def install(self, hwnd: int) -> None:
-            """Attach the menu bar to *hwnd* (the pygame window handle)."""
+            """Attach the menu bar to *hwnd* (the application window handle)."""
             self._hwnd = hwnd
             self._menu_bar   = _user32.CreateMenu()
             self._file_menu  = _user32.CreatePopupMenu()
