@@ -1,0 +1,106 @@
+20:53:02 INFO  MIDI: 2 devices found
+20:53:02 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+20:53:02 INFO  MIDI connected: MOTU M Series MIDI In 0
+20:53:02 INFO  IReal Studio ready. Press R to record.
+20:53:40 DEBUG Closing MIDI port: MOTU M Series MIDI In 0
+20:53:40 DEBUG MIDI reader thread stopped
+23:07:07 INFO  MIDI: 1 device found
+23:07:07 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+23:07:07 INFO  MIDI connected: MOTU M Series MIDI In 0
+23:07:58 INFO  IReal Studio ready. Denizian blues. Press R to record.
+23:08:01 INFO  bar 1 beat 2
+23:08:02 INFO  bar 1 beat 1
+23:08:25 INFO  MIDI devices refreshed
+23:08:39 INFO  MIDI devices refreshed
+23:08:41 DEBUG MIDI reader thread stopped
+23:08:41 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+23:08:41 INFO  MIDI connected: Nord Piano 6 MIDI 1
+23:08:41 INFO  MIDI: Nord Piano 6 MIDI 1
+23:08:48 INFO  bar 1 beat 1
+23:08:48 INFO  bar 1 beat 1
+23:08:53 INFO  One
+23:08:54 INFO  Two
+23:08:54 INFO  Three
+23:08:54 INFO  Four
+23:08:54 INFO  One
+23:08:55 INFO  Two
+23:08:55 INFO  Three
+23:08:55 INFO  Four
+23:08:56 INFO  Recording
+23:09:05 INFO  G6 at 9 colon 3
+23:09:07 INFO  Dm7/C at 11 colon 4
+23:09:12 INFO  Already active
+23:09:15 INFO  Stopped
+23:09:17 INFO  G6 bar 9 beat 3
+23:09:17 INFO  bar 9 beat 2
+23:09:17 INFO  bar 9 beat 1
+23:09:18 INFO  bar 8 beat 4
+23:09:18 INFO  bar 8 beat 3
+23:09:18 INFO  bar 8 beat 2
+23:09:18 INFO  bar 8 beat 1
+23:09:18 INFO  bar 7 beat 4
+23:09:19 INFO  bar 7 beat 3
+23:09:20 INFO  bar 7 beat 2
+23:09:20 INFO  bar 7 beat 1
+23:09:21 INFO  bar 6 beat 4
+23:09:21 INFO  bar 6 beat 3
+23:09:21 INFO  bar 6 beat 2
+23:09:21 INFO  bar 6 beat 1
+23:09:21 INFO  bar 5 beat 4
+23:09:21 INFO  bar 5 beat 3
+23:09:23 INFO  bar 5 beat 2
+23:09:23 INFO  bar 5 beat 1
+23:09:23 INFO  bar 4 beat 4
+23:09:23 INFO  bar 4 beat 3
+23:09:24 INFO  bar 4 beat 2
+23:09:24 INFO  bar 4 beat 1
+23:09:24 INFO  bar 3 beat 4
+23:09:24 INFO  bar 3 beat 3
+23:09:24 INFO  bar 3 beat 2
+23:09:24 INFO  bar 3 beat 1
+23:09:24 INFO  bar 2 beat 4
+23:09:24 INFO  bar 2 beat 3
+23:09:24 INFO  bar 2 beat 2
+23:09:24 INFO  bar 2 beat 1
+23:09:24 INFO  bar 1 beat 4
+23:09:24 INFO  bar 1 beat 3
+23:09:25 INFO  bar 1 beat 2
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:26 INFO  bar 1 beat 1
+23:09:29 INFO  G6 bar 9 beat 3
+23:09:29 INFO  Dm7/C bar 11 beat 4
+23:09:29 INFO  bar 12 beat 1
+23:09:30 INFO  Dm7/C bar 11 beat 4
+23:09:31 INFO  G6 bar 9 beat 3
+23:09:31 INFO  bar 9 beat 2
+23:09:31 INFO  bar 9 beat 1
+23:09:32 INFO  G6 bar 9 beat 3
+23:09:32 INFO  bar 9 beat 2
+23:09:33 INFO  bar 9 beat 1
+23:09:33 INFO  bar 8 beat 4
+23:09:33 INFO  bar 8 beat 3
+23:09:33 INFO  bar 8 beat 2
+23:09:33 INFO  bar 8 beat 1
+23:09:33 INFO  bar 7 beat 4
+23:09:33 INFO  bar 7 beat 3
+23:09:33 INFO  bar 7 beat 2
+23:09:33 INFO  bar 7 beat 1
+23:09:33 INFO  bar 6 beat 4
+23:09:33 INFO  bar 6 beat 3
+23:09:33 INFO  bar 6 beat 2
+23:09:33 INFO  bar 6 beat 1
+23:09:34 INFO  bar 5 beat 4
+23:09:34 INFO  bar 5 beat 3
+23:09:34 INFO  G6 bar 9 beat 3
+23:09:38 INFO  bar 9 beat 2
+23:09:38 INFO  G6 bar 9 beat 3
+23:09:41 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+23:09:41 DEBUG MIDI reader thread stopped
