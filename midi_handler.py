@@ -1,5 +1,6 @@
 """MIDI input handling and chord detection."""
 
+import logging
 import time
 import threading
 from typing import Callable
@@ -9,6 +10,8 @@ try:
     MIDO_AVAILABLE = True
 except ImportError:
     MIDO_AVAILABLE = False
+
+_logger = logging.getLogger('irealstudio')
 
 
 class MidiHandler:
@@ -94,11 +97,13 @@ class MidiHandler:
         try:
             return mido.get_input_names()
         except Exception as e:
+            _logger.error("MIDI list error: %s", e)
             self._speak(f"MIDI list error: {e}")
             return []
 
     def close(self) -> None:
         """Signal the reader thread to stop and close the port."""
+        _logger.debug("Closing MIDI port: %s", self.midi_input_name)
         self._stop_event.set()
         if self.midi_input is not None:
             try:
@@ -112,15 +117,18 @@ class MidiHandler:
     # ------------------------------------------------------------------
 
     def _loop(self) -> None:
+        _logger.debug("MIDI reader thread started for: %s", self.midi_input_name)
         while not self._stop_event.is_set():
             if self.midi_input is None:
                 break
             try:
                 for msg in self.midi_input.iter_pending():
                     self._handle(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.error("MIDI read error: %s", e)
+                break
             time.sleep(0.005)
+        _logger.debug("MIDI reader thread stopped")
 
     def _handle(self, msg) -> None:
         if not self._is_recording():

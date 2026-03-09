@@ -18,8 +18,11 @@ Keyboard shortcuts:
   Delete/Backspace - Delete chord at current position
   Ctrl+S        - Save progression to JSON
   Ctrl+E        - Export to iReal Pro format (HTML file)
+  Ctrl+L        - Speak last 5 log entries (MIDI errors, etc.)
   Escape        - Stop recording/playback
   Ctrl+Q        - Quit
+
+All events are written to irealstudio.log in the working directory.
 
 On Windows a native menu bar is available (use Alt to activate):
   File          - Save / Export to iReal Pro
@@ -29,6 +32,8 @@ On Windows a native menu bar is available (use Alt to activate):
 import os
 import sys
 import time
+import logging
+import collections
 import webbrowser
 import tkinter as tk
 from pathlib import Path
@@ -50,6 +55,36 @@ from windows_menu import (
     CMD_MIDI_REFRESH, CMD_SETTINGS_BPM, CMD_SETTINGS_KEY, CMD_SETTINGS_STYLE,
     _MIDI_DEVICE_BASE, _index_from_id,
 )
+
+# ---------------------------------------------------------------------------
+# Logging setup — writes timestamped records to irealstudio.log and keeps
+# the last LOG_RING_SIZE messages in an in-memory ring for the in-app log display.
+# ---------------------------------------------------------------------------
+LOG_FILE = "irealstudio.log"
+LOG_RING_SIZE = 100       # entries kept in the in-memory ring buffer
+LOG_SPEAK_RECENT = 5      # entries spoken by Ctrl+L
+
+_log_ring: collections.deque[str] = collections.deque(maxlen=LOG_RING_SIZE)
+
+
+class _RingHandler(logging.Handler):
+    """Push formatted records into the module-level ring buffer."""
+    def emit(self, record: logging.LogRecord) -> None:
+        _log_ring.append(self.format(record))
+
+
+_app_logger = logging.getLogger('irealstudio')
+_app_logger.setLevel(logging.DEBUG)
+
+_file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(
+    logging.Formatter('%(asctime)s %(levelname)-5s %(message)s',
+                      datefmt='%H:%M:%S'))
+_app_logger.addHandler(_file_handler)
+
+_ring_handler = _RingHandler()
+_ring_handler.setFormatter(logging.Formatter('%(levelname)-5s %(message)s'))
+_app_logger.addHandler(_ring_handler)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -86,8 +121,8 @@ class App:
         # Recorder owns metronome/recording/playback state
         self._recorder = Recorder(
             speak=self.speak,
-            tick_sound=make_beep(880, 60),
-            tock_sound=make_beep(440, 60),
+            tick_sound=make_beep(1200, 30),   # high downbeat click
+            tock_sound=make_beep(800, 25),    # lower upbeat click
         )
 
         # MIDI handler owns port management and chord detection
@@ -333,14 +368,23 @@ class App:
             self.speak(f"Export failed: {e}")
 
     # ------------------------------------------------------------------
-    # Speech
+    # Speech / logging
     # ------------------------------------------------------------------
 
     def speak(self, text: str) -> None:
+        _app_logger.info(text)
         try:
             self.speech.output(text)
         except Exception:
             print(text)
+
+    def _speak_recent_log(self) -> None:
+        """Speak the last LOG_SPEAK_RECENT log entries (bound to Ctrl+L)."""
+        recent = list(_log_ring)[-LOG_SPEAK_RECENT:]
+        if recent:
+            self.speak(". ".join(recent))
+        else:
+            self.speak("Log is empty")
 
     # ------------------------------------------------------------------
     # Menu command handler
@@ -424,15 +468,17 @@ class App:
         self.root.configure(bg='#1e1e1e')
         self.root.resizable(False, False)
 
-        # Status labels
-        for _ in range(4):
+        # Status labels (lines 0-3) + log line (line 4)
+        for _ in range(5):
             lbl = tk.Label(
                 self.root, text="", bg='#1e1e1e', fg='#c8c8c8',
                 font=('Courier', 10), anchor='w', padx=8,
             )
             lbl.pack(fill='x', pady=1)
             self._status_labels.append(lbl)
-        self.root.geometry("500x110")
+        # Tint the log label slightly differently so it reads as a footer
+        self._status_labels[4].config(fg='#888888')
+        self.root.geometry("500x135")
 
         # Keyboard bindings
         self.root.bind('<KeyPress>', self._on_keydown)
@@ -534,6 +580,10 @@ class App:
         elif ctrl and key == 'e':
             self.export_ireal()
 
+        # Ctrl+L – speak recent log entries
+        elif ctrl and key == 'l':
+            self._speak_recent_log()
+
         # Delete/Backspace
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
@@ -583,6 +633,7 @@ class App:
             f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self._recorder.state}",
             f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
             "",
+            _log_ring[-1] if _log_ring else "",
         ]
         chords_here = self.progression.find_chords_at_position(self.cursor)
         if chords_here:
