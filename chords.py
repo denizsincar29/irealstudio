@@ -324,38 +324,62 @@ class ChordProgression:
     # Volta / repeat brackets
     # -----------------------------------------------------------------------
 
-    def add_volta_start(self, measure: int):
+    def add_volta_start(self, measure: int) -> str:
         """
-        Press V at a measure.  First press → create ending1_start.
-        Second press (on a different bracket's ending2 slot) → set ending2_start.
-        Returns a description of what happened.
+        Press V once at the first measure of ending 1.
+
+        All bracket coordinates are computed automatically from the section marks:
+          - repeat_start  = last section mark at or before `measure`
+          - next_section  = first section mark after `measure` (or end-of-content + 1)
+          - body_length   = measure - repeat_start
+          - ending_length = next_section - measure  (≥ 1)
+          - ending1_end   = measure + ending_length - 1
+          - ending2_start = next_section + body_length
+
+        If a bracket already exists for the same repeat_start it is replaced.
         """
-        # Check if there's an incomplete bracket (ending2 not set yet)
-        incomplete = [vb for vb in self.volta_brackets if not vb.is_complete()]
-        if incomplete:
-            vb = incomplete[-1]
-            # This is the second V press: set ending2_start
-            if measure > vb.ending1_start:
-                vb.ending2_start = measure
-                # The body that repeats is (ending1_start - repeat_start) measures long.
-                # Those "hidden" measures occupy ending1_end+1 .. ending2_start-1, so:
-                #   ending1_end = ending2_start - 1 - (ending1_start - repeat_start)
-                hidden_count = vb.ending1_start - vb.repeat_start
-                vb.ending1_end = measure - 1 - hidden_count
-                return f"Ending 2 set at measure {measure}, ending 1 closes at measure {vb.ending1_end}"
-            return "Invalid: ending2 must come after ending1"
-        else:
-            # First V press: create a new bracket
-            # Determine repeat_start: last section mark before or at this measure
-            repeat_start = self._find_section_start(measure)
-            vb = VoltaBracket(repeat_start=repeat_start, ending1_start=measure)
-            self.volta_brackets.append(vb)
-            return f"Ending 1 marked at measure {measure} (repeat from measure {repeat_start})"
+        repeat_start = self._find_section_start(measure)
+        next_section = self._find_next_section_start(measure)
+
+        body_length = measure - repeat_start
+        ending_length = max(1, next_section - measure)
+        ending1_end = measure + ending_length - 1
+        ending2_start = next_section + body_length
+
+        # Replace any existing bracket that starts at the same repeat_start
+        self.volta_brackets = [vb for vb in self.volta_brackets
+                                if vb.repeat_start != repeat_start]
+
+        vb = VoltaBracket(
+            repeat_start=repeat_start,
+            ending1_start=measure,
+            ending1_end=ending1_end,
+            ending2_start=ending2_start,
+        )
+        self.volta_brackets.append(vb)
+        return (f"Repeat from measure {repeat_start}, "
+                f"ending 1: {measure}–{ending1_end}, "
+                f"ending 2 starts at measure {ending2_start}")
 
     def _find_section_start(self, measure: int) -> int:
         """Find the measure where the current section starts (for repeat bracket placement)."""
         marks_before = [s.measure for s in self.section_marks if s.measure <= measure]
         return marks_before[-1] if marks_before else 1
+
+    def _find_next_section_start(self, from_measure: int) -> int:
+        """
+        Return the first measure of the next section after `from_measure`.
+        Falls back to max(total_measures, from_measure) + 1 when no section
+        mark exists beyond `from_measure` (yielding a 1-measure ending when
+        total_measures equals from_measure, or a longer one when more content
+        exists).
+        """
+        marks_after = sorted(s.measure for s in self.section_marks
+                             if s.measure > from_measure)
+        if marks_after:
+            return marks_after[0]
+        # Use end-of-known-content + 1, or a safe 2-measure default
+        return max(self.total_measures, from_measure) + 1
 
     def get_volta_bracket_for_measure(self, measure: int) -> VoltaBracket | None:
         """Return the VoltaBracket that contains the given measure."""

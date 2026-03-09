@@ -208,6 +208,12 @@ class App:
         measure = total_beat_0 // beats_per_measure + 1
         beat = total_beat_0 % beats_per_measure + 1
 
+        # Discard chords that fall in the hidden (repeated-body) range so that
+        # the user does not accidentally overwrite clean chords while playing
+        # through the repeated section before reaching ending 2.
+        if self.progression.is_in_hidden_range(measure):
+            return
+
         self.progression.add_chord(chord, measure, beat)
         if measure > self.progression.total_measures:
             self.progression.total_measures = measure
@@ -256,12 +262,40 @@ class App:
         self.recording_chord_notes.clear()
         self.speak("Recording")
 
+        # Position-tracking metronome: tracks the logical measure/beat so it
+        # can announce when we enter a hidden (repeated-body) range or reach
+        # ending 2.  The click pattern stays at a steady tempo throughout.
+        beats = self.progression.time_signature.numerator
+        cursor_beat_0 = self.cursor.beat_from_start - 1  # 0-based offset
         beat_count = 0
+        _announced_hidden = False
+        _announced_ending2: set[int] = set()
+
         while not self.metronome_stop_event.is_set():
-            if beat_count % beats == 0:
+            # Logical 0-based beat position from beginning of progression
+            abs_beat_0 = cursor_beat_0 + beat_count
+            logical_measure = abs_beat_0 // beats + 1
+            logical_beat_in_measure = abs_beat_0 % beats + 1
+
+            # --- Announcements at beat 1 of each measure ---
+            if logical_beat_in_measure == 1:
+                if self.progression.is_in_hidden_range(logical_measure):
+                    if not _announced_hidden:
+                        self.speak("Repeating, chords not recorded")
+                        _announced_hidden = True
+                else:
+                    _announced_hidden = False
+                    # Announce arrival at ending 2
+                    for vb in self.progression.volta_brackets:
+                        if (vb.is_complete()
+                                and logical_measure == vb.ending2_start
+                                and logical_measure not in _announced_ending2):
+                            self.speak("Ending 2")
+                            _announced_ending2.add(logical_measure)
                 self.tick_sound.play()
             else:
                 self.tock_sound.play()
+
             beat_count += 1
             time.sleep(interval)
 
