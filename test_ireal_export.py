@@ -19,7 +19,7 @@ import unittest
 # Ensure the package root is on the path regardless of where tests are run from
 sys.path.insert(0, os.path.dirname(__file__))
 
-from chords import ChordProgression, TimeSignature, VoltaBracket
+from chords import ChordProgression, TimeSignature, VoltaBracket, Position
 from urllib.parse import unquote
 
 
@@ -342,6 +342,118 @@ class TestHiddenRangeNavigation(unittest.TestCase):
         # From ending2_start, navigation should jump back to ending1_end
         dest = prog.navigate_left_from_measure(vb.ending2_start)
         self.assertEqual(dest, vb.ending1_end)
+
+
+class TestNoteDeduplication(unittest.TestCase):
+    """Tests for duplicate note removal before chord detection (Bug 3)."""
+
+    def test_dedup_removes_octave_duplicates(self):
+        """MIDI notes 60 and 72 both map to 'C'; only one 'C' should remain."""
+        from chords import NOTE_NAMES
+        notes = [60, 64, 67, 72]  # C4, E4, G4, C5
+        deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
+        self.assertEqual(deduped, ['C', 'E', 'G'])
+
+    def test_dedup_preserves_order(self):
+        """Deduplication must keep the first-seen note order."""
+        from chords import NOTE_NAMES
+        notes = [64, 67, 60, 72]  # E4, G4, C4, C5
+        deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
+        self.assertEqual(deduped[0], 'E')  # first seen
+        self.assertEqual(deduped[-1], 'C')  # only one 'C'
+
+    def test_chord_found_after_dedup(self):
+        """find_chords_from_notes must succeed for C/E/G/C5 after deduplication."""
+        from chords import NOTE_NAMES
+        from pychord import find_chords_from_notes
+        notes = [60, 64, 67, 72]  # C4, E4, G4, C5
+        deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
+        chords = find_chords_from_notes(deduped)
+        self.assertTrue(len(chords) > 0)
+        self.assertIn('C', str(chords[0]))
+
+
+class TestChordNavigation(unittest.TestCase):
+    """Tests for chord-by-chord vs beat-by-beat navigation (Bug 1)."""
+
+    def _make_prog(self):
+        ts = TimeSignature(4, 4)
+        prog = ChordProgression(title='Nav', time_signature=ts,
+                                key='C', style='Medium Swing', bpm=120)
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        prog.add_chord_by_name('Am7',   2, 1)
+        prog.add_chord_by_name('Fmaj7', 3, 1)
+        prog.add_chord_by_name('G7',    4, 1)
+        prog.total_measures = 4
+        return prog
+
+    def test_find_next_chord_to_right(self):
+        prog = self._make_prog()
+        ts = prog.time_signature
+        cursor = Position(1, 1, ts)
+        nxt = prog.find_next_chord_to_right(cursor)
+        self.assertIsNotNone(nxt)
+        self.assertEqual(nxt.position.measure, 2)
+
+    def test_find_prev_chord_to_left(self):
+        prog = self._make_prog()
+        ts = prog.time_signature
+        cursor = Position(3, 1, ts)
+        prv = prog.find_last_chord_to_left(cursor)
+        self.assertIsNotNone(prv)
+        self.assertEqual(prv.position.measure, 2)
+
+    def test_no_chord_to_left_returns_none(self):
+        prog = self._make_prog()
+        ts = prog.time_signature
+        cursor = Position(1, 1, ts)
+        prv = prog.find_last_chord_to_left(cursor)
+        self.assertIsNone(prv)
+
+    def test_beat_navigation_position_plus_one(self):
+        """position + 1 should advance one beat."""
+        ts = TimeSignature(4, 4)
+        pos = Position(2, 3, ts)
+        new_pos = pos + 1
+        self.assertEqual(new_pos.measure, 2)
+        self.assertEqual(new_pos.beat, 4)
+
+    def test_beat_navigation_wraps_to_next_measure(self):
+        ts = TimeSignature(4, 4)
+        pos = Position(2, 4, ts)
+        new_pos = pos + 1
+        self.assertEqual(new_pos.measure, 3)
+        self.assertEqual(new_pos.beat, 1)
+
+    def test_beat_navigation_left_clamps_at_start(self):
+        ts = TimeSignature(4, 4)
+        pos = Position(1, 1, ts)
+        new_pos = pos - 1
+        self.assertEqual(new_pos.measure, 1)
+        self.assertEqual(new_pos.beat, 1)
+
+
+class TestIpsFileFormat(unittest.TestCase):
+    """Tests for .ips file format (Bug 4)."""
+
+    def test_ips_and_json_same_content(self):
+        """IPS files use the same JSON content as .json files."""
+        prog = make_prog('IPS Test', key='Bb', bpm=100)
+        prog.add_chord_by_name('Bbmaj7', 1, 1)
+        json_str = prog.to_json()
+        # Both .ips and .json are loaded via from_json
+        loaded = ChordProgression.from_json(json_str)
+        self.assertEqual(loaded.title, 'IPS Test')
+        self.assertEqual(loaded.key, 'Bb')
+        self.assertEqual(loaded.bpm, 100)
+
+    def test_from_json_roundtrip_with_time_sig(self):
+        """Time signature survives JSON round-trip."""
+        prog = make_prog(numerator=3, denominator=4)
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        loaded = ChordProgression.from_json(prog.to_json())
+        self.assertEqual(loaded.time_signature.numerator, 3)
+        self.assertEqual(loaded.time_signature.denominator, 4)
 
 
 if __name__ == '__main__':
