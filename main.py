@@ -35,7 +35,7 @@ import time
 import logging
 import collections
 import webbrowser
-import tkinter as tk
+import wx
 from pathlib import Path
 
 from accessible_output3.outputs.auto import Auto
@@ -48,13 +48,19 @@ from chords import (
 from sound import make_beep
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
-from windows_menu import (
-    create_menu,
-    prompt_input,
-    CMD_FILE_SAVE, CMD_FILE_EXPORT,
-    CMD_MIDI_REFRESH, CMD_SETTINGS_BPM, CMD_SETTINGS_KEY, CMD_SETTINGS_STYLE,
-    _MIDI_DEVICE_BASE, _index_from_id,
-)
+from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
+
+# ---------------------------------------------------------------------------
+# Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
+# ---------------------------------------------------------------------------
+_CMD_FILE_SAVE      = 1001
+_CMD_FILE_EXPORT    = 1002
+_CMD_MIDI_REFRESH   = 2001
+_CMD_MIDI_NONE      = 2002   # placeholder shown when no devices are present
+_CMD_SETTINGS_BPM   = 3001
+_CMD_SETTINGS_KEY   = 3002
+_CMD_SETTINGS_STYLE = 3003
+_MIDI_DEVICE_BASE   = 2100   # IDs 2100..2199 → MIDI device indices 0..99
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes timestamped records to irealstudio.log and keeps
@@ -96,6 +102,21 @@ DEFAULT_STYLE = "Medium Swing"
 DEFAULT_TIME_SIG = TimeSignature(4, 4)
 SAVE_FILE = "progression.json"
 
+# ---------------------------------------------------------------------------
+# wxPython key-code → symbolic-name map (used by both keydown and keyup)
+# ---------------------------------------------------------------------------
+_WX_KEY_SYM: dict[int, str] = {
+    wx.WXK_LEFT:    'left',
+    wx.WXK_RIGHT:   'right',
+    wx.WXK_HOME:    'home',
+    wx.WXK_END:     'end',
+    wx.WXK_ESCAPE:  'escape',
+    wx.WXK_SPACE:   'space',
+    wx.WXK_DELETE:  'delete',
+    wx.WXK_BACK:    'backspace',
+    ord('/'):       'slash',
+}
+
 
 # ---------------------------------------------------------------------------
 # Main application class
@@ -133,23 +154,26 @@ class App:
         )
         self._midi.init()
 
-        # Native Windows menu bar (window handle installed in run())
-        self._menu = create_menu()
+        # wxPython frame, status labels, and menu handles (created in run())
+        self._frame: wx.Frame | None = None
+        self._status_labels: list[wx.StaticText] = []
+        self._midi_menu: wx.Menu | None = None
+        self._bpm_item:   wx.MenuItem | None = None
+        self._key_item:   wx.MenuItem | None = None
+        self._style_item: wx.MenuItem | None = None
 
-        # tkinter root window (created in run())
-        self.root: tk.Tk | None = None
-        self._status_labels: list[tk.Label] = []
-
-        # Load saved progression if it exists
+        # Load saved progression if it exists; otherwise flag for new-project dialog
         if Path(SAVE_FILE).exists():
             try:
                 with open(SAVE_FILE) as f:
                     self.progression = ChordProgression.from_json(f.read())
+                self._is_new_project = False
                 self.speak(f"Loaded {self.progression.title}")
             except Exception as e:
+                self._is_new_project = True
                 self.speak(f"Could not load: {e}")
         else:
-            self.speak("IReal Studio ready. Press R to record.")
+            self._is_new_project = True
 
     # ------------------------------------------------------------------
     # MIDI chord callback
@@ -185,26 +209,55 @@ class App:
     # ------------------------------------------------------------------
 
     def _refresh_midi_devices(self) -> None:
-        """Rebuild the MIDI Device menu from currently available ports."""
+        """Rebuild the MIDI Device submenu with currently available ports."""
+        if self._midi_menu is None:
+            return
         names = self._midi.get_input_names()
         active: int | None = None
         for i, n in enumerate(names):
             if n == self._midi.midi_input_name:
                 active = i
                 break
-        self._menu.refresh_devices(names, active)
-        if names and active is None:
-            self._midi.open_by_name(names[0])
-            self._menu.refresh_devices(names, 0)
+
+        # Remove all device entries that sit above the separator
+        count = self._midi_menu.GetMenuItemCount()
+        # Last two items are always: separator + "Refresh devices"
+        for _ in range(max(0, count - 2)):
+            item = self._midi_menu.FindItemByPosition(0)
+            self._midi_menu.Remove(item)
+
+        if names:
+            if active is None:
+                self._midi.open_by_name(names[0])
+                active = 0
+            for idx, name in enumerate(names):
+                item = wx.MenuItem(self._midi_menu, _MIDI_DEVICE_BASE + idx,
+                                   name, kind=wx.ITEM_CHECK)
+                self._midi_menu.Insert(idx, item)
+                if idx == active:
+                    item.Check(True)
+        else:
+            placeholder = wx.MenuItem(self._midi_menu, _CMD_MIDI_NONE,
+                                      "No MIDI devices found")
+            self._midi_menu.Insert(0, placeholder)
+            placeholder.Enable(False)
 
     def _refresh_menu_state(self) -> None:
         """Push current app state into the menu labels."""
         self._refresh_midi_devices()
-        self._menu.update_settings_labels(
-            self.progression.bpm,
-            self.progression.key,
-            self.progression.style,
-        )
+        self._update_settings_labels()
+
+    def _update_settings_labels(self) -> None:
+        """Update the Settings menu items to display current values."""
+        if self._bpm_item:
+            self._bpm_item.SetItemLabel(
+                f"&BPM: {self.progression.bpm}...")
+        if self._key_item:
+            self._key_item.SetItemLabel(
+                f"&Key: {self.progression.key}...")
+        if self._style_item:
+            self._style_item.SetItemLabel(
+                f"&Style: {self.progression.style}...")
 
     # ------------------------------------------------------------------
     # Navigation
@@ -387,58 +440,45 @@ class App:
             self.speak("Log is empty")
 
     # ------------------------------------------------------------------
-    # Menu command handler
+    # Menu event handlers (EVT_MENU — fired directly by wxPython)
     # ------------------------------------------------------------------
 
-    def _handle_menu_command(self, cmd_id: int) -> None:
-        """Dispatch a command from the native Win32 menu bar."""
-        if cmd_id == CMD_FILE_SAVE:
-            self.save_json()
-        elif cmd_id == CMD_FILE_EXPORT:
-            self.export_ireal()
-        elif cmd_id == CMD_MIDI_REFRESH:
+    def _on_menu_midi_refresh(self, _event: wx.CommandEvent) -> None:
+        self._refresh_midi_devices()
+        self.speak("MIDI devices refreshed")
+
+    def _on_menu_midi_device(self, event: wx.CommandEvent) -> None:
+        idx = event.GetId() - _MIDI_DEVICE_BASE
+        names = self._midi.get_input_names()
+        if 0 <= idx < len(names):
+            self._midi.open_by_name(names[idx])
             self._refresh_midi_devices()
-            self.speak("MIDI devices refreshed")
-        elif cmd_id == CMD_SETTINGS_BPM:
-            self._menu_change_bpm()
-        elif cmd_id == CMD_SETTINGS_KEY:
-            self._menu_change_key()
-        elif cmd_id == CMD_SETTINGS_STYLE:
-            self._menu_change_style()
-        elif _MIDI_DEVICE_BASE <= cmd_id < _MIDI_DEVICE_BASE + 100:
-            idx = _index_from_id(cmd_id)
-            names = self._midi.get_input_names()
-            if 0 <= idx < len(names):
-                self._midi.open_by_name(names[idx])
-                self._menu.refresh_devices(names, idx)
-                self.speak(f"MIDI: {names[idx]}")
+            self.speak(f"MIDI: {names[idx]}")
 
     def _menu_change_bpm(self) -> None:
-        val = prompt_input("BPM", "Enter new BPM (40–240):",
-                           str(self.progression.bpm), parent=self.root)
+        val = prompt_input(f"BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
+                           str(self.progression.bpm), parent=self._frame)
         if val is not None:
             try:
                 bpm = int(val)
-                if 40 <= bpm <= 240:
+                if BPM_MIN <= bpm <= BPM_MAX:
                     self.progression.bpm = bpm
-                    self._menu.update_settings_labels(
-                        bpm, self.progression.key, self.progression.style)
+                    self._update_settings_labels()
                     self.speak(f"BPM set to {bpm}")
                 else:
-                    self.speak("BPM must be between 40 and 240")
+                    self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
             except ValueError:
                 self.speak("Invalid BPM value")
 
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
         val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
-                           self.progression.key, parent=self.root)
+                           self.progression.key, parent=self._frame)
         if val is not None:
             key = val.strip()
             if key in KEY_SIGNATURES:
                 self.progression.key = key
-                self._menu.update_settings_labels(
-                    self.progression.bpm, key, self.progression.style)
+                self._update_settings_labels()
                 self.speak(f"Key set to {key}")
             else:
                 self.speak(f"Unknown key: {key}")
@@ -447,85 +487,159 @@ class App:
         from pyrealpro import STYLES_ALL
         val = prompt_input("Style",
                            "Enter style (e.g. Medium Swing, Bossa Nova):",
-                           self.progression.style, parent=self.root)
+                           self.progression.style, parent=self._frame)
         if val is not None:
             style = val.strip()
             if style in STYLES_ALL:
                 self.progression.style = style
-                self._menu.update_settings_labels(
-                    self.progression.bpm, self.progression.key, style)
+                self._update_settings_labels()
                 self.speak(f"Style set to {style}")
             else:
                 self.speak(f"Unknown style: {style}")
 
     # ------------------------------------------------------------------
-    # Main loop (tkinter)
+    # Main loop (wxPython)
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        self.root = tk.Tk()
-        self.root.title("IReal Studio")
-        self.root.configure(bg='#1e1e1e')
-        self.root.resizable(False, False)
+        wx_app = wx.App(False)
 
-        # Status labels (lines 0-3) + log line (line 4)
-        for _ in range(5):
-            lbl = tk.Label(
-                self.root, text="", bg='#1e1e1e', fg='#c8c8c8',
-                font=('Courier', 10), anchor='w', padx=8,
+        # --- New-project dialog (shown before the main window) ---
+        if self._is_new_project:
+            data = new_project_dialog(
+                parent=None,
+                defaults={
+                    'title':    self.progression.title,
+                    'composer': self.progression.composer,
+                    'key':      self.progression.key,
+                    'style':    self.progression.style,
+                    'bpm':      self.progression.bpm,
+                },
             )
-            lbl.pack(fill='x', pady=1)
+            if data:
+                self.progression.title    = data['title']
+                self.progression.composer = data['composer']
+                self.progression.key      = data['key']
+                self.progression.style    = data['style']
+                try:
+                    bpm = int(data['bpm'])
+                    if BPM_MIN <= bpm <= BPM_MAX:
+                        self.progression.bpm = bpm
+                    else:
+                        self.speak(
+                            f"BPM {bpm} out of range ({BPM_MIN}–{BPM_MAX}); "
+                            f"using {self.progression.bpm}")
+                except ValueError:
+                    self.speak(
+                        f"Invalid BPM '{data['bpm']}'; "
+                        f"using {self.progression.bpm}")
+        self.speak(f"IReal Studio ready. {self.progression.title}. Press R to record.")
+
+        self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
+        self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
+        # style=0 removes wx.TAB_TRAVERSAL so navigation keys reach _on_keydown
+        panel = wx.Panel(self._frame, style=0)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self._status_labels = []
+
+        # Status labels (lines 0-3): title/key/bpm, cursor, chords, current chord
+        for _ in range(4):
+            lbl = wx.StaticText(panel, label="", style=wx.ST_NO_AUTORESIZE)
+            lbl.SetForegroundColour(wx.Colour(200, 200, 200))
+            sizer.Add(lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
             self._status_labels.append(lbl)
-        # Tint the log label slightly differently so it reads as a footer
-        self._status_labels[4].config(fg='#888888')
-        self.root.geometry("500x135")
 
-        # Keyboard bindings
-        self.root.bind('<KeyPress>', self._on_keydown)
-        self.root.bind('<KeyRelease>', self._on_keyup)
+        # Line 4: last log entry, tinted as a footer
+        log_lbl = wx.StaticText(panel, label="", style=wx.ST_NO_AUTORESIZE)
+        log_lbl.SetForegroundColour(wx.Colour(136, 136, 136))
+        sizer.Add(log_lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        self._status_labels.append(log_lbl)
 
-        # Attach native Windows menu bar
-        self.root.update()
-        try:
-            hwnd = self._get_hwnd()
-            if hwnd:
-                self._menu.install(hwnd)
-                self._refresh_menu_state()
-        except Exception:
-            pass
+        panel.SetSizer(sizer)
 
-        # Start periodic callbacks
+        for w in (self._frame, panel):
+            w.Bind(wx.EVT_KEY_DOWN, self._on_keydown)
+            w.Bind(wx.EVT_KEY_UP,   self._on_keyup)
+
+        # Bind close event so cleanup runs whether the user presses X or Ctrl+Q
+        self._frame.Bind(wx.EVT_CLOSE, self._on_close_window)
+
+        # Build and attach the native wx.MenuBar
+        self._build_menu_bar()
+        self._refresh_menu_state()
+
+        self._frame.Show()
+        # Give keyboard focus to the panel so key events are received immediately
+        panel.SetFocus()
+
         self._schedule_display_update()
-        self._schedule_menu_poll()
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
-        self.root.mainloop()
+        wx_app.MainLoop()
 
-        # Cleanup after mainloop exits
+    def _build_menu_bar(self) -> None:
+        """Create a wx.MenuBar and attach it to the frame with EVT_MENU bindings."""
+        menu_bar = wx.MenuBar()
+
+        # --- File ---
+        file_menu = wx.Menu()
+        file_menu.Append(_CMD_FILE_SAVE,   "&Save\tCtrl+S")
+        file_menu.Append(_CMD_FILE_EXPORT, "&Export to iReal Pro\tCtrl+E")
+        menu_bar.Append(file_menu, "&File")
+
+        # --- MIDI Device (device items are populated by _refresh_midi_devices) ---
+        self._midi_menu = wx.Menu()
+        self._midi_menu.AppendSeparator()
+        self._midi_menu.Append(_CMD_MIDI_REFRESH, "&Refresh devices")
+        menu_bar.Append(self._midi_menu, "&MIDI Device")
+
+        # --- Settings ---
+        settings_menu = wx.Menu()
+        self._bpm_item   = settings_menu.Append(
+            _CMD_SETTINGS_BPM,   f"&BPM: {self.progression.bpm}...")
+        self._key_item   = settings_menu.Append(
+            _CMD_SETTINGS_KEY,   f"&Key: {self.progression.key}...")
+        self._style_item = settings_menu.Append(
+            _CMD_SETTINGS_STYLE, f"&Style: {self.progression.style}...")
+        menu_bar.Append(settings_menu, "&Settings")
+
+        self._frame.SetMenuBar(menu_bar)
+
+        # Bind fixed-ID menu events
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.save_json(),
+                         id=_CMD_FILE_SAVE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.export_ireal(),
+                         id=_CMD_FILE_EXPORT)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
+                         id=_CMD_MIDI_REFRESH)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_bpm(),
+                         id=_CMD_SETTINGS_BPM)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_key(),
+                         id=_CMD_SETTINGS_KEY)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_style(),
+                         id=_CMD_SETTINGS_STYLE)
+        # Bind the entire MIDI device ID range once (no per-device rebinding needed)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_device,
+                         id=_MIDI_DEVICE_BASE, id2=_MIDI_DEVICE_BASE + 99)
+
+    def _on_close_window(self, event: wx.CloseEvent) -> None:
+        """Handle window close: clean up resources then allow destruction."""
         self._recorder.stop_all()
-        self._menu.destroy()
         self._midi.close()
-
-    def _get_hwnd(self) -> int:
-        """Return the Win32 HWND of the tkinter root window, or 0."""
-        if sys.platform != 'win32' or self.root is None:
-            return 0
-        import ctypes
-        child = self.root.winfo_id()
-        parent = ctypes.windll.user32.GetParent(child)
-        return parent if parent else child
+        self._frame = None
+        event.Skip()
 
     def _on_quit(self) -> None:
-        if self.root is not None:
-            self.root.quit()
+        if self._frame is not None:
+            self._frame.Close()
 
     # ------------------------------------------------------------------
     # Keyboard event handlers
     # ------------------------------------------------------------------
 
-    def _on_keydown(self, event: tk.Event) -> None:
-        ctrl = bool(event.state & 0x4)
-        key = event.keysym.lower()
+    def _on_keydown(self, event: wx.KeyEvent) -> None:
+        ctrl = event.ControlDown()
+        kc   = event.GetKeyCode()
+        key  = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
 
         # Quit
         if ctrl and key == 'q':
@@ -614,19 +728,23 @@ class App:
                 self.add_bass_note(key)
                 self.slash_held = False
 
-    def _on_keyup(self, event: tk.Event) -> None:
-        key = event.keysym.lower()
+        event.Skip()
+
+    def _on_keyup(self, event: wx.KeyEvent) -> None:
+        kc  = event.GetKeyCode()
+        key = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
         if key == 's':
             self.s_held = False
         elif key == 'slash':
             self.slash_held = False
+        event.Skip()
 
     # ------------------------------------------------------------------
-    # Periodic tkinter callbacks
+    # Periodic wxPython callback
     # ------------------------------------------------------------------
 
     def _schedule_display_update(self) -> None:
-        if self.root is None:
+        if self._frame is None:
             return
         lines = [
             f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
@@ -639,18 +757,8 @@ class App:
         if chords_here:
             lines[3] = f"Here: {chords_here[0].chord_name()}"
         for lbl, text in zip(self._status_labels, lines):
-            lbl.config(text=text)
-        self.root.after(50, self._schedule_display_update)
-
-    def _schedule_menu_poll(self) -> None:
-        if self.root is None:
-            return
-        for _ in range(16):
-            cmd = self._menu.poll()
-            if cmd is None:
-                break
-            self._handle_menu_command(cmd)
-        self.root.after(16, self._schedule_menu_poll)
+            lbl.SetLabel(text)
+        wx.CallLater(50, self._schedule_display_update)
 
 
 if __name__ == '__main__':
