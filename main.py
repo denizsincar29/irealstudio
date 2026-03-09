@@ -35,7 +35,7 @@ import time
 import logging
 import collections
 import webbrowser
-import tkinter as tk
+import wx
 from pathlib import Path
 
 from accessible_output3.outputs.auto import Auto
@@ -50,11 +50,11 @@ from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from windows_menu import (
     create_menu,
-    prompt_input,
     CMD_FILE_SAVE, CMD_FILE_EXPORT,
     CMD_MIDI_REFRESH, CMD_SETTINGS_BPM, CMD_SETTINGS_KEY, CMD_SETTINGS_STYLE,
     _MIDI_DEVICE_BASE, _index_from_id,
 )
+from dialogs import prompt_input
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes timestamped records to irealstudio.log and keeps
@@ -96,6 +96,21 @@ DEFAULT_STYLE = "Medium Swing"
 DEFAULT_TIME_SIG = TimeSignature(4, 4)
 SAVE_FILE = "progression.json"
 
+# ---------------------------------------------------------------------------
+# wxPython key-code → symbolic-name map (used by both keydown and keyup)
+# ---------------------------------------------------------------------------
+_WX_KEY_SYM: dict[int, str] = {
+    wx.WXK_LEFT:    'left',
+    wx.WXK_RIGHT:   'right',
+    wx.WXK_HOME:    'home',
+    wx.WXK_END:     'end',
+    wx.WXK_ESCAPE:  'escape',
+    wx.WXK_SPACE:   'space',
+    wx.WXK_DELETE:  'delete',
+    wx.WXK_BACK:    'backspace',
+    ord('/'):       'slash',
+}
+
 
 # ---------------------------------------------------------------------------
 # Main application class
@@ -136,9 +151,9 @@ class App:
         # Native Windows menu bar (window handle installed in run())
         self._menu = create_menu()
 
-        # tkinter root window (created in run())
-        self.root: tk.Tk | None = None
-        self._status_labels: list[tk.Label] = []
+        # wxPython frame and status labels (created in run())
+        self._frame: wx.Frame | None = None
+        self._status_labels: list[wx.StaticText] = []
 
         # Load saved progression if it exists
         if Path(SAVE_FILE).exists():
@@ -415,7 +430,7 @@ class App:
 
     def _menu_change_bpm(self) -> None:
         val = prompt_input("BPM", "Enter new BPM (40–240):",
-                           str(self.progression.bpm), parent=self.root)
+                           str(self.progression.bpm), parent=self._frame)
         if val is not None:
             try:
                 bpm = int(val)
@@ -432,7 +447,7 @@ class App:
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
         val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
-                           self.progression.key, parent=self.root)
+                           self.progression.key, parent=self._frame)
         if val is not None:
             key = val.strip()
             if key in KEY_SIGNATURES:
@@ -447,7 +462,7 @@ class App:
         from pyrealpro import STYLES_ALL
         val = prompt_input("Style",
                            "Enter style (e.g. Medium Swing, Bossa Nova):",
-                           self.progression.style, parent=self.root)
+                           self.progression.style, parent=self._frame)
         if val is not None:
             style = val.strip()
             if style in STYLES_ALL:
@@ -459,33 +474,40 @@ class App:
                 self.speak(f"Unknown style: {style}")
 
     # ------------------------------------------------------------------
-    # Main loop (tkinter)
+    # Main loop (wxPython)
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        self.root = tk.Tk()
-        self.root.title("IReal Studio")
-        self.root.configure(bg='#1e1e1e')
-        self.root.resizable(False, False)
+        wx_app = wx.App(False)
+        self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
+        self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
+        panel = wx.Panel(self._frame)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self._status_labels = []
 
-        # Status labels (lines 0-3) + log line (line 4)
-        for _ in range(5):
-            lbl = tk.Label(
-                self.root, text="", bg='#1e1e1e', fg='#c8c8c8',
-                font=('Courier', 10), anchor='w', padx=8,
-            )
-            lbl.pack(fill='x', pady=1)
+        # Status labels (lines 0-3): title/key/bpm, cursor, chords, current chord
+        for _ in range(4):
+            lbl = wx.StaticText(panel, label="", style=wx.ST_NO_AUTORESIZE)
+            lbl.SetForegroundColour(wx.Colour(200, 200, 200))
+            sizer.Add(lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
             self._status_labels.append(lbl)
-        # Tint the log label slightly differently so it reads as a footer
-        self._status_labels[4].config(fg='#888888')
-        self.root.geometry("500x135")
 
-        # Keyboard bindings
-        self.root.bind('<KeyPress>', self._on_keydown)
-        self.root.bind('<KeyRelease>', self._on_keyup)
+        # Line 4: last log entry, tinted as a footer
+        log_lbl = wx.StaticText(panel, label="", style=wx.ST_NO_AUTORESIZE)
+        log_lbl.SetForegroundColour(wx.Colour(136, 136, 136))
+        sizer.Add(log_lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        self._status_labels.append(log_lbl)
 
-        # Attach native Windows menu bar
-        self.root.update()
+        panel.SetSizer(sizer)
+
+        for w in (self._frame, panel):
+            w.Bind(wx.EVT_KEY_DOWN, self._on_keydown)
+            w.Bind(wx.EVT_KEY_UP,   self._on_keyup)
+
+        # Bind close event so cleanup runs whether the user presses X or Ctrl+Q
+        self._frame.Bind(wx.EVT_CLOSE, self._on_close_window)
+
+        # Install the native menu before showing so the window appears complete
         try:
             hwnd = self._get_hwnd()
             if hwnd:
@@ -494,38 +516,39 @@ class App:
         except Exception:
             pass
 
-        # Start periodic callbacks
+        self._frame.Show()
+
         self._schedule_display_update()
         self._schedule_menu_poll()
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
-        self.root.mainloop()
+        wx_app.MainLoop()
 
-        # Cleanup after mainloop exits
+    def _get_hwnd(self) -> int:
+        """Return the Win32 HWND of the wxPython frame, or 0."""
+        if sys.platform != 'win32' or self._frame is None:
+            return 0
+        return self._frame.GetHandle()
+
+    def _on_close_window(self, event: wx.CloseEvent) -> None:
+        """Handle window close: clean up resources then allow destruction."""
         self._recorder.stop_all()
         self._menu.destroy()
         self._midi.close()
-
-    def _get_hwnd(self) -> int:
-        """Return the Win32 HWND of the tkinter root window, or 0."""
-        if sys.platform != 'win32' or self.root is None:
-            return 0
-        import ctypes
-        child = self.root.winfo_id()
-        parent = ctypes.windll.user32.GetParent(child)
-        return parent if parent else child
+        self._frame = None
+        event.Skip()
 
     def _on_quit(self) -> None:
-        if self.root is not None:
-            self.root.quit()
+        if self._frame is not None:
+            self._frame.Close()
 
     # ------------------------------------------------------------------
     # Keyboard event handlers
     # ------------------------------------------------------------------
 
-    def _on_keydown(self, event: tk.Event) -> None:
-        ctrl = bool(event.state & 0x4)
-        key = event.keysym.lower()
+    def _on_keydown(self, event: wx.KeyEvent) -> None:
+        ctrl = event.ControlDown()
+        kc   = event.GetKeyCode()
+        key  = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
 
         # Quit
         if ctrl and key == 'q':
@@ -614,19 +637,23 @@ class App:
                 self.add_bass_note(key)
                 self.slash_held = False
 
-    def _on_keyup(self, event: tk.Event) -> None:
-        key = event.keysym.lower()
+        event.Skip()
+
+    def _on_keyup(self, event: wx.KeyEvent) -> None:
+        kc  = event.GetKeyCode()
+        key = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
         if key == 's':
             self.s_held = False
         elif key == 'slash':
             self.slash_held = False
+        event.Skip()
 
     # ------------------------------------------------------------------
-    # Periodic tkinter callbacks
+    # Periodic wxPython callbacks
     # ------------------------------------------------------------------
 
     def _schedule_display_update(self) -> None:
-        if self.root is None:
+        if self._frame is None:
             return
         lines = [
             f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
@@ -639,18 +666,18 @@ class App:
         if chords_here:
             lines[3] = f"Here: {chords_here[0].chord_name()}"
         for lbl, text in zip(self._status_labels, lines):
-            lbl.config(text=text)
-        self.root.after(50, self._schedule_display_update)
+            lbl.SetLabel(text)
+        wx.CallLater(50, self._schedule_display_update)
 
     def _schedule_menu_poll(self) -> None:
-        if self.root is None:
+        if self._frame is None:
             return
         for _ in range(16):
             cmd = self._menu.poll()
             if cmd is None:
                 break
             self._handle_menu_command(cmd)
-        self.root.after(16, self._schedule_menu_poll)
+        wx.CallLater(16, self._schedule_menu_poll)
 
 
 if __name__ == '__main__':
