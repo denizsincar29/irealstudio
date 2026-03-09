@@ -11,14 +11,18 @@ Keyboard shortcuts:
   Ctrl+Right    - Move cursor right one measure
   Ctrl+Home     - Go to beginning of progression
   Ctrl+End      - Go to end of progression
+  P             - Speak full position: section, ending, chord, bar, beat
   S + (a/b/c/d/v/i) - Add section mark at current measure
   V             - Add volta/ending mark at current measure
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
   Delete/Backspace - Delete chord at current position
   Ctrl+S        - Save progression to JSON
   Ctrl+E        - Export to iReal Pro format (HTML file)
+  Ctrl+L        - Speak last 5 log entries (MIDI errors, etc.)
   Escape        - Stop recording/playback
   Ctrl+Q        - Quit
+
+All events are written to irealstudio.log in the working directory.
 
 On Windows a native menu bar is available (use Alt to activate):
   File          - Save / Export to iReal Pro
@@ -28,24 +32,22 @@ On Windows a native menu bar is available (use Alt to activate):
 import os
 import sys
 import time
-import threading
+import logging
+import collections
 import webbrowser
+import tkinter as tk
 from pathlib import Path
 
-import pygame
 from accessible_output3.outputs.auto import Auto
 from pychord import find_chords_from_notes
-
-try:
-    import mido
-    MIDO_AVAILABLE = True
-except ImportError:
-    MIDO_AVAILABLE = False
 
 from chords import (
     ChordProgression, TimeSignature, Position,
     SECTION_KEYS, NOTE_NAMES,
 )
+from sound import make_beep
+from midi_handler import MidiHandler
+from recorder import Recorder, AppState
 from windows_menu import (
     create_menu,
     prompt_input,
@@ -53,6 +55,36 @@ from windows_menu import (
     CMD_MIDI_REFRESH, CMD_SETTINGS_BPM, CMD_SETTINGS_KEY, CMD_SETTINGS_STYLE,
     _MIDI_DEVICE_BASE, _index_from_id,
 )
+
+# ---------------------------------------------------------------------------
+# Logging setup — writes timestamped records to irealstudio.log and keeps
+# the last LOG_RING_SIZE messages in an in-memory ring for the in-app log display.
+# ---------------------------------------------------------------------------
+LOG_FILE = "irealstudio.log"
+LOG_RING_SIZE = 100       # entries kept in the in-memory ring buffer
+LOG_SPEAK_RECENT = 5      # entries spoken by Ctrl+L
+
+_log_ring: collections.deque[str] = collections.deque(maxlen=LOG_RING_SIZE)
+
+
+class _RingHandler(logging.Handler):
+    """Push formatted records into the module-level ring buffer."""
+    def emit(self, record: logging.LogRecord) -> None:
+        _log_ring.append(self.format(record))
+
+
+_app_logger = logging.getLogger('irealstudio')
+_app_logger.setLevel(logging.DEBUG)
+
+_file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(
+    logging.Formatter('%(asctime)s %(levelname)-5s %(message)s',
+                      datefmt='%H:%M:%S'))
+_app_logger.addHandler(_file_handler)
+
+_ring_handler = _RingHandler()
+_ring_handler.setFormatter(logging.Formatter('%(levelname)-5s %(message)s'))
+_app_logger.addHandler(_ring_handler)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -66,27 +98,13 @@ SAVE_FILE = "progression.json"
 
 
 # ---------------------------------------------------------------------------
-# App state constants
-# ---------------------------------------------------------------------------
-class AppState:
-    IDLE = 'idle'
-    PRE_COUNT = 'precount'
-    RECORDING = 'recording'
-    PLAYING = 'playing'
-
-
-# ---------------------------------------------------------------------------
 # Main application class
 # ---------------------------------------------------------------------------
 class App:
     def __init__(self):
-        pygame.init()
-        pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
-
         self.speech = Auto()
-        self.state = AppState.IDLE
 
-        # Chord progression
+        # Chord progression and cursor
         self.progression = ChordProgression(
             title=DEFAULT_TITLE,
             time_signature=DEFAULT_TIME_SIG,
@@ -94,53 +112,33 @@ class App:
             style=DEFAULT_STYLE,
             bpm=DEFAULT_BPM,
         )
-
-        # Cursor position
         self.cursor = Position(1, 1, self.progression.time_signature)
 
-        # Recording state
-        self.recording_start_time: float = 0.0
-        self.held_notes: dict = {}          # midi_note -> press time
-        self.chord_first_note_time: float = 0.0
-        self.recording_chord_notes: list = []
-
-        # Metronome/recording thread
-        self.metronome_stop_event = threading.Event()
-        self.metronome_thread = None
-
-        # Playback thread
-        self.playback_stop_event = threading.Event()
-        self.playback_thread = None
-        self.playback_stopped_at = None
-
-        # Key modifier tracking
+        # Key modifier tracking (for multi-key shortcuts)
         self.s_held = False
         self.slash_held = False
 
-        # MIDI
-        self.midi_input = None
-        self.midi_input_name: str = ''
-        self.midi_stop_event = threading.Event()
-        self._init_midi()
+        # Recorder owns metronome/recording/playback state
+        self._recorder = Recorder(
+            speak=self.speak,
+            tick_sound=make_beep(1200, 30),   # high downbeat click
+            tock_sound=make_beep(800, 25),    # lower upbeat click
+        )
 
-        # Pygame display
-        self.screen = pygame.display.set_mode((500, 110))
-        pygame.display.set_caption("IReal Studio")
-        self.clock = pygame.time.Clock()
+        # MIDI handler owns port management and chord detection
+        self._midi = MidiHandler(
+            speak=self.speak,
+            on_chord_released=self._on_chord_released,
+            is_recording=lambda: self._recorder.state == AppState.RECORDING,
+        )
+        self._midi.init()
 
-        # Native Windows menu bar
+        # Native Windows menu bar (window handle installed in run())
         self._menu = create_menu()
-        try:
-            hwnd = pygame.display.get_wm_info().get('window', 0)
-            if hwnd:
-                self._menu.install(hwnd)
-                self._refresh_menu_state()
-        except Exception:
-            pass
 
-        # Sounds
-        self.tick_sound = self._make_beep(880, 60)
-        self.tock_sound = self._make_beep(440, 60)
+        # tkinter root window (created in run())
+        self.root: tk.Tk | None = None
+        self._status_labels: list[tk.Label] = []
 
         # Load saved progression if it exists
         if Path(SAVE_FILE).exists():
@@ -154,79 +152,49 @@ class App:
             self.speak("IReal Studio ready. Press R to record.")
 
     # ------------------------------------------------------------------
-    # Audio helpers
+    # MIDI chord callback
     # ------------------------------------------------------------------
 
-    def _make_beep(self, freq: int, duration_ms: int) -> pygame.mixer.Sound:
-        import math
-        import array as arr
-        sample_rate = 44100
-        num_samples = int(sample_rate * duration_ms / 1000)
-        wave = arr.array('h', [
-            int(32767 * math.sin(2 * math.pi * freq * i / sample_rate))
-            for i in range(num_samples)
-        ])
-        return pygame.sndarray.make_sound(wave)
-
-    # ------------------------------------------------------------------
-    # MIDI
-    # ------------------------------------------------------------------
-
-    def _init_midi(self):
-        if not MIDO_AVAILABLE:
+    def _on_chord_released(self, notes: list[int], first_note_time: float) -> None:
+        """Commit a detected chord to the progression during recording."""
+        note_names = [NOTE_NAMES[n % 12] for n in notes]
+        chords = find_chords_from_notes(note_names)
+        if not chords:
             return
-        try:
-            names = mido.get_input_names()
-            if names:
-                self._open_midi_by_name(names[0])
-        except Exception:
-            pass
+        chord = chords[0]
 
-    def _open_midi_by_name(self, name: str) -> None:
-        """Close any open MIDI port and open *name*."""
-        # Signal the existing reader thread to stop and wait briefly for it to exit
-        self.midi_stop_event.set()
-        if self.metronome_thread and self.metronome_thread.is_alive():
-            pass  # metronome thread managed separately
-        if self.midi_input is not None:
-            try:
-                self.midi_input.close()
-            except Exception:
-                pass
-            self.midi_input = None
-        # Give the old midi_loop thread a moment to notice the stop event
-        time.sleep(0.02)
+        elapsed = max(0.0, first_note_time - self._recorder.recording_start_time)
+        bps = self.progression.bpm / 60.0
+        beats_per_measure = self.progression.time_signature.numerator
+        total_beat_0 = max(0, round(elapsed * bps))
+        total_beat_0 += self.cursor.beat_from_start - 1
+        measure = total_beat_0 // beats_per_measure + 1
+        beat = total_beat_0 % beats_per_measure + 1
 
-        self.midi_stop_event.clear()
-        try:
-            self.midi_input = mido.open_input(name)
-            self.midi_input_name = name
-            t = threading.Thread(target=self._midi_loop, daemon=True)
-            t.start()
-        except Exception as e:
-            self.midi_input_name = ''
-            self.speak(f"MIDI open failed: {e}")
+        # Discard chords in hidden (volta-repeated-body) range.
+        if self.progression.is_in_hidden_range(measure):
+            return
+
+        self.progression.add_chord(chord, measure, beat)
+        if measure > self.progression.total_measures:
+            self.progression.total_measures = measure
+        self.speak(f"{chord} at {measure} colon {beat}")
+
+    # ------------------------------------------------------------------
+    # MIDI device management
+    # ------------------------------------------------------------------
 
     def _refresh_midi_devices(self) -> None:
-        """Reopen MIDI device list and rebuild the menu."""
-        if not MIDO_AVAILABLE:
-            self._menu.refresh_devices([], None)
-            return
-        try:
-            names = mido.get_input_names()
-        except Exception as e:
-            self.speak(f"MIDI list error: {e}")
-            names = []
-
+        """Rebuild the MIDI Device menu from currently available ports."""
+        names = self._midi.get_input_names()
         active: int | None = None
         for i, n in enumerate(names):
-            if n == self.midi_input_name:
+            if n == self._midi.midi_input_name:
                 active = i
                 break
-
         self._menu.refresh_devices(names, active)
         if names and active is None:
-            self._open_midi_by_name(names[0])
+            self._midi.open_by_name(names[0])
             self._menu.refresh_devices(names, 0)
 
     def _refresh_menu_state(self) -> None:
@@ -238,218 +206,18 @@ class App:
             self.progression.style,
         )
 
-    def _midi_loop(self):
-        while not self.midi_stop_event.is_set():
-            if self.midi_input is None:
-                break
-            try:
-                for msg in self.midi_input.iter_pending():
-                    self._handle_midi(msg)
-            except Exception:
-                pass
-            time.sleep(0.005)
-
-    def _handle_midi(self, msg):
-        if self.state != AppState.RECORDING:
-            return
-        note_on = (msg.type == 'note_on' and msg.velocity > 0)
-        note_off = (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0)
-
-        if note_on:
-            if not self.held_notes:
-                self.chord_first_note_time = time.time()
-            self.held_notes[msg.note] = time.time()
-            if msg.note not in self.recording_chord_notes:
-                self.recording_chord_notes.append(msg.note)
-        elif note_off:
-            self.held_notes.pop(msg.note, None)
-            if not self.held_notes and self.recording_chord_notes:
-                self._commit_chord()
-                self.recording_chord_notes = []
-
-    def _commit_chord(self):
-        if not self.recording_chord_notes:
-            return
-        notes = [NOTE_NAMES[n % 12] for n in self.recording_chord_notes]
-        chords = find_chords_from_notes(notes)
-        if not chords:
-            return
-        chord = chords[0]
-
-        elapsed = max(0.0, self.chord_first_note_time - self.recording_start_time)
-        bps = self.progression.bpm / 60.0
-        beats_per_measure = self.progression.time_signature.numerator
-        total_beat_0 = max(0, round(elapsed * bps))  # 0-based
-        # Offset by cursor's starting beat
-        total_beat_0 += self.cursor.beat_from_start - 1
-        measure = total_beat_0 // beats_per_measure + 1
-        beat = total_beat_0 % beats_per_measure + 1
-
-        # Discard chords that fall in the hidden (repeated-body) range so that
-        # the user does not accidentally overwrite clean chords while playing
-        # through the repeated section before reaching ending 2.
-        if self.progression.is_in_hidden_range(measure):
-            return
-
-        self.progression.add_chord(chord, measure, beat)
-        if measure > self.progression.total_measures:
-            self.progression.total_measures = measure
-        self.speak(f"{chord} at {measure} colon {beat}")
-
-    # ------------------------------------------------------------------
-    # Metronome & recording
-    # ------------------------------------------------------------------
-
-    def _beat_interval(self) -> float:
-        return 60.0 / self.progression.bpm
-
-    def start_recording(self):
-        self.stop_all()
-        self.state = AppState.PRE_COUNT
-        self.metronome_stop_event.clear()
-        self.metronome_thread = threading.Thread(
-            target=self._precount_and_record, daemon=True)
-        self.metronome_thread.start()
-
-    def _precount_and_record(self):
-        beats = self.progression.time_signature.numerator
-        beat_names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
-        interval = self._beat_interval()
-
-        for _ in range(2):           # 2 measure pre-count
-            for b in range(beats):
-                if self.metronome_stop_event.is_set():
-                    self.state = AppState.IDLE
-                    return
-                name = beat_names[b] if b < len(beat_names) else str(b + 1)
-                self.speak(name)
-                if b == 0:
-                    self.tick_sound.play()
-                else:
-                    self.tock_sound.play()
-                time.sleep(interval)
-
-        if self.metronome_stop_event.is_set():
-            self.state = AppState.IDLE
-            return
-
-        self.state = AppState.RECORDING
-        self.recording_start_time = time.time()
-        self.held_notes.clear()
-        self.recording_chord_notes.clear()
-        self.speak("Recording")
-
-        # Position-tracking metronome: tracks the logical measure/beat so it
-        # can announce when we enter a hidden (repeated-body) range or reach
-        # ending 2.  The click pattern stays at a steady tempo throughout.
-        beats = self.progression.time_signature.numerator
-        cursor_beat_0 = self.cursor.beat_from_start - 1  # 0-based offset
-        beat_count = 0
-        _announced_hidden = False
-        _announced_ending2: set[int] = set()
-
-        while not self.metronome_stop_event.is_set():
-            # Logical 0-based beat position from beginning of progression
-            abs_beat_0 = cursor_beat_0 + beat_count
-            logical_measure = abs_beat_0 // beats + 1
-            logical_beat_in_measure = abs_beat_0 % beats + 1
-
-            # --- Announcements at beat 1 of each measure ---
-            if logical_beat_in_measure == 1:
-                if self.progression.is_in_hidden_range(logical_measure):
-                    if not _announced_hidden:
-                        self.speak("Repeating, chords not recorded")
-                        _announced_hidden = True
-                else:
-                    _announced_hidden = False
-                    # Announce arrival at ending 2
-                    for vb in self.progression.volta_brackets:
-                        if (vb.is_complete()
-                                and logical_measure == vb.ending2_start
-                                and logical_measure not in _announced_ending2):
-                            self.speak("Ending 2")
-                            _announced_ending2.add(logical_measure)
-                self.tick_sound.play()
-            else:
-                self.tock_sound.play()
-
-            beat_count += 1
-            time.sleep(interval)
-
-        self.state = AppState.IDLE
-
-    def stop_all(self):
-        self.metronome_stop_event.set()
-        self.playback_stop_event.set()
-        self.state = AppState.IDLE
-
-    # ------------------------------------------------------------------
-    # Playback
-    # ------------------------------------------------------------------
-
-    def start_playback(self):
-        if self.state != AppState.IDLE:
-            return
-        self.state = AppState.PLAYING
-        self.playback_stop_event.clear()
-        self.playback_stopped_at = None
-        self.playback_thread = threading.Thread(
-            target=self._playback_loop, daemon=True)
-        self.playback_thread.start()
-
-    def _playback_loop(self):
-        interval = self._beat_interval()
-        beats = self.progression.time_signature.numerator
-        cur = Position(self.cursor.measure, self.cursor.beat,
-                       self.progression.time_signature)
-        # Determine the true final measure, including anything past hidden ranges
-        last_m = max(self.progression.last_measure(), self.progression.total_measures, 1)
-        # Also check the end of any volta brackets
-        for vb in self.progression.volta_brackets:
-            if vb.is_complete():
-                last_m = max(last_m, vb.ending2_start)
-
-        while not self.playback_stop_event.is_set():
-            chords_here = self.progression.find_chords_at_position(cur)
-            if chords_here:
-                self.speak(chords_here[0].chord_name())
-
-            if cur.beat == 1:
-                self.tick_sound.play()
-            else:
-                self.tock_sound.play()
-
-            self.playback_stopped_at = Position(
-                cur.measure, cur.beat, self.progression.time_signature)
-
-            time.sleep(interval)
-            if self.playback_stop_event.is_set():
-                break
-
-            next_beat = cur.beat + 1
-            if next_beat > beats:
-                next_m = self.progression.navigate_right_from_measure(cur.measure)
-                if next_m > last_m:
-                    break
-                cur = Position(next_m, 1, self.progression.time_signature)
-            else:
-                cur = Position(cur.measure, next_beat, self.progression.time_signature)
-
-        self.state = AppState.IDLE
-
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
 
-    def navigate(self, direction: str, by_measure: bool = False):
+    def navigate(self, direction: str, by_measure: bool = False) -> None:
         ts = self.progression.time_signature
         if by_measure:
             if direction == 'right':
                 new_m = self.progression.navigate_right_from_measure(self.cursor.measure)
-                self.cursor = Position(new_m, 1, ts)
             else:
                 new_m = self.progression.navigate_left_from_measure(self.cursor.measure)
-                self.cursor = Position(new_m, 1, ts)
+            self.cursor = Position(new_m, 1, ts)
         else:
             if direction == 'right':
                 nxt = self.progression.find_next_chord_to_right(self.cursor)
@@ -461,7 +229,7 @@ class App:
                     while max_iter > 0 and self.progression.is_in_hidden_range(new_pos.measure):
                         new_m = self.progression.navigate_right_from_measure(new_pos.measure - 1)
                         if new_m <= new_pos.measure:
-                            break  # no forward progress, stop
+                            break
                         new_pos = Position(new_m, 1, ts)
                         max_iter -= 1
                     self.cursor = new_pos
@@ -472,58 +240,75 @@ class App:
                 else:
                     new_pos = self.cursor - 1
                     max_iter = 1000
-                    while new_pos.measure > 1 and max_iter > 0 and self.progression.is_in_hidden_range(new_pos.measure):
+                    while (
+                        new_pos.measure > 1
+                        and max_iter > 0
+                        and self.progression.is_in_hidden_range(new_pos.measure)
+                    ):
                         new_m = self.progression.navigate_left_from_measure(new_pos.measure + 1)
                         if new_m >= new_pos.measure:
-                            break  # no backward progress, stop
+                            break
                         new_pos = Position(new_m, 1, ts)
                         max_iter -= 1
                     self.cursor = new_pos
-
         self._announce_position()
 
-    def navigate_home(self):
+    def navigate_home(self) -> None:
         self.cursor = Position(1, 1, self.progression.time_signature)
         self._announce_position()
 
-    def navigate_end(self):
+    def navigate_end(self) -> None:
         last_m = max(self.progression.last_measure(), 1)
         chords = self.progression.find_chords_in_measure(last_m)
-        self.cursor = chords[-1].position if chords else Position(last_m, 1, self.progression.time_signature)
+        self.cursor = (
+            chords[-1].position if chords
+            else Position(last_m, 1, self.progression.time_signature)
+        )
         self._announce_position()
 
-    def _announce_position(self):
-        parts = []
+    def _announce_position(self) -> None:
+        """Speak a brief position: chord (if any) then 'bar N beat M'."""
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        chord_part = chords_here[0].chord_name() if chords_here else ""
+        pos_part = f"bar {self.cursor.measure} beat {self.cursor.beat}"
+        self.speak(f"{chord_part} {pos_part}".strip())
+
+    def _announce_position_verbose(self) -> None:
+        """Speak full context: section, ending, chord (if any), bar, beat."""
+        parts: list[str] = []
+        mark_names = {
+            '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
+            '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
+        }
         sm = self.progression.get_section_mark(self.cursor.measure)
         if sm:
-            mark_names = {'*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-                          '*D': 'Section D', '*V': 'Verse', '*i': 'Intro'}
             parts.append(mark_names.get(sm, sm))
-
         for vb in self.progression.volta_brackets:
             if self.cursor.measure == vb.ending1_start:
-                parts.append("Ending 1")
+                parts.append("ending 1")
             elif vb.is_complete() and self.cursor.measure == vb.ending2_start:
-                parts.append("Ending 2")
-
+                parts.append("ending 2")
         chords_here = self.progression.find_chords_at_position(self.cursor)
-        parts.append(chords_here[0].chord_name() if chords_here else "Empty")
-        parts.append(f"Measure {self.cursor.measure} beat {self.cursor.beat}")
-        self.speak(", ".join(parts))
+        if chords_here:
+            parts.append(chords_here[0].chord_name())
+        parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
+        self.speak(" ".join(parts))
 
     # ------------------------------------------------------------------
-    # Section marks / slash chords / volta
+    # Editing helpers
     # ------------------------------------------------------------------
 
-    def add_section_mark(self, letter: str):
+    def add_section_mark(self, letter: str) -> None:
         mark = SECTION_KEYS.get(letter.lower())
         if mark:
             self.progression.add_section_mark(self.cursor.measure, mark)
-            names = {'*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-                     '*D': 'Section D', '*V': 'Verse', '*i': 'Intro'}
+            names = {
+                '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
+                '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
+            }
             self.speak(f"{names.get(mark, mark)} at measure {self.cursor.measure}")
 
-    def add_bass_note(self, letter: str):
+    def add_bass_note(self, letter: str) -> None:
         note = letter.upper()
         if note not in NOTE_NAMES:
             self.speak("Invalid note")
@@ -540,11 +325,11 @@ class App:
         target.bass_note = note
         self.speak(target.chord_name())
 
-    def add_volta(self):
+    def add_volta(self) -> None:
         msg = self.progression.add_volta_start(self.cursor.measure)
         self.speak(msg)
 
-    def delete_at_cursor(self):
+    def delete_at_cursor(self) -> None:
         self.progression.delete_chord_at(self.cursor)
         self.speak(f"Deleted at measure {self.cursor.measure} beat {self.cursor.beat}")
 
@@ -552,7 +337,7 @@ class App:
     # Save / Export
     # ------------------------------------------------------------------
 
-    def save_json(self):
+    def save_json(self) -> None:
         try:
             with open(SAVE_FILE, 'w') as f:
                 f.write(self.progression.to_json())
@@ -560,7 +345,7 @@ class App:
         except Exception as e:
             self.speak(f"Save failed: {e}")
 
-    def export_ireal(self):
+    def export_ireal(self) -> None:
         try:
             url = self.progression.to_ireal_url()
             html_file = self.progression.title.replace(' ', '_') + '.html'
@@ -583,21 +368,30 @@ class App:
             self.speak(f"Export failed: {e}")
 
     # ------------------------------------------------------------------
-    # Speech
+    # Speech / logging
     # ------------------------------------------------------------------
 
-    def speak(self, text: str):
+    def speak(self, text: str) -> None:
+        _app_logger.info(text)
         try:
             self.speech.output(text)
         except Exception:
             print(text)
+
+    def _speak_recent_log(self) -> None:
+        """Speak the last LOG_SPEAK_RECENT log entries (bound to Ctrl+L)."""
+        recent = list(_log_ring)[-LOG_SPEAK_RECENT:]
+        if recent:
+            self.speak(". ".join(recent))
+        else:
+            self.speak("Log is empty")
 
     # ------------------------------------------------------------------
     # Menu command handler
     # ------------------------------------------------------------------
 
     def _handle_menu_command(self, cmd_id: int) -> None:
-        """Dispatch a menu command (from the native menu bar)."""
+        """Dispatch a command from the native Win32 menu bar."""
         if cmd_id == CMD_FILE_SAVE:
             self.save_json()
         elif cmd_id == CMD_FILE_EXPORT:
@@ -613,19 +407,15 @@ class App:
             self._menu_change_style()
         elif _MIDI_DEVICE_BASE <= cmd_id < _MIDI_DEVICE_BASE + 100:
             idx = _index_from_id(cmd_id)
-            if MIDO_AVAILABLE:
-                try:
-                    names = mido.get_input_names()
-                    if 0 <= idx < len(names):
-                        self._open_midi_by_name(names[idx])
-                        self._menu.refresh_devices(names, idx)
-                        self.speak(f"MIDI: {names[idx]}")
-                except Exception as e:
-                    self.speak(f"MIDI error: {e}")
+            names = self._midi.get_input_names()
+            if 0 <= idx < len(names):
+                self._midi.open_by_name(names[idx])
+                self._menu.refresh_devices(names, idx)
+                self.speak(f"MIDI: {names[idx]}")
 
     def _menu_change_bpm(self) -> None:
         val = prompt_input("BPM", "Enter new BPM (40–240):",
-                           str(self.progression.bpm))
+                           str(self.progression.bpm), parent=self.root)
         if val is not None:
             try:
                 bpm = int(val)
@@ -642,7 +432,7 @@ class App:
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
         val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
-                           self.progression.key)
+                           self.progression.key, parent=self.root)
         if val is not None:
             key = val.strip()
             if key in KEY_SIGNATURES:
@@ -657,7 +447,7 @@ class App:
         from pyrealpro import STYLES_ALL
         val = prompt_input("Style",
                            "Enter style (e.g. Medium Swing, Bossa Nova):",
-                           self.progression.style)
+                           self.progression.style, parent=self.root)
         if val is not None:
             style = val.strip()
             if style in STYLES_ALL:
@@ -669,142 +459,201 @@ class App:
                 self.speak(f"Unknown style: {style}")
 
     # ------------------------------------------------------------------
-    # Main loop
+    # Main loop (tkinter)
     # ------------------------------------------------------------------
 
-    def run(self):
-        font = pygame.font.SysFont(None, 20)
-        running = True
+    def run(self) -> None:
+        self.root = tk.Tk()
+        self.root.title("IReal Studio")
+        self.root.configure(bg='#1e1e1e')
+        self.root.resizable(False, False)
 
-        while running:
-            self.clock.tick(60)
+        # Status labels (lines 0-3) + log line (line 4)
+        for _ in range(5):
+            lbl = tk.Label(
+                self.root, text="", bg='#1e1e1e', fg='#c8c8c8',
+                font=('Courier', 10), anchor='w', padx=8,
+            )
+            lbl.pack(fill='x', pady=1)
+            self._status_labels.append(lbl)
+        # Tint the log label slightly differently so it reads as a footer
+        self._status_labels[4].config(fg='#888888')
+        self.root.geometry("500x135")
 
-            # Poll native menu commands (Windows menu bar) — cap per frame
-            for _ in range(16):
-                cmd = self._menu.poll()
-                if cmd is None:
-                    break
-                self._handle_menu_command(cmd)
+        # Keyboard bindings
+        self.root.bind('<KeyPress>', self._on_keydown)
+        self.root.bind('<KeyRelease>', self._on_keyup)
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
+        # Attach native Windows menu bar
+        self.root.update()
+        try:
+            hwnd = self._get_hwnd()
+            if hwnd:
+                self._menu.install(hwnd)
+                self._refresh_menu_state()
+        except Exception:
+            pass
 
-                elif event.type == pygame.KEYDOWN:
-                    ctrl = bool(event.mod & pygame.KMOD_CTRL)
+        # Start periodic callbacks
+        self._schedule_display_update()
+        self._schedule_menu_poll()
 
-                    # Quit
-                    if ctrl and event.key == pygame.K_q:
-                        running = False
+        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
+        self.root.mainloop()
 
-                    # Escape – stop
-                    elif event.key == pygame.K_ESCAPE:
-                        self.stop_all()
-                        self.speak("Stopped")
-
-                    # R – record
-                    elif event.key == pygame.K_r and not ctrl:
-                        if self.state == AppState.IDLE:
-                            self.start_recording()
-                        else:
-                            self.speak("Already active")
-
-                    # Space – play / stop
-                    elif event.key == pygame.K_SPACE:
-                        if ctrl:
-                            if self.state == AppState.PLAYING:
-                                self.stop_all()
-                                time.sleep(0.05)
-                                if self.playback_stopped_at:
-                                    self.cursor = self.playback_stopped_at
-                                    self._announce_position()
-                        else:
-                            if self.state == AppState.IDLE:
-                                self.start_playback()
-                            elif self.state == AppState.PLAYING:
-                                self.stop_all()
-
-                    # Navigation
-                    elif event.key == pygame.K_LEFT and not self.s_held:
-                        if self.state == AppState.IDLE:
-                            self.navigate('left', by_measure=ctrl)
-                    elif event.key == pygame.K_RIGHT and not self.s_held:
-                        if self.state == AppState.IDLE:
-                            self.navigate('right', by_measure=ctrl)
-                    elif event.key == pygame.K_HOME and ctrl:
-                        if self.state == AppState.IDLE:
-                            self.navigate_home()
-                    elif event.key == pygame.K_END and ctrl:
-                        if self.state == AppState.IDLE:
-                            self.navigate_end()
-
-                    # Ctrl+S – save
-                    elif ctrl and event.key == pygame.K_s:
-                        self.save_json()
-
-                    # Ctrl+E – export
-                    elif ctrl and event.key == pygame.K_e:
-                        self.export_ireal()
-
-                    # Delete/Backspace
-                    elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
-                        if self.state == AppState.IDLE:
-                            self.delete_at_cursor()
-
-                    # S key held for section marks
-                    elif event.key == pygame.K_s and not ctrl:
-                        self.s_held = True
-
-                    # / held for slash chords
-                    elif event.key == pygame.K_SLASH:
-                        self.slash_held = True
-
-                    # V key – volta (only when not using S modifier)
-                    elif event.key == pygame.K_v and not ctrl and not self.s_held:
-                        self.add_volta()
-
-                    # Letter keys A-Z
-                    elif pygame.K_a <= event.key <= pygame.K_z:
-                        letter = chr(event.key)
-                        if self.s_held:
-                            self.add_section_mark(letter)
-                            self.s_held = False
-                        elif self.slash_held:
-                            self.add_bass_note(letter)
-                            self.slash_held = False
-
-                elif event.type == pygame.KEYUP:
-                    if event.key == pygame.K_s:
-                        self.s_held = False
-                    elif event.key == pygame.K_SLASH:
-                        self.slash_held = False
-
-            # Draw status
-            self.screen.fill((30, 30, 30))
-            lines = [
-                f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
-                f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self.state}",
-                f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
-            ]
-            chords_here = self.progression.find_chords_at_position(self.cursor)
-            if chords_here:
-                lines.append(f"Here: {chords_here[0].chord_name()}")
-            for i, line in enumerate(lines):
-                surf = font.render(line, True, (200, 200, 200))
-                self.screen.blit(surf, (8, 8 + i * 22))
-            pygame.display.flip()
-
-        self.stop_all()
+        # Cleanup after mainloop exits
+        self._recorder.stop_all()
         self._menu.destroy()
-        self.midi_stop_event.set()
-        if self.midi_input:
-            try:
-                self.midi_input.close()
-            except Exception:
-                pass
-        pygame.quit()
+        self._midi.close()
+
+    def _get_hwnd(self) -> int:
+        """Return the Win32 HWND of the tkinter root window, or 0."""
+        if sys.platform != 'win32' or self.root is None:
+            return 0
+        import ctypes
+        child = self.root.winfo_id()
+        parent = ctypes.windll.user32.GetParent(child)
+        return parent if parent else child
+
+    def _on_quit(self) -> None:
+        if self.root is not None:
+            self.root.quit()
+
+    # ------------------------------------------------------------------
+    # Keyboard event handlers
+    # ------------------------------------------------------------------
+
+    def _on_keydown(self, event: tk.Event) -> None:
+        ctrl = bool(event.state & 0x4)
+        key = event.keysym.lower()
+
+        # Quit
+        if ctrl and key == 'q':
+            self._on_quit()
+
+        # Escape – stop
+        elif key == 'escape':
+            self._recorder.stop_all()
+            self.speak("Stopped")
+
+        # R – record
+        elif key == 'r' and not ctrl:
+            if self._recorder.state == AppState.IDLE:
+                self._recorder.start_recording(self.progression, self.cursor)
+            else:
+                self.speak("Already active")
+
+        # Space – play / stop
+        elif key == 'space':
+            if ctrl:
+                if self._recorder.state == AppState.PLAYING:
+                    self._recorder.stop_all()
+                    time.sleep(0.05)
+                    if self._recorder.playback_stopped_at:
+                        self.cursor = self._recorder.playback_stopped_at
+                        self._announce_position()
+            else:
+                if self._recorder.state == AppState.IDLE:
+                    self._recorder.start_playback(self.progression, self.cursor)
+                elif self._recorder.state == AppState.PLAYING:
+                    self._recorder.stop_all()
+
+        # Navigation
+        elif key == 'left' and not self.s_held:
+            if self._recorder.state == AppState.IDLE:
+                self.navigate('left', by_measure=ctrl)
+        elif key == 'right' and not self.s_held:
+            if self._recorder.state == AppState.IDLE:
+                self.navigate('right', by_measure=ctrl)
+        elif key == 'home' and ctrl:
+            if self._recorder.state == AppState.IDLE:
+                self.navigate_home()
+        elif key == 'end' and ctrl:
+            if self._recorder.state == AppState.IDLE:
+                self.navigate_end()
+
+        # Ctrl+S – save
+        elif ctrl and key == 's':
+            self.save_json()
+
+        # Ctrl+E – export
+        elif ctrl and key == 'e':
+            self.export_ireal()
+
+        # Ctrl+L – speak recent log entries
+        elif ctrl and key == 'l':
+            self._speak_recent_log()
+
+        # Delete/Backspace
+        elif key in ('delete', 'backspace'):
+            if self._recorder.state == AppState.IDLE:
+                self.delete_at_cursor()
+
+        # S key held for section marks
+        elif key == 's' and not ctrl:
+            self.s_held = True
+
+        # / held for slash chords
+        elif key == 'slash':
+            self.slash_held = True
+
+        # P – verbose position (section, ending, chord, bar, beat)
+        elif key == 'p' and not ctrl and not self.s_held:
+            self._announce_position_verbose()
+
+        # V key – volta (only when not using S modifier)
+        elif key == 'v' and not ctrl and not self.s_held:
+            self.add_volta()
+
+        # Letter keys A-Z
+        elif len(key) == 1 and key.isalpha():
+            if self.s_held:
+                self.add_section_mark(key)
+                self.s_held = False
+            elif self.slash_held:
+                self.add_bass_note(key)
+                self.slash_held = False
+
+    def _on_keyup(self, event: tk.Event) -> None:
+        key = event.keysym.lower()
+        if key == 's':
+            self.s_held = False
+        elif key == 'slash':
+            self.slash_held = False
+
+    # ------------------------------------------------------------------
+    # Periodic tkinter callbacks
+    # ------------------------------------------------------------------
+
+    def _schedule_display_update(self) -> None:
+        if self.root is None:
+            return
+        lines = [
+            f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
+            f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self._recorder.state}",
+            f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
+            "",
+            _log_ring[-1] if _log_ring else "",
+        ]
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        if chords_here:
+            lines[3] = f"Here: {chords_here[0].chord_name()}"
+        for lbl, text in zip(self._status_labels, lines):
+            lbl.config(text=text)
+        self.root.after(50, self._schedule_display_update)
+
+    def _schedule_menu_poll(self) -> None:
+        if self.root is None:
+            return
+        for _ in range(16):
+            cmd = self._menu.poll()
+            if cmd is None:
+                break
+            self._handle_menu_command(cmd)
+        self.root.after(16, self._schedule_menu_poll)
 
 
 if __name__ == '__main__':
     app = App()
     app.run()
+
