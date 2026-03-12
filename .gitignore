@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local Telegram message history (runtime data, not source)
+history/

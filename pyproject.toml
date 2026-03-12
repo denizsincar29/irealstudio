@@ -12,5 +12,6 @@ dependencies = [
     "pyrealpro>=0.2.0",
     "python-rtmidi>=1.5.8",
     "sounddevice>=0.5.5",
+    "requests>=2.32.0",
     "wxpython>=4.2.0",
 ]
