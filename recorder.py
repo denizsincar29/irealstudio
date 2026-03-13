@@ -1,5 +1,6 @@
 """Metronome, recording, and playback logic."""
 
+import logging
 import time
 import threading
 from typing import Callable
@@ -8,6 +9,8 @@ import numpy as np
 
 from chords import ChordProgression, Position
 from sound import play_sound
+
+_logger = logging.getLogger('irealstudio')
 
 
 class AppState:
@@ -76,23 +79,54 @@ class Recorder:
         beat_names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
         interval = 60.0 / self.recording_bpm
 
-        for _ in range(2):  # 2-measure pre-count
-            for b in range(beats):
-                if self._metronome_stop.is_set():
-                    self.state = AppState.IDLE
-                    return
-                # Play the click first so the sound lands precisely on the beat;
-                # speech follows asynchronously and is heard just after the click.
-                play_sound(self._tick if b == 0 else self._tock)
-                self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
-                time.sleep(interval)
+        # Use time.monotonic() throughout so beat scheduling is immune to
+        # wall-clock adjustments (NTP, manual time changes, etc.).
+        t0 = time.monotonic()
+        total_precount_beats = 2 * beats
+
+        # While loop (instead of for) so we can skip missed beats when the
+        # system falls behind by more than one interval.
+        i = 0
+        while i < total_precount_beats:
+            if self._metronome_stop.is_set():
+                self.state = AppState.IDLE
+                return
+            b = i % beats
+            # Play the click first so the sound lands precisely on the beat;
+            # speech follows asynchronously and is heard just after the click.
+            play_sound(self._tick if b == 0 else self._tock)
+            self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
+            # Sleep until the absolute time of the next beat.
+            next_beat_time = t0 + (i + 1) * interval
+            sleep_time = next_beat_time - time.monotonic()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+                i += 1
+            elif sleep_time > -interval:
+                # Slightly behind (within one interval); proceed normally.
+                if sleep_time < -0.01:
+                    _logger.debug(
+                        "Pre-count beat %d ran %.1f ms over budget", i, -sleep_time * 1000
+                    )
+                i += 1
+            else:
+                # More than one beat behind; skip missed beats to avoid
+                # rapid-fire catch-up clicks.
+                missed = int(-sleep_time / interval)
+                _logger.debug(
+                    "Pre-count: skipping %d beat(s) due to %.1f ms lag",
+                    missed, -sleep_time * 1000,
+                )
+                i += missed + 1
 
         if self._metronome_stop.is_set():
             self.state = AppState.IDLE
             return
 
+        # Recording begins exactly on the beat that follows the last pre-count
+        # beat, continuing the same absolute timeline.
+        self.recording_start_time = t0 + total_precount_beats * interval
         self.state = AppState.RECORDING
-        self.recording_start_time = time.time()
         self._speak("Recording")
 
         # Position-tracking metronome: announces hidden ranges and ending 2.
@@ -126,7 +160,27 @@ class Recorder:
                 play_sound(self._tock)
 
             beat_count += 1
-            time.sleep(interval)
+            # Use absolute timing so the recording metronome stays locked to
+            # the same grid established by the pre-count.
+            next_beat_time = self.recording_start_time + beat_count * interval
+            sleep_time = next_beat_time - time.monotonic()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            elif sleep_time > -interval:
+                # Slightly behind; proceed without sleeping.
+                if sleep_time < -0.01:
+                    _logger.debug(
+                        "Recording beat %d ran %.1f ms over budget", beat_count, -sleep_time * 1000
+                    )
+            else:
+                # More than one beat behind; skip missed beats to avoid
+                # rapid-fire catch-up clicks.
+                missed = int(-sleep_time / interval)
+                _logger.debug(
+                    "Recording metronome: skipping %d beat(s) due to %.1f ms lag",
+                    missed, -sleep_time * 1000,
+                )
+                beat_count += missed
 
         self.state = AppState.IDLE
 

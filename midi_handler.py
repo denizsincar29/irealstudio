@@ -13,6 +13,11 @@ except ImportError:
 
 _logger = logging.getLogger('irealstudio')
 
+# Time window (seconds) to collect note-on events into a single chord.
+# Notes pressed within this window of the first note-on are grouped together,
+# so rolled/staccato chords are detected correctly on the last note-off.
+CHORD_WINDOW = 0.1
+
 
 class MidiHandler:
     """Manages a MIDI input port and detects chord note events."""
@@ -30,8 +35,9 @@ class MidiHandler:
             Callable used to announce messages to the user.
         on_chord_released:
             Called with ``(notes, first_note_time)`` when all held keys are
-            released.  ``notes`` is a list of MIDI note numbers; ``first_note_time``
-            is the ``time.time()`` value of the first key press in the chord.
+            released.  ``notes`` is a sorted list of MIDI note numbers;
+            ``first_note_time`` is the ``time.monotonic()`` value of the first
+            key press in the chord.
         is_recording:
             Returns True when the app is in the RECORDING state so that the
             handler only commits chords during active recording.
@@ -46,7 +52,9 @@ class MidiHandler:
 
         self._held_notes: dict[int, float] = {}
         self._chord_first_note_time: float = 0.0
-        self._chord_notes: list[int] = []
+        self._chord_notes: set[int] = set()
+        self._last_note_on_time: float = 0.0
+        self._chord_pending: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,6 +135,20 @@ class MidiHandler:
             except Exception as e:
                 _logger.error("MIDI read error: %s", e)
                 break
+            # Trigger a pending chord once the chord window has elapsed,
+            # all keys have been released, and recording is still active.
+            if (
+                self._chord_pending
+                and self._chord_notes
+                and not self._held_notes
+                and self._is_recording()
+            ):
+                if time.monotonic() - self._last_note_on_time >= CHORD_WINDOW:
+                    notes = sorted(self._chord_notes)
+                    first_time = self._chord_first_note_time
+                    self._chord_notes = set()
+                    self._chord_pending = False
+                    self._on_chord_released(notes, first_time)
             time.sleep(0.005)
         _logger.debug("MIDI reader thread stopped")
 
@@ -139,15 +161,17 @@ class MidiHandler:
         )
 
         if note_on:
-            if not self._held_notes:
-                self._chord_first_note_time = time.time()
-            self._held_notes[msg.note] = time.time()
-            if msg.note not in self._chord_notes:
-                self._chord_notes.append(msg.note)
+            now = time.monotonic()
+            if not self._chord_notes:
+                self._chord_first_note_time = now
+            self._chord_notes.add(msg.note)
+            self._held_notes[msg.note] = now
+            self._last_note_on_time = now
+            # A new note extends the current chord; cancel any pending trigger.
+            self._chord_pending = False
         elif note_off:
             self._held_notes.pop(msg.note, None)
             if not self._held_notes and self._chord_notes:
-                notes = list(self._chord_notes)
-                first_time = self._chord_first_note_time
-                self._chord_notes = []
-                self._on_chord_released(notes, first_time)
+                # Don't trigger immediately — wait for the chord window to
+                # expire in _loop so that rolled notes are grouped together.
+                self._chord_pending = True
