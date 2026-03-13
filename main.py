@@ -357,7 +357,7 @@ class App:
                         if not self.progression.is_in_hidden_range(new_m):
                             break
                         new_m = self.progression.navigate_right_from_measure(new_m)
-                    search = Position(new_m - 1, ts.numerator, ts)
+                    search = Position(max(new_m - 1, 1), ts.numerator, ts)
                     visible = self.progression.find_next_chord_to_right(search)
                     self.cursor = visible.position if visible else Position(new_m, 1, ts)
                 # else: no chord to the right — stay put
