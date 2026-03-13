@@ -35,8 +35,9 @@ class MidiHandler:
             Callable used to announce messages to the user.
         on_chord_released:
             Called with ``(notes, first_note_time)`` when all held keys are
-            released.  ``notes`` is a list of MIDI note numbers; ``first_note_time``
-            is the ``time.time()`` value of the first key press in the chord.
+            released.  ``notes`` is a sorted list of MIDI note numbers;
+            ``first_note_time`` is the ``time.monotonic()`` value of the first
+            key press in the chord.
         is_recording:
             Returns True when the app is in the RECORDING state so that the
             handler only commits chords during active recording.
@@ -134,11 +135,16 @@ class MidiHandler:
             except Exception as e:
                 _logger.error("MIDI read error: %s", e)
                 break
-            # Trigger a pending chord once the chord window has elapsed and
-            # all keys have been released.
-            if self._chord_pending and self._chord_notes and not self._held_notes:
-                if time.time() - self._last_note_on_time >= CHORD_WINDOW:
-                    notes = list(self._chord_notes)
+            # Trigger a pending chord once the chord window has elapsed,
+            # all keys have been released, and recording is still active.
+            if (
+                self._chord_pending
+                and self._chord_notes
+                and not self._held_notes
+                and self._is_recording()
+            ):
+                if time.monotonic() - self._last_note_on_time >= CHORD_WINDOW:
+                    notes = sorted(self._chord_notes)
                     first_time = self._chord_first_note_time
                     self._chord_notes = set()
                     self._chord_pending = False
@@ -155,7 +161,7 @@ class MidiHandler:
         )
 
         if note_on:
-            now = time.time()
+            now = time.monotonic()
             if not self._chord_notes:
                 self._chord_first_note_time = now
             self._chord_notes.add(msg.note)
