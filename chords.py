@@ -5,15 +5,274 @@ chords.py - Data model for chord progressions, including:
 - Volta/ending brackets for repeats
 - JSON serialization
 - iReal Pro export
+- Own chord recognition system (no pychord dependency)
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from functools import total_ordering
-from pychord import Chord, find_chords_from_notes
 
 NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
+# ---------------------------------------------------------------------------
+# Chord recognition system
+# ---------------------------------------------------------------------------
+
+# Semitones from root for each simple (major-scale) degree
+_DEGREE_TO_ST: dict[int, int] = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11}
+
+
+def _identify_chord_name(notes: list[str]) -> str | None:
+    """
+    Identify a chord name from pitch-class note names (root = first note).
+
+    Algorithm (see task.md):
+    1. Root is the lowest (first) note.
+    2. Calculate semitone intervals from root (mod 12).
+    3. Apply validation rules to disambiguate enharmonic spellings.
+    4. Return the chord name string.
+    """
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    clean: list[str] = []
+    for n in notes:
+        if n in NOTE_NAMES and n not in seen:
+            seen.add(n)
+            clean.append(n)
+    if not clean:
+        return None
+
+    root = clean[0]
+    root_idx = NOTE_NAMES.index(root)
+
+    # Semitone interval set (mod 12, excluding 0 = root)
+    ivals: set[int] = set()
+    for n in clean[1:]:
+        st = (NOTE_NAMES.index(n) - root_idx) % 12
+        if st != 0:
+            ivals.add(st)
+
+    # Raw interval flags
+    has_min3    = 3  in ivals   # semitone 3: minor 3rd or #9
+    has_maj3    = 4  in ivals   # semitone 4: major 3rd
+    has_4th     = 5  in ivals   # semitone 5: perfect 4th (sus4)
+    has_tritone = 6  in ivals   # semitone 6: tritone (b5 or #11)
+    has_5th     = 7  in ivals   # semitone 7: perfect 5th
+    has_aug5    = 8  in ivals   # semitone 8: augmented 5th
+    has_6th     = 9  in ivals   # semitone 9: major 6th / dim7
+    has_b7      = 10 in ivals   # semitone 10: dominant/minor 7th
+    has_maj7    = 11 in ivals   # semitone 11: major 7th
+    has_b9      = 1  in ivals   # semitone 1: b9
+    has_nat9    = 2  in ivals   # semitone 2: natural 9
+
+    # --- Validation rule 1 ---
+    # If both b3 (3 st) and maj3 (4 st) present → the 3-st interval is #9
+    sharp9 = has_min3 and has_maj3
+    min3   = has_min3 and not has_maj3   # genuine minor third
+
+    # --- Validation rule 2 ---
+    # If (maj7 or perfect 5th) present along with tritone → tritone is #11
+    sharp11 = has_tritone and (has_maj7 or has_5th)
+    flat5   = has_tritone and not sharp11
+
+    # --- Validation rule 3 ---
+    # If perfect 4th is present, chord is sus4 (no thirds in sus4)
+    sus4 = has_4th
+
+    # ================================================================
+    # Chord-type identification
+    # ================================================================
+
+    def exts_str(parts: list[str]) -> str:
+        return f"({''.join(parts)})" if parts else ''
+
+    if sus4:
+        if has_b7:
+            base = root + '7sus4'
+        elif has_maj7:
+            base = root + 'maj7sus4'
+        else:
+            base = root + 'sus4'
+        exts: list[str] = []
+        if has_b9:
+            exts.append('b9')
+        if has_6th:
+            exts.append('13')
+        return base + exts_str(exts)
+
+    if min3 and flat5:
+        # Diminished family
+        if has_b7:
+            # Half-diminished (m7b5)
+            base = root + 'm7b5'
+            exts = []
+            if has_b9:
+                exts.append('b9')
+            elif has_nat9:
+                exts.append('9')
+            return base + exts_str(exts)
+        if has_6th:
+            # Diminished seventh (bb7 = 9 semitones = major 6th)
+            return root + 'dim7'
+        return root + 'dim'
+
+    if min3:
+        # Minor family
+        if has_maj7:
+            base = root + 'mM7'
+        elif has_b7:
+            base = root + 'm7'
+        elif has_aug5:
+            return root + 'm#5'
+        else:
+            base = root + 'm'
+        exts = []
+        if has_nat9:
+            exts.append('9')
+        if sharp11:
+            exts.append('#11')
+        if has_6th:
+            exts.append('13')
+        return base + exts_str(exts)
+
+    if has_maj3 and has_aug5 and not has_5th:
+        # Augmented family
+        if has_b7:
+            return root + 'aug7'
+        if has_maj7:
+            return root + 'augM7'
+        return root + 'aug'
+
+    if has_maj3:
+        # Major family
+        if has_b7:
+            base = root + '7'
+            exts = []
+            if has_b9:
+                exts.append('b9')
+            elif sharp9:
+                exts.append('#9')
+            elif has_nat9:
+                exts.append('9')
+            if sharp11:
+                exts.append('#11')
+            if has_6th:
+                exts.append('13')
+            return base + exts_str(exts)
+        if has_maj7:
+            base = root + 'maj7'
+            exts = []
+            if has_nat9:
+                exts.append('9')
+            if sharp11:
+                exts.append('#11')
+            if has_6th:
+                exts.append('13')
+            return base + exts_str(exts)
+        # Major triad with optional added tones
+        if has_nat9 and has_6th:
+            return root + '6/9'
+        if has_6th:
+            return root + '6'
+        if has_nat9:
+            return root + 'add9'
+        return root
+
+    # No recognizable third — return root (power chord / single note)
+    return root
+
+
+class Chord:
+    """
+    A chord with a name and optionally its constituent notes.
+
+    The chord name is the canonical string representation (e.g. 'Cmaj7', 'Am7').
+    When constructed from MIDI notes, the notes are stored and enable
+    has_degree() / get_degree() queries.
+    """
+
+    def __init__(self, name: str, notes: list[str] | None = None) -> None:
+        """
+        Parameters
+        ----------
+        name  : Chord name string, e.g. 'Cmaj7', 'Am7', 'G7'.
+        notes : Optional pitch-class note names ordered lowest to highest.
+                Enables has_degree() / get_degree() when provided.
+        """
+        self._name = name
+        self._notes: list[str] = list(notes) if notes else []
+        if self._notes and self._notes[0] in NOTE_NAMES:
+            self._root_pc: int = NOTE_NAMES.index(self._notes[0])
+            self._ivals: frozenset[int] = frozenset(
+                (NOTE_NAMES.index(n) - self._root_pc) % 12
+                for n in self._notes
+                if n in NOTE_NAMES
+            )
+        else:
+            self._root_pc = -1
+            self._ivals = frozenset()
+
+    # ------------------------------------------------------------------
+
+    def __str__(self) -> str:
+        return self._name
+
+    def __repr__(self) -> str:
+        return f"Chord({self._name!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Chord):
+            return self._name == other._name
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._name)
+
+    # ------------------------------------------------------------------
+    # Degree helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _norm_degree(degree: int) -> int:
+        """Fold extended octave degrees to simple ones (9→2, 11→4, 13→6)."""
+        return degree - 7 if degree >= 8 else degree
+
+    def has_degree(self, degree: int) -> bool:
+        """Return True if the chord contains a note at *degree* (1-based)."""
+        if not self._ivals:
+            return False
+        st = _DEGREE_TO_ST.get(self._norm_degree(degree))
+        return st is not None and st in self._ivals
+
+    def get_degree(self, degree: int) -> str | None:
+        """Return the note name for *degree*, or None if absent."""
+        if self._root_pc < 0:
+            return None
+        st = _DEGREE_TO_ST.get(self._norm_degree(degree))
+        if st is None:
+            return None
+        for note in self._notes:
+            if note in NOTE_NAMES and (NOTE_NAMES.index(note) - self._root_pc) % 12 == st:
+                return note
+        return None
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_notes(cls, notes: list[str]) -> Chord | None:
+        """Identify a chord from pitch-class note names (root = first/lowest)."""
+        name = _identify_chord_name(notes)
+        return cls(name, notes) if name else None
+
+
+def find_chords_from_notes(notes: list[str]) -> list[Chord]:
+    """Return the best-matching chord for the given note names (at most one)."""
+    chord = Chord.from_notes(notes)
+    return [chord] if chord else []
+
 
 # iReal Pro rehearsal marks supported by the app (S key + letter)
 SECTION_KEYS = {

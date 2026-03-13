@@ -364,8 +364,7 @@ class TestNoteDeduplication(unittest.TestCase):
 
     def test_chord_found_after_dedup(self):
         """find_chords_from_notes must succeed for C/E/G/C5 after deduplication."""
-        from chords import NOTE_NAMES
-        from pychord import find_chords_from_notes
+        from chords import NOTE_NAMES, find_chords_from_notes
         notes = [60, 64, 67, 72]  # C4, E4, G4, C5
         deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
         chords = find_chords_from_notes(deduped)
