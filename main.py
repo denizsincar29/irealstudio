@@ -50,7 +50,8 @@ import wx
 from pathlib import Path
 
 from accessible_output3.outputs.auto import Auto
-from pychord import find_chords_from_notes
+from pychord import Chord as PyChord, find_chords_from_notes
+from pychord.quality import QualityManager
 
 from chords import (
     ChordProgression, TimeSignature, Position,
@@ -60,6 +61,19 @@ from sound import make_beep
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
+
+# ---------------------------------------------------------------------------
+# Extend pychord's QualityManager with 7th-chord variants that omit the 5th.
+# A common piano/keyboard voicing drops the 5th (e.g. C–E–Bb for C7).
+# These qualities use a "(no5)" suffix so they don't collide with the full
+# voicings; _on_chord_released strips the suffix when naming the recorded chord.
+# ---------------------------------------------------------------------------
+_qm = QualityManager()
+_qm.set_quality("7(no5)",    (0, 4, 10))   # dominant 7 without 5th:    1 3 b7
+_qm.set_quality("M7(no5)",   (0, 4, 11))   # major 7 without 5th:       1 3 7
+_qm.set_quality("m7(no5)",   (0, 3, 10))   # minor 7 without 5th:       1 b3 b7
+_qm.set_quality("mM7(no5)",  (0, 3, 11))   # minor-major 7 without 5th: 1 b3 7
+del _qm
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -242,6 +256,18 @@ class App:
         if not chords:
             return
         chord = chords[0]
+
+        # If a no5 variant was detected, promote it to the standard 7th-chord
+        # name (e.g. "C7(no5)" → "C7") so that the recorded chord name is
+        # canonical and compatible with iReal Pro export.
+        NO5_SUFFIX = "(no5)"
+        chord_str = str(chord)
+        if chord_str.endswith(NO5_SUFFIX):
+            chord_str = chord_str[: -len(NO5_SUFFIX)]
+            try:
+                chord = PyChord(chord_str)
+            except Exception:
+                pass  # keep original if parsing fails
 
         elapsed = max(0.0, first_note_time - self._recorder.recording_start_time)
         bps = self._recorder.recording_bpm / 60.0
