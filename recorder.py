@@ -32,6 +32,7 @@ class Recorder:
 
         self.state: str = AppState.IDLE
         self.recording_start_time: float = 0.0
+        self.recording_bpm: int = 120
 
         self._metronome_stop = threading.Event()
         self._metronome_thread: threading.Thread | None = None
@@ -44,9 +45,21 @@ class Recorder:
     # Recording
     # ------------------------------------------------------------------
 
-    def start_recording(self, progression: ChordProgression, cursor: Position) -> None:
-        """Start a 2-measure pre-count then switch to RECORDING state."""
+    def start_recording(
+        self,
+        progression: ChordProgression,
+        cursor: Position,
+        recording_bpm: int | None = None,
+    ) -> None:
+        """Start a 2-measure pre-count then switch to RECORDING state.
+
+        *recording_bpm* sets the metronome tempo used during recording.
+        When ``None`` the progression's own BPM is used.  Passing a lower
+        value lets the user record at a comfortable speed and then play back
+        at the song's actual BPM.
+        """
         self.stop_all()
+        self.recording_bpm = recording_bpm if recording_bpm is not None else progression.bpm
         self.state = AppState.PRE_COUNT
         self._metronome_stop.clear()
         self._metronome_thread = threading.Thread(
@@ -61,15 +74,17 @@ class Recorder:
     ) -> None:
         beats = progression.time_signature.numerator
         beat_names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
-        interval = 60.0 / progression.bpm
+        interval = 60.0 / self.recording_bpm
 
         for _ in range(2):  # 2-measure pre-count
             for b in range(beats):
                 if self._metronome_stop.is_set():
                     self.state = AppState.IDLE
                     return
-                self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
+                # Play the click first so the sound lands precisely on the beat;
+                # speech follows asynchronously and is heard just after the click.
                 play_sound(self._tick if b == 0 else self._tock)
+                self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
                 time.sleep(interval)
 
         if self._metronome_stop.is_set():

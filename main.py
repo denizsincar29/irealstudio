@@ -7,6 +7,8 @@ Keyboard shortcuts:
   Ctrl+Space    - Stop playback, navigate to stopped position
   Left          - Move cursor left (to previous chord)
   Right         - Move cursor right (to next chord)
+  Alt+Left      - Move cursor left one beat
+  Alt+Right     - Move cursor right one beat
   Ctrl+Left     - Move cursor left one measure
   Ctrl+Right    - Move cursor right one measure
   Ctrl+Home     - Go to beginning of progression
@@ -16,7 +18,8 @@ Keyboard shortcuts:
   V             - Add volta/ending mark at current measure
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
   Delete/Backspace - Delete chord at current position
-  Ctrl+S        - Save progression to JSON
+  Ctrl+O        - Open progression file (.ips or .json)
+  Ctrl+S        - Save progression (to current file, or prompts if new)
   Ctrl+E        - Export to iReal Pro format (HTML file)
   Ctrl+L        - Speak last 5 log entries (MIDI errors, etc.)
   Escape        - Stop recording/playback
@@ -24,10 +27,18 @@ Keyboard shortcuts:
 
 All events are written to irealstudio.log in the working directory.
 
+File formats:
+  .ips  - IReal Studio format (default); same JSON content as .json
+  .json - Legacy JSON format, still supported for reading and writing
+
+On Windows the program can be registered as the default handler for .ips files
+via "Open with" so that double-clicking a .ips file opens it in IReal Studio.
+
 On Windows a native menu bar is available (use Alt to activate):
-  File          - Save / Export to iReal Pro
+  File          - Open, Save, Save As, Export to iReal Pro
   MIDI Device   - Select MIDI input port, refresh device list
-  Settings      - Change BPM, Key, Style interactively
+  Settings      - Change Title, Composer, Time Signature, BPM, Recording BPM,
+                  Key, Style interactively
 """
 import os
 import sys
@@ -54,12 +65,18 @@ from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
 # ---------------------------------------------------------------------------
 _CMD_FILE_SAVE      = 1001
+_CMD_FILE_SAVE_AS   = 1003
+_CMD_FILE_OPEN      = 1004
 _CMD_FILE_EXPORT    = 1002
 _CMD_MIDI_REFRESH   = 2001
 _CMD_MIDI_NONE      = 2002   # placeholder shown when no devices are present
-_CMD_SETTINGS_BPM   = 3001
-_CMD_SETTINGS_KEY   = 3002
-_CMD_SETTINGS_STYLE = 3003
+_CMD_SETTINGS_BPM       = 3001
+_CMD_SETTINGS_KEY       = 3002
+_CMD_SETTINGS_STYLE     = 3003
+_CMD_SETTINGS_REC_BPM   = 3004
+_CMD_SETTINGS_TITLE     = 3005
+_CMD_SETTINGS_COMPOSER  = 3006
+_CMD_SETTINGS_TIME_SIG  = 3007
 _MIDI_DEVICE_BASE   = 2100   # IDs 2100..2199 → MIDI device indices 0..99
 
 # ---------------------------------------------------------------------------
@@ -100,7 +117,7 @@ DEFAULT_TITLE = "My Progression"
 DEFAULT_KEY = "C"
 DEFAULT_STYLE = "Medium Swing"
 DEFAULT_TIME_SIG = TimeSignature(4, 4)
-SAVE_FILE = "progression.json"
+SAVE_FILE = "progression.ips"
 
 # ---------------------------------------------------------------------------
 # wxPython key-code → symbolic-name map (used by both keydown and keyup)
@@ -139,11 +156,14 @@ class App:
         self.s_held = False
         self.slash_held = False
 
+        # Recording BPM (may differ from song BPM so user can record at a slower pace)
+        self.recording_bpm: int = DEFAULT_BPM
+
         # Recorder owns metronome/recording/playback state
         self._recorder = Recorder(
             speak=self.speak,
-            tick_sound=make_beep(1200, 30),   # high downbeat click
-            tock_sound=make_beep(800, 25),    # lower upbeat click
+            tick_sound=make_beep(1200, 10),   # short high downbeat click
+            tock_sound=make_beep(800,   8),   # short lower upbeat click
         )
 
         # MIDI handler owns port management and chord detection
@@ -158,17 +178,52 @@ class App:
         self._frame: wx.Frame | None = None
         self._status_labels: list[wx.StaticText] = []
         self._midi_menu: wx.Menu | None = None
-        self._bpm_item:   wx.MenuItem | None = None
-        self._key_item:   wx.MenuItem | None = None
-        self._style_item: wx.MenuItem | None = None
+        self._bpm_item:          wx.MenuItem | None = None
+        self._rec_bpm_item:      wx.MenuItem | None = None
+        self._key_item:          wx.MenuItem | None = None
+        self._style_item:        wx.MenuItem | None = None
+        self._title_item:        wx.MenuItem | None = None
+        self._composer_item:     wx.MenuItem | None = None
+        self._time_sig_item:     wx.MenuItem | None = None
 
+        # Current open file path (None = unsaved / new project)
+        self._current_file: Path | None = None
+
+        # Load a file passed on the command line (e.g. via Windows "Open with")
+        if len(sys.argv) > 1:
+            cli_path = Path(sys.argv[1])
+            if cli_path.exists():
+                try:
+                    with open(cli_path, encoding='utf-8') as f:
+                        self.progression = ChordProgression.from_json(f.read())
+                    self._current_file = cli_path
+                    self._is_new_project = False
+                    self.speak(f"Loaded {self.progression.title}")
+                except Exception as e:
+                    self._is_new_project = True
+                    self.speak(f"Could not load {cli_path.name}: {e}")
+            else:
+                self._is_new_project = True
         # Load saved progression if it exists; otherwise flag for new-project dialog
-        if Path(SAVE_FILE).exists():
+        # Try .ips first, then fall back to legacy .json
+        elif Path(SAVE_FILE).exists():
             try:
-                with open(SAVE_FILE) as f:
+                with open(SAVE_FILE, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
+                self._current_file = Path(SAVE_FILE)
                 self._is_new_project = False
                 self.speak(f"Loaded {self.progression.title}")
+            except Exception as e:
+                self._is_new_project = True
+                self.speak(f"Could not load: {e}")
+        elif Path("progression.json").exists():
+            # Backward-compatibility: migrate from legacy JSON file
+            try:
+                with open("progression.json", encoding='utf-8') as f:
+                    self.progression = ChordProgression.from_json(f.read())
+                self._current_file = None  # will prompt Save As on next Ctrl+S
+                self._is_new_project = False
+                self.speak(f"Loaded {self.progression.title} (legacy JSON)")
             except Exception as e:
                 self._is_new_project = True
                 self.speak(f"Could not load: {e}")
@@ -181,14 +236,15 @@ class App:
 
     def _on_chord_released(self, notes: list[int], first_note_time: float) -> None:
         """Commit a detected chord to the progression during recording."""
-        note_names = [NOTE_NAMES[n % 12] for n in notes]
+        # Deduplicate pitch classes (same note in different octaves confuses detector)
+        note_names = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
         chords = find_chords_from_notes(note_names)
         if not chords:
             return
         chord = chords[0]
 
         elapsed = max(0.0, first_note_time - self._recorder.recording_start_time)
-        bps = self.progression.bpm / 60.0
+        bps = self._recorder.recording_bpm / 60.0
         beats_per_measure = self.progression.time_signature.numerator
         total_beat_0 = max(0, round(elapsed * bps))
         total_beat_0 += self.cursor.beat_from_start - 1
@@ -249,9 +305,21 @@ class App:
 
     def _update_settings_labels(self) -> None:
         """Update the Settings menu items to display current values."""
+        if self._title_item:
+            self._title_item.SetItemLabel(
+                f"&Title: {self.progression.title}...")
+        if self._composer_item:
+            self._composer_item.SetItemLabel(
+                f"C&omposer: {self.progression.composer}...")
+        if self._time_sig_item:
+            self._time_sig_item.SetItemLabel(
+                f"T&ime Signature: {self.progression.time_signature}...")
         if self._bpm_item:
             self._bpm_item.SetItemLabel(
                 f"&BPM: {self.progression.bpm}...")
+        if self._rec_bpm_item:
+            self._rec_bpm_item.SetItemLabel(
+                f"&Recording BPM: {self.recording_bpm}...")
         if self._key_item:
             self._key_item.SetItemLabel(
                 f"&Key: {self.progression.key}...")
@@ -263,7 +331,7 @@ class App:
     # Navigation
     # ------------------------------------------------------------------
 
-    def navigate(self, direction: str, by_measure: bool = False) -> None:
+    def navigate(self, direction: str, by_measure: bool = False, by_beat: bool = False) -> None:
         ts = self.progression.time_signature
         if by_measure:
             if direction == 'right':
@@ -271,39 +339,43 @@ class App:
             else:
                 new_m = self.progression.navigate_left_from_measure(self.cursor.measure)
             self.cursor = Position(new_m, 1, ts)
+        elif by_beat:
+            if direction == 'right':
+                self.cursor = self.cursor + 1
+            else:
+                self.cursor = self.cursor - 1
         else:
+            # Chord navigation: jump to nearest visible chord, skipping hidden ranges.
             if direction == 'right':
                 nxt = self.progression.find_next_chord_to_right(self.cursor)
                 if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
                     self.cursor = nxt.position
-                else:
-                    new_pos = self.cursor + 1
-                    max_iter = 1000
-                    while max_iter > 0 and self.progression.is_in_hidden_range(new_pos.measure):
-                        new_m = self.progression.navigate_right_from_measure(new_pos.measure - 1)
-                        if new_m <= new_pos.measure:
+                elif nxt:
+                    # Next chord is in a hidden range; skip past it and find first visible chord.
+                    new_m = nxt.position.measure
+                    for _ in range(1000):
+                        if not self.progression.is_in_hidden_range(new_m):
                             break
-                        new_pos = Position(new_m, 1, ts)
-                        max_iter -= 1
-                    self.cursor = new_pos
+                        new_m = self.progression.navigate_right_from_measure(new_m)
+                    search = Position(max(new_m - 1, 1), ts.numerator, ts)
+                    visible = self.progression.find_next_chord_to_right(search)
+                    self.cursor = visible.position if visible else Position(new_m, 1, ts)
+                # else: no chord to the right — stay put
             else:
                 prv = self.progression.find_last_chord_to_left(self.cursor)
                 if prv and not self.progression.is_in_hidden_range(prv.position.measure):
                     self.cursor = prv.position
-                else:
-                    new_pos = self.cursor - 1
-                    max_iter = 1000
-                    while (
-                        new_pos.measure > 1
-                        and max_iter > 0
-                        and self.progression.is_in_hidden_range(new_pos.measure)
-                    ):
-                        new_m = self.progression.navigate_left_from_measure(new_pos.measure + 1)
-                        if new_m >= new_pos.measure:
+                elif prv:
+                    # Previous chord is in a hidden range; skip back past it and find last visible chord.
+                    new_m = prv.position.measure
+                    for _ in range(1000):
+                        if not self.progression.is_in_hidden_range(new_m):
                             break
-                        new_pos = Position(new_m, 1, ts)
-                        max_iter -= 1
-                    self.cursor = new_pos
+                        new_m = self.progression.navigate_left_from_measure(new_m)
+                    search = Position(new_m + 1, 1, ts)
+                    visible = self.progression.find_last_chord_to_left(search)
+                    self.cursor = visible.position if visible else Position(new_m, 1, ts)
+                # else: no chord to the left — stay put
         self._announce_position()
 
     def navigate_home(self) -> None:
@@ -390,13 +462,89 @@ class App:
     # Save / Export
     # ------------------------------------------------------------------
 
+    def _save_to_path(self, path: Path) -> None:
+        """Write the progression as JSON/IPS to *path* and update _current_file."""
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(self.progression.to_json())
+        self._current_file = path
+
+    def save(self) -> None:
+        """Save to the current file; prompt for a path if none is set yet."""
+        if self._current_file is not None:
+            try:
+                self._save_to_path(self._current_file)
+                self.speak(f"Saved to {self._current_file.name}")
+            except Exception as e:
+                self.speak(f"Save failed: {e}")
+        else:
+            self.save_as()
+
+    def save_as(self) -> None:
+        """Show a Save-As dialog; save as .ips by default, .json also accepted."""
+        if self._frame is not None:
+            default_name = (
+                self.progression.title.replace(' ', '_') + '.ips'
+            )
+            dlg = wx.FileDialog(
+                self._frame,
+                message="Save progression",
+                defaultFile=default_name,
+                wildcard=(
+                    "IReal Studio files (*.ips)|*.ips"
+                    "|JSON files (*.json)|*.json"
+                    "|All files (*.*)|*.*"
+                ),
+                style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+            )
+            if dlg.ShowModal() == wx.ID_OK:
+                path = Path(dlg.GetPath())
+                dlg.Destroy()
+                try:
+                    self._save_to_path(path)
+                    self.speak(f"Saved to {path.name}")
+                except Exception as e:
+                    self.speak(f"Save failed: {e}")
+            else:
+                dlg.Destroy()
+        else:
+            # Fallback (no GUI)
+            try:
+                self._save_to_path(Path(SAVE_FILE))
+                self.speak(f"Saved to {SAVE_FILE}")
+            except Exception as e:
+                self.speak(f"Save failed: {e}")
+
+    # Backward-compatible alias kept for the Ctrl+S menu binding
     def save_json(self) -> None:
-        try:
-            with open(SAVE_FILE, 'w') as f:
-                f.write(self.progression.to_json())
-            self.speak(f"Saved to {SAVE_FILE}")
-        except Exception as e:
-            self.speak(f"Save failed: {e}")
+        self.save()
+
+    def open_file(self) -> None:
+        """Show an Open dialog and load the selected .ips or .json file."""
+        if self._frame is None:
+            return
+        dlg = wx.FileDialog(
+            self._frame,
+            message="Open progression",
+            wildcard=(
+                "IReal Studio files (*.ips)|*.ips"
+                "|JSON files (*.json)|*.json"
+                "|All files (*.*)|*.*"
+            ),
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            path = Path(dlg.GetPath())
+            dlg.Destroy()
+            try:
+                with open(path, encoding='utf-8') as f:
+                    self.progression = ChordProgression.from_json(f.read())
+                self._current_file = path
+                self.cursor = Position(1, 1, self.progression.time_signature)
+                self.speak(f"Opened {self.progression.title}")
+            except Exception as e:
+                self.speak(f"Open failed: {e}")
+        else:
+            dlg.Destroy()
 
     def export_ireal(self) -> None:
         try:
@@ -410,7 +558,7 @@ class App:
                 + "<script>window.location.href = \"" + url + "\";</script>\n"
                 + "</body>\n</html>"
             )
-            with open(html_file, 'w') as f:
+            with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(html)
             self.speak(f"Exported to {html_file}")
             try:
@@ -470,6 +618,62 @@ class App:
             except ValueError:
                 self.speak("Invalid BPM value")
 
+    def _menu_change_recording_bpm(self) -> None:
+        val = prompt_input("Recording BPM",
+                           f"Enter recording BPM ({BPM_MIN}–{BPM_MAX})\n"
+                           "Record at a slower pace; playback uses the song BPM:",
+                           str(self.recording_bpm), parent=self._frame)
+        if val is not None:
+            try:
+                bpm = int(val)
+                if BPM_MIN <= bpm <= BPM_MAX:
+                    self.recording_bpm = bpm
+                    self._update_settings_labels()
+                    self.speak(f"Recording BPM set to {bpm}")
+                else:
+                    self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
+            except ValueError:
+                self.speak("Invalid BPM value")
+
+    def _menu_change_title(self) -> None:
+        val = prompt_input("Title", "Enter song title:",
+                           self.progression.title, parent=self._frame)
+        if val is not None:
+            self.progression.title = val.strip() or self.progression.title
+            self._update_settings_labels()
+            self.speak(f"Title set to {self.progression.title}")
+
+    def _menu_change_composer(self) -> None:
+        val = prompt_input("Composer", "Enter composer name:",
+                           self.progression.composer, parent=self._frame)
+        if val is not None:
+            self.progression.composer = val.strip() or self.progression.composer
+            self._update_settings_labels()
+            self.speak(f"Composer set to {self.progression.composer}")
+
+    def _menu_change_time_signature(self) -> None:
+        val = prompt_input("Time Signature",
+                           "Enter time signature (e.g. 4/4, 3/4, 6/8):",
+                           str(self.progression.time_signature),
+                           parent=self._frame)
+        if val is not None:
+            val = val.strip()
+            try:
+                ts = TimeSignature.from_string(val)
+                if ts.numerator < 1 or ts.denominator < 1:
+                    raise ValueError("numerator and denominator must be positive")
+                self.progression.time_signature = ts
+                # Update cursor to the same measure but clamp beat to valid range
+                self.cursor = Position(
+                    self.cursor.measure,
+                    min(self.cursor.beat, ts.numerator),
+                    ts,
+                )
+                self._update_settings_labels()
+                self.speak(f"Time signature set to {ts}")
+            except (ValueError, AttributeError):
+                self.speak(f"Invalid time signature: {val}. Use format N/D (e.g. 4/4)")
+
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
         val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
@@ -525,6 +729,7 @@ class App:
                     bpm = int(data['bpm'])
                     if BPM_MIN <= bpm <= BPM_MAX:
                         self.progression.bpm = bpm
+                        self.recording_bpm   = bpm   # default rec BPM = song BPM
                     else:
                         self.speak(
                             f"BPM {bpm} out of range ({BPM_MIN}–{BPM_MAX}); "
@@ -582,7 +787,10 @@ class App:
 
         # --- File ---
         file_menu = wx.Menu()
+        file_menu.Append(_CMD_FILE_OPEN,   "&Open...\tCtrl+O")
         file_menu.Append(_CMD_FILE_SAVE,   "&Save\tCtrl+S")
+        file_menu.Append(_CMD_FILE_SAVE_AS, "Save &As...")
+        file_menu.AppendSeparator()
         file_menu.Append(_CMD_FILE_EXPORT, "&Export to iReal Pro\tCtrl+E")
         menu_bar.Append(file_menu, "&File")
 
@@ -594,25 +802,46 @@ class App:
 
         # --- Settings ---
         settings_menu = wx.Menu()
-        self._bpm_item   = settings_menu.Append(
-            _CMD_SETTINGS_BPM,   f"&BPM: {self.progression.bpm}...")
-        self._key_item   = settings_menu.Append(
-            _CMD_SETTINGS_KEY,   f"&Key: {self.progression.key}...")
-        self._style_item = settings_menu.Append(
-            _CMD_SETTINGS_STYLE, f"&Style: {self.progression.style}...")
+        self._title_item    = settings_menu.Append(
+            _CMD_SETTINGS_TITLE,    f"&Title: {self.progression.title}...")
+        self._composer_item = settings_menu.Append(
+            _CMD_SETTINGS_COMPOSER, f"C&omposer: {self.progression.composer}...")
+        self._time_sig_item = settings_menu.Append(
+            _CMD_SETTINGS_TIME_SIG, f"T&ime Signature: {self.progression.time_signature}...")
+        settings_menu.AppendSeparator()
+        self._bpm_item      = settings_menu.Append(
+            _CMD_SETTINGS_BPM,      f"&BPM: {self.progression.bpm}...")
+        self._rec_bpm_item  = settings_menu.Append(
+            _CMD_SETTINGS_REC_BPM,  f"&Recording BPM: {self.recording_bpm}...")
+        self._key_item      = settings_menu.Append(
+            _CMD_SETTINGS_KEY,      f"&Key: {self.progression.key}...")
+        self._style_item    = settings_menu.Append(
+            _CMD_SETTINGS_STYLE,    f"&Style: {self.progression.style}...")
         menu_bar.Append(settings_menu, "&Settings")
 
         self._frame.SetMenuBar(menu_bar)
 
         # Bind fixed-ID menu events
-        self._frame.Bind(wx.EVT_MENU, lambda e: self.save_json(),
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.open_file(),
+                         id=_CMD_FILE_OPEN)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.save(),
                          id=_CMD_FILE_SAVE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.save_as(),
+                         id=_CMD_FILE_SAVE_AS)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.export_ireal(),
                          id=_CMD_FILE_EXPORT)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
                          id=_CMD_MIDI_REFRESH)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_title(),
+                         id=_CMD_SETTINGS_TITLE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_composer(),
+                         id=_CMD_SETTINGS_COMPOSER)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_time_signature(),
+                         id=_CMD_SETTINGS_TIME_SIG)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_bpm(),
                          id=_CMD_SETTINGS_BPM)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_recording_bpm(),
+                         id=_CMD_SETTINGS_REC_BPM)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_key(),
                          id=_CMD_SETTINGS_KEY)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_style(),
@@ -638,6 +867,7 @@ class App:
 
     def _on_keydown(self, event: wx.KeyEvent) -> None:
         ctrl = event.ControlDown()
+        alt  = event.AltDown()
         kc   = event.GetKeyCode()
         key  = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
 
@@ -653,7 +883,10 @@ class App:
         # R – record
         elif key == 'r' and not ctrl:
             if self._recorder.state == AppState.IDLE:
-                self._recorder.start_recording(self.progression, self.cursor)
+                self._recorder.start_recording(
+                    self.progression, self.cursor,
+                    recording_bpm=self.recording_bpm,
+                )
             else:
                 self.speak("Already active")
 
@@ -673,12 +906,13 @@ class App:
                     self._recorder.stop_all()
 
         # Navigation
+        # Left/Right: chord navigation by default; Ctrl: by measure; Alt: by beat
         elif key == 'left' and not self.s_held:
             if self._recorder.state == AppState.IDLE:
-                self.navigate('left', by_measure=ctrl)
+                self.navigate('left', by_measure=ctrl, by_beat=alt)
         elif key == 'right' and not self.s_held:
             if self._recorder.state == AppState.IDLE:
-                self.navigate('right', by_measure=ctrl)
+                self.navigate('right', by_measure=ctrl, by_beat=alt)
         elif key == 'home' and ctrl:
             if self._recorder.state == AppState.IDLE:
                 self.navigate_home()
@@ -686,9 +920,14 @@ class App:
             if self._recorder.state == AppState.IDLE:
                 self.navigate_end()
 
+        # Ctrl+O – open file
+        elif ctrl and key == 'o':
+            if self._recorder.state == AppState.IDLE:
+                self.open_file()
+
         # Ctrl+S – save
         elif ctrl and key == 's':
-            self.save_json()
+            self.save()
 
         # Ctrl+E – export
         elif ctrl and key == 'e':
@@ -746,8 +985,12 @@ class App:
     def _schedule_display_update(self) -> None:
         if self._frame is None:
             return
+        bpm_info = f"BPM: {self.progression.bpm}"
+        if self.recording_bpm != self.progression.bpm:
+            bpm_info += f"  Rec BPM: {self.recording_bpm}"
+        file_name = self._current_file.name if self._current_file else "[unsaved]"
         lines = [
-            f"Title: {self.progression.title}  Key: {self.progression.key}  BPM: {self.progression.bpm}",
+            f"Title: {self.progression.title}  Key: {self.progression.key}  {bpm_info}  [{file_name}]",
             f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self._recorder.state}",
             f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
             "",
