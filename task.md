@@ -1,7 +1,4 @@
 # bugs
-1. Left arrow goes beet by beet, IDK why, but right arrow goes straight to the next chord. Left arrow should go to the previous chord, not the previous beat. And alt+left/right must go to the beat to the left/right of the current beat, not to the previous/next chord.
-2. The speaking pre-counter is so unsynchronized with the metronome, it seams it says at the end of the beat time.
-3. When finding chords by notes while recording, remove duplicate notes for the detector to work correctly.
-4. The json that is saved must be in default *.ips (ireal pro studio) format. Make the program able to use windows's open with feature to open ips in the program, and to save in ips format by default. The program must also be able to open and save in json format for compatibility with the old version, but ips must be the default.
-5. Make metronome sounds even shorter, like clicks. Make the ability to slow down recording bpm, even when the song has a different bpm, so that the user can record at a comfortable speed and then speed it up to the song's bpm.
-6. Make me able to change every parameter, like key, title, time signature using the UI, not just by editing the json file. Make the program able to read and write all these parameters to the json/ips file.
+1. The chords pressed are not detected so accurately, only when holded. Note ons must be collected to a set and recognize on the last note off. The timestamp must be recognized as the first note on, not the last note off, to be more accurate, but chord detection must be done on the last note off, so that the user can press the chord in any order and it will be detected.
+2. The speaking pre-counter is so unsynchronized with the metronome, it seams it says at the end of the beat time, or metronome or counting is made wrong intirely.
+3. In pychord quality manager, make so 7th chords are detected without 5th. Like 1 3 7.

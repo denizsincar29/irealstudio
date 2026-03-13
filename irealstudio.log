@@ -104,3 +104,33 @@
 23:09:38 INFO  G6 bar 9 beat 3
 23:09:41 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 23:09:41 DEBUG MIDI reader thread stopped
+21:45:12 INFO  MIDI: 1 device found
+21:45:12 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 0
+21:45:12 INFO  MIDI connected: Nord Piano 6 MIDI 0
+21:46:03 INFO  IReal Studio ready. Denizian changes. Press R to record.
+21:46:10 INFO  One
+21:46:11 INFO  Two
+21:46:11 INFO  Three
+21:46:12 INFO  Four
+21:46:12 INFO  One
+21:46:12 INFO  Two
+21:46:13 INFO  Three
+21:46:13 INFO  Four
+21:46:13 INFO  Recording
+21:46:18 INFO  Cm(no5)/Eb at 4 colon 2
+21:46:27 INFO  F7/Eb at 10 colon 2
+21:46:30 INFO  F7 at 12 colon 2
+21:46:31 INFO  F7 at 13 colon 2
+21:46:32 INFO  F7 at 14 colon 1
+21:46:34 INFO  F7/Eb at 15 colon 4
+21:46:38 INFO  F7 at 17 colon 4
+21:46:39 INFO  F7 at 18 colon 4
+21:46:40 INFO  F7/Eb at 20 colon 1
+21:46:48 INFO  F7/Eb at 25 colon 1
+21:46:53 INFO  Already active
+21:46:55 INFO  Stopped
+21:46:57 INFO  Stopped
+21:46:58 INFO  Stopped
+21:46:58 INFO  Stopped
+21:47:03 DEBUG Closing MIDI port: Nord Piano 6 MIDI 0
+21:47:03 DEBUG MIDI reader thread stopped
