@@ -134,3 +134,32 @@
 21:46:58 INFO  Stopped
 21:47:03 DEBUG Closing MIDI port: Nord Piano 6 MIDI 0
 21:47:03 DEBUG MIDI reader thread stopped
+23:41:14 INFO  MIDI: 1 device found
+23:41:14 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 0
+23:41:14 INFO  MIDI connected: Nord Piano 6 MIDI 0
+23:41:19 INFO  IReal Studio ready. My Progression. Press R to record.
+23:41:22 INFO  One
+23:41:23 INFO  Two
+23:41:23 INFO  Three
+23:41:24 INFO  Four
+23:41:24 INFO  One
+23:41:25 INFO  Two
+23:41:25 INFO  Three
+23:41:26 INFO  Four
+23:41:26 INFO  Recording
+23:41:27 INFO  Cm at 1 colon 2
+23:41:29 INFO  F/C at 2 colon 2
+23:41:31 INFO  Cm at 3 colon 2
+23:41:33 INFO  C7 at 4 colon 1
+23:41:35 INFO  F at 5 colon 2
+23:41:37 INFO  Fm9 at 6 colon 2
+23:41:39 INFO  Em7 at 7 colon 2
+23:41:41 INFO  Dm7 at 8 colon 2
+23:41:47 INFO  G7 at 11 colon 2
+23:41:50 INFO  G7 at 13 colon 1
+23:41:51 INFO  G7 at 13 colon 3
+23:41:53 INFO  Already active
+23:41:54 INFO  Already active
+23:41:55 INFO  Stopped
+23:41:56 DEBUG Closing MIDI port: Nord Piano 6 MIDI 0
+23:41:56 DEBUG MIDI reader thread stopped
