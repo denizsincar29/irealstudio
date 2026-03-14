@@ -6,58 +6,49 @@ Usage::
     uv run python tag_release.py
 
 The script:
-1. Checks that there are no uncommitted changes.
-2. Asks for a version number in ``Vx.x.x`` format.
+1. Checks that there are no uncommitted or untracked changes.
+2. Asks for a version number in ``x.x.x`` format (the ``v`` prefix is added
+   automatically).
 3. Validates the format.
 4. Checks the tag does not already exist.
 5. Checks the new version is strictly higher than the last tag.
 6. Collects a multiline changelog entry (press Enter twice quickly to finish).
-7. Writes ``news.md`` with the version, date, and changelog.
-8. Commits ``news.md``.
+7. Writes ``news.md`` (current release) and updates ``changelog.md`` (history).
+8. Commits ``news.md`` and ``changelog.md``.
 9. Creates and pushes the git tag.
 """
 
-import subprocess
 import sys
 import re
 import time
 from datetime import date
 from pathlib import Path
 
-
-def _run(cmd: list[str], capture: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        check=False,
-    )
+import git
 
 
-def _check_clean_tree() -> None:
-    result = _run(['git', 'status', '--porcelain'])
-    if result.returncode != 0:
-        print("ERROR: Could not check git status.")
-        sys.exit(1)
-    if result.stdout.strip():
-        print("ERROR: There are uncommitted changes. Please commit or stash them first.")
-        print(result.stdout)
+def _check_clean_tree(repo: git.Repo) -> None:
+    if repo.is_dirty(untracked_files=True):
+        print("ERROR: There are uncommitted or untracked changes. Please commit or stash them first.")
+        print(repo.git.status('--porcelain'))
         sys.exit(1)
 
 
-def _parse_version(tag: str) -> tuple[int, ...] | None:
-    """Parse ``Vx.y.z`` → ``(x, y, z)``; return None if invalid."""
-    m = re.fullmatch(r'[Vv](\d+)\.(\d+)\.(\d+)', tag.strip())
+def _parse_version(raw: str) -> tuple[int, ...] | None:
+    """Parse ``x.y.z`` or ``vx.y.z`` → ``(x, y, z)``; return None if invalid."""
+    m = re.fullmatch(r'[Vv]?(\d+)\.(\d+)\.(\d+)', raw.strip())
     if not m:
         return None
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
-def _get_existing_tags() -> list[str]:
-    result = _run(['git', 'tag', '--list', 'v*', '--sort=-version:refname'])
-    if result.returncode != 0:
-        return []
-    return [t for t in result.stdout.splitlines() if t.strip()]
+def _get_existing_tags(repo: git.Repo) -> list[str]:
+    tags = []
+    for t in repo.tags:
+        tag_str = str(t)
+        if re.match(r'v\d+\.\d+\.\d+$', tag_str):
+            tags.append(tag_str)
+    return tags
 
 
 def _last_version_tag(tags: list[str]) -> tuple[int, ...]:
@@ -116,23 +107,24 @@ def _write_news(version: str, changelog: str) -> None:
 
 
 def main() -> None:
-    _check_clean_tree()
+    repo = git.Repo('.')
+    _check_clean_tree(repo)
 
-    # Ask for version
+    # Ask for version (user does NOT need to type the 'v' prefix)
     while True:
-        raw = input("Enter version (e.g. v1.0.0): ").strip()
+        raw = input("Enter version (e.g. 1.0.0): ").strip()
         if not raw:
             print("Cancelled.")
             sys.exit(0)
         parsed = _parse_version(raw)
         if parsed is None:
-            print(f"  Invalid format '{raw}'. Use Vx.y.z (e.g. v1.2.3).")
+            print(f"  Invalid format '{raw}'. Use x.y.z (e.g. 1.2.3).")
             continue
-        # Normalise to lowercase 'v'
+        # Always normalise to lowercase 'v' prefix
         version_tag = 'v{}.{}.{}'.format(*parsed)
         break
 
-    existing_tags = _get_existing_tags()
+    existing_tags = _get_existing_tags(repo)
 
     # Check tag doesn't already exist
     if version_tag in existing_tags:
@@ -155,27 +147,20 @@ def main() -> None:
 
     _write_news(version_tag, changelog)
 
-    # Commit news.md
-    _run(['git', 'add', 'news.md'], capture=False)
-    result = _run(['git', 'commit', '-m', f'chore: release {version_tag}'])
-    if result.returncode != 0:
-        print("ERROR: git commit failed.")
-        print(result.stderr)
-        sys.exit(1)
-    print(f"Committed news.md for {version_tag}")
+    # Commit news.md and changelog.md
+    repo.index.add(['news.md', 'changelog.md'])
+    repo.index.commit(f'chore: release {version_tag}')
+    print(f"Committed release notes for {version_tag}")
 
     # Create annotated tag
-    result = _run(['git', 'tag', '-a', version_tag, '-m', f'Release {version_tag}'])
-    if result.returncode != 0:
-        print("ERROR: git tag failed.")
-        print(result.stderr)
-        sys.exit(1)
+    repo.create_tag(version_tag, message=f'Release {version_tag}')
     print(f"Created tag {version_tag}")
 
     # Push commit and tag
     print("Pushing commit and tag…")
-    _run(['git', 'push'], capture=False)
-    _run(['git', 'push', 'origin', version_tag], capture=False)
+    origin = repo.remotes.origin
+    origin.push()
+    origin.push(version_tag)
     print(f"Done! Release {version_tag} is on its way.")
 
 

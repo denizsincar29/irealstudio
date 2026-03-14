@@ -232,9 +232,7 @@ class App:
         self.cursor = Position(1, 1, self.progression.time_signature)
 
         # Key modifier tracking (for multi-key shortcuts)
-        self.s_held = False
         self.slash_held = False
-        self._s_hook_time: float = 0.0  # monotonic time when S key was pressed
 
         # Recording BPM (may differ from song BPM so user can record at a slower pace)
         self.recording_bpm: int = DEFAULT_BPM
@@ -252,6 +250,13 @@ class App:
 
         # Clipboard (chord name string for cut/copy/paste)
         self._clipboard: str | None = None
+
+        # Selection state: anchor + active end (both Positions or None)
+        self._sel_anchor: Position | None = None
+        self._sel_active: Position | None = None
+
+        # Unsaved-changes tracking
+        self._is_dirty: bool = False
 
         # Menu items that may need to be checked/unchecked at runtime
         self._overdub_item:          wx.MenuItem | None = None
@@ -360,6 +365,7 @@ class App:
             self.progression.total_measures = measure
         if self.recording_mode == RECORDING_MODE_OVERWRITE:
             self._overwrite_recorded.add((measure, beat))
+        self._mark_dirty()
         self.speak(chord_name_to_spoken(chord.name))
 
     def _on_chord_preview(self, notes: list[int]) -> None:
@@ -395,6 +401,10 @@ class App:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
+    def _mark_dirty(self) -> None:
+        """Mark the progression as having unsaved changes."""
+        self._is_dirty = True
+
     def undo(self) -> None:
         if not self._undo_stack:
             self.speak("Nothing to undo")
@@ -406,6 +416,7 @@ class App:
             min(self.cursor.measure, max(self.progression.last_measure(), 1)),
             1, self.progression.time_signature,
         )
+        self._mark_dirty()
         self.speak("Undo")
 
     def redo(self) -> None:
@@ -415,6 +426,7 @@ class App:
         self._undo_stack.append(self.progression.to_json())
         snapshot = self._redo_stack.pop()
         self.progression = ChordProgression.from_json(snapshot)
+        self._mark_dirty()
         self.speak("Redo")
 
     # ------------------------------------------------------------------
@@ -435,6 +447,7 @@ class App:
             self._clipboard = chords[0].chord.name
             self._push_undo()
             self.progression.delete_chord_at(self.cursor)
+            self._mark_dirty()
             self.speak(f"Cut {self._clipboard}")
         else:
             self.speak("No chord at cursor")
@@ -448,6 +461,7 @@ class App:
             self._clipboard,
             self.cursor.measure, self.cursor.beat,
         )
+        self._mark_dirty()
         self.speak(f"Pasted {self._clipboard}")
 
     # ------------------------------------------------------------------
@@ -460,10 +474,12 @@ class App:
         if self.progression.is_no_chord(m):
             self._push_undo()
             self.progression.remove_no_chord(m)
+            self._mark_dirty()
             self.speak(f"N.C. removed at measure {m}")
         else:
             self._push_undo()
             self.progression.add_no_chord(m)
+            self._mark_dirty()
             self.speak(f"N.C. at measure {m}")
 
     # ------------------------------------------------------------------
@@ -648,25 +664,122 @@ class App:
         dlg.Destroy()
 
     # ------------------------------------------------------------------
-    # S-hook helper
+    # Selection helpers (Shift+Left/Right)
     # ------------------------------------------------------------------
 
-    def _is_s_hook_active(self) -> bool:
-        """Return True if the section-mark hook is armed (within 1 second of S press).
+    def _clear_selection(self) -> None:
+        """Discard any active selection."""
+        self._sel_anchor = None
+        self._sel_active = None
 
-        Side-effect: clears ``s_held`` when the 1-second window has expired,
-        so subsequent calls (and guards like ``not self._is_s_hook_active()``)
-        do not need to handle expiry themselves.
-        """
-        if not self.s_held:
-            return False
-        if time.monotonic() - self._s_hook_time >= 1.0:
-            self.s_held = False
-            return False
-        return True
+    def _extend_selection(self, direction: str) -> None:
+        """Extend (or start) the chord selection one chord in *direction*."""
+        if self._sel_anchor is None:
+            self._sel_anchor = self.cursor
+        if direction == 'right':
+            nxt = self.progression.find_next_chord_to_right(self.cursor)
+            if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
+                self.cursor = nxt.position
+                self._sel_active = self.cursor
+        else:
+            prv = self.progression.find_last_chord_to_left(self.cursor)
+            if prv and not self.progression.is_in_hidden_range(prv.position.measure):
+                self.cursor = prv.position
+                self._sel_active = self.cursor
+        self._announce_selection()
+
+    def _announce_selection(self) -> None:
+        """Speak chord at cursor plus selection size."""
+        chords_sel = self._chords_in_selection()
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        chord_part = chords_here[0].chord_name_spoken() if chords_here else ""
+        n = len(chords_sel)
+        count_part = f"{n} chord{'s' if n != 1 else ''} selected"
+        self.speak(f"{chord_part} {count_part}".strip())
+
+    def _selected_range(self) -> tuple[Position, Position] | None:
+        """Return (start, end) positions of the current selection, or None."""
+        if self._sel_anchor is None or self._sel_active is None:
+            return None
+        start = min(self._sel_anchor, self._sel_active)
+        end   = max(self._sel_anchor, self._sel_active)
+        return start, end
+
+    def _chords_in_selection(self) -> list:
+        """Return all ProgressionItems within the current selection range."""
+        rng = self._selected_range()
+        if rng is None:
+            return []
+        start, end = rng
+        return [item for item in self.progression.items
+                if start <= item.position <= end]
+
+    def _select_all(self) -> None:
+        """Select all chords in the progression."""
+        items = self.progression.items
+        if not items:
+            self.speak("No chords to select")
+            return
+        self._sel_anchor = items[0].position
+        self._sel_active = items[-1].position
+        self.cursor = self._sel_active
+        n = len(items)
+        self.speak(f"All {n} chord{'s' if n != 1 else ''} selected")
+
+    def _copy_selection(self) -> None:
+        """Copy the first chord of the selection to the clipboard."""
+        chords = self._chords_in_selection()
+        if not chords:
+            self.speak("No chords selected")
+            return
+        self._clipboard = chords[0].chord.name
+        self.speak(f"Copied {chords[0].chord_name_spoken()}")
+
+    def _cut_selection(self) -> None:
+        """Cut all selected chords."""
+        chords = self._chords_in_selection()
+        if not chords:
+            self.speak("No chords selected")
+            return
+        self._clipboard = chords[0].chord.name
+        self._push_undo()
+        for item in chords:
+            self.progression.delete_chord_at(item.position)
+        self._mark_dirty()
+        self._clear_selection()
+        n = len(chords)
+        self.speak(f"Cut {n} chord{'s' if n != 1 else ''}")
+
+    def _delete_selection(self) -> None:
+        """Delete all chords in the current selection."""
+        chords = self._chords_in_selection()
+        if not chords:
+            self._clear_selection()
+            self.speak("No chords in selection")
+            return
+        # Land on the chord just before the selection start
+        anchor = self._sel_anchor
+        active = self._sel_active
+        if anchor is None or active is None:
+            return
+        start = min(anchor, active)
+        prev_item = self.progression.find_last_chord_to_left(start)
+        self._push_undo()
+        for item in chords:
+            self.progression.delete_chord_at(item.position)
+        self._mark_dirty()
+        self._clear_selection()
+        if prev_item:
+            self.cursor = prev_item.position
+        else:
+            self.cursor = Position(1, 1, self.progression.time_signature)
+        n = len(chords)
+        self.speak(f"Deleted {n} chord{'s' if n != 1 else ''}")
+        self._announce_position()
 
     def navigate(self, direction: str, by_measure: bool = False, by_beat: bool = False) -> None:
         ts = self.progression.time_signature
+        old_measure = self.cursor.measure
         if by_measure:
             if direction == 'right':
                 new_m = self.progression.navigate_right_from_measure(self.cursor.measure)
@@ -710,11 +823,11 @@ class App:
                     visible = self.progression.find_last_chord_to_left(search)
                     self.cursor = visible.position if visible else Position(new_m, 1, ts)
                 # else: no chord to the left — stay put
-        self._announce_position()
+        self._announce_position(announce_section=self.cursor.measure != old_measure)
 
     def navigate_home(self) -> None:
         self.cursor = Position(1, 1, self.progression.time_signature)
-        self._announce_position()
+        self._announce_position(announce_section=True)
 
     def navigate_end(self) -> None:
         last_m = max(self.progression.last_measure(), 1)
@@ -723,25 +836,32 @@ class App:
             chords[-1].position if chords
             else Position(last_m, 1, self.progression.time_signature)
         )
-        self._announce_position()
+        self._announce_position(announce_section=True)
 
-    def _announce_position(self) -> None:
-        """Speak a brief position: chord (if any) then 'bar N beat M'."""
+    _SECTION_MARK_NAMES: dict[str, str] = {
+        '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
+        '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
+    }
+
+    def _announce_position(self, announce_section: bool = False) -> None:
+        """Speak a brief position: optional section name, chord (if any), 'bar N beat M'."""
+        parts: list[str] = []
+        if announce_section:
+            sm = self.progression.get_section_mark(self.cursor.measure)
+            if sm:
+                parts.append(self._SECTION_MARK_NAMES.get(sm, sm))
         chords_here = self.progression.find_chords_at_position(self.cursor)
-        chord_part = chords_here[0].chord_name_spoken() if chords_here else ""
-        pos_part = f"bar {self.cursor.measure} beat {self.cursor.beat}"
-        self.speak(f"{chord_part} {pos_part}".strip())
+        if chords_here:
+            parts.append(chords_here[0].chord_name_spoken())
+        parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
+        self.speak(" ".join(parts))
 
     def _announce_position_verbose(self) -> None:
         """Speak full context: section, ending, chord (if any), bar, beat."""
         parts: list[str] = []
-        mark_names = {
-            '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-            '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
-        }
         sm = self.progression.get_section_mark(self.cursor.measure)
         if sm:
-            parts.append(mark_names.get(sm, sm))
+            parts.append(self._SECTION_MARK_NAMES.get(sm, sm))
         for vb in self.progression.volta_brackets:
             if self.cursor.measure == vb.ending1_start:
                 parts.append("ending 1")
@@ -762,6 +882,7 @@ class App:
         if mark:
             self._push_undo()
             self.progression.add_section_mark(self.cursor.measure, mark)
+            self._mark_dirty()
             names = {
                 '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
                 '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
@@ -784,17 +905,69 @@ class App:
             target = chords[0]
         self._push_undo()
         target.bass_note = note
+        self._mark_dirty()
         self.speak(target.chord_name_spoken())
 
     def add_volta(self) -> None:
         self._push_undo()
         msg = self.progression.add_volta_start(self.cursor.measure)
+        self._mark_dirty()
         self.speak(msg)
 
     def delete_at_cursor(self) -> None:
-        self._push_undo()
-        self.progression.delete_chord_at(self.cursor)
-        self.speak(f"Deleted at measure {self.cursor.measure} beat {self.cursor.beat}")
+        """Delete the chord, section mark, or volta bracket at the cursor.
+
+        After deleting a chord the cursor moves to the previous chord (or to
+        the start of the progression when the song becomes empty).
+        Section marks and volta brackets at the current measure are removed
+        when no chord is present at the cursor.
+        """
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        if chords_here:
+            # Find the previous chord BEFORE deleting so we can land there.
+            prev_item = self.progression.find_last_chord_to_left(self.cursor)
+            self._push_undo()
+            self.progression.delete_chord_at(self.cursor)
+            self._mark_dirty()
+            if prev_item:
+                self.cursor = prev_item.position
+            else:
+                self.cursor = Position(1, 1, self.progression.time_signature)
+            self.speak("Deleted")
+            self._announce_position()
+        else:
+            # No chord — try to delete structural marks at this measure.
+            m = self.cursor.measure
+            deleted = []
+            if self.progression.get_section_mark(m):
+                self._push_undo()
+                self.progression.remove_section_mark(m)
+                self._mark_dirty()
+                deleted.append("section mark")
+            # Remove any volta bracket whose ending1_start or ending2_start or
+            # repeat_start coincides with the current measure.
+            vbs_to_remove = [
+                vb for vb in self.progression.volta_brackets
+                if vb.repeat_start == m or vb.ending1_start == m
+                or (vb.is_complete() and vb.ending2_start == m)
+            ]
+            if vbs_to_remove:
+                if not deleted:  # only push undo once
+                    self._push_undo()
+                for vb in vbs_to_remove:
+                    self.progression.volta_brackets.remove(vb)
+                self._mark_dirty()
+                deleted.append("repeat bracket")
+            if self.progression.is_no_chord(m):
+                if not deleted:
+                    self._push_undo()
+                self.progression.remove_no_chord(m)
+                self._mark_dirty()
+                deleted.append("N.C.")
+            if deleted:
+                self.speak(f"Deleted {', '.join(deleted)} at measure {m}")
+            else:
+                self.speak(f"Nothing to delete at measure {m} beat {self.cursor.beat}")
 
     # ------------------------------------------------------------------
     # Save / Export
@@ -805,6 +978,7 @@ class App:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(self.progression.to_json())
         self._current_file = path
+        self._is_dirty = False
 
     def save(self) -> None:
         """Save to the current file; prompt for a path if none is set yet."""
@@ -877,7 +1051,11 @@ class App:
                 with open(path, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
                 self._current_file = path
+                self._is_dirty = False
+                self._undo_stack.clear()
+                self._redo_stack.clear()
                 self.cursor = Position(1, 1, self.progression.time_signature)
+                self._clear_selection()
                 self.speak(f"Opened {self.progression.title}")
             except Exception as e:
                 self.speak(f"Open failed: {e}")
@@ -1240,6 +1418,7 @@ class App:
                 )
             except (ValueError, AttributeError):
                 pass
+        self._mark_dirty()
         self.speak(f"Settings updated: {self.progression.title}")
 
     def _insert_chord_from_menu(self) -> None:
@@ -1250,6 +1429,7 @@ class App:
         if name:
             self._push_undo()
             self.progression.add_chord_by_name(name, self.cursor.measure, self.cursor.beat)
+            self._mark_dirty()
             self.speak(f"Inserted {name}")
 
     def _insert_bass_from_menu(self) -> None:
@@ -1390,14 +1570,14 @@ class App:
         insert_menu.Append(_CMD_INSERT_CHORD, "&Add Chord...\tCtrl+Return")
         insert_menu.AppendSeparator()
 
-        # Section marks sub-menu
+        # Section marks sub-menu — Ctrl+Shift+letter shortcuts
         sm_menu = wx.Menu()
-        sm_menu.Append(_CMD_INSERT_SM_A, "&A (Section A)\tS+A")
-        sm_menu.Append(_CMD_INSERT_SM_B, "&B (Section B)\tS+B")
-        sm_menu.Append(_CMD_INSERT_SM_C, "&C (Section C)\tS+C")
-        sm_menu.Append(_CMD_INSERT_SM_D, "&D (Section D)\tS+D")
-        sm_menu.Append(_CMD_INSERT_SM_V, "&Verse\tS+V")
-        sm_menu.Append(_CMD_INSERT_SM_I, "&Intro\tS+I")
+        sm_menu.Append(_CMD_INSERT_SM_A, "&A (Section A)\tCtrl+Shift+A")
+        sm_menu.Append(_CMD_INSERT_SM_B, "&B (Section B)\tCtrl+Shift+B")
+        sm_menu.Append(_CMD_INSERT_SM_C, "&C (Section C)\tCtrl+Shift+C")
+        sm_menu.Append(_CMD_INSERT_SM_D, "&D (Section D)\tCtrl+Shift+D")
+        sm_menu.Append(_CMD_INSERT_SM_V, "&Verse\tCtrl+Shift+V")
+        sm_menu.Append(_CMD_INSERT_SM_I, "&Intro\tCtrl+Shift+I")
         insert_menu.AppendSubMenu(sm_menu, "&Section Mark")
 
         insert_menu.Append(_CMD_INSERT_VOLTA, "&Volta / Ending\tV")
@@ -1560,7 +1740,40 @@ class App:
         self.speak("Stopped")
 
     def _on_close_window(self, event: wx.CloseEvent) -> None:
-        """Handle window close: clean up resources then allow destruction."""
+        """Handle window close: prompt to save unsaved changes, then clean up."""
+        if self._is_dirty:
+            dlg = wx.MessageDialog(
+                self._frame,
+                f"'{self.progression.title}' has unsaved changes.\n\nSave before closing?",
+                "Unsaved Changes",
+                wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT | wx.ICON_WARNING,
+            )
+            result = dlg.ShowModal()
+            dlg.Destroy()
+            if result == wx.ID_CANCEL:
+                event.Veto()
+                return
+            if result == wx.ID_YES:
+                if self._current_file is not None:
+                    try:
+                        self._save_to_path(self._current_file)
+                    except Exception as e:
+                        wx.MessageBox(f"Save failed: {e}", "Error",
+                                      wx.OK | wx.ICON_ERROR, self._frame)
+                        event.Veto()
+                        return
+                else:
+                    try:
+                        self.save_as()
+                    except Exception as e:
+                        wx.MessageBox(f"Save failed: {e}", "Error",
+                                      wx.OK | wx.ICON_ERROR, self._frame)
+                        event.Veto()
+                        return
+                    # If still dirty (user cancelled the Save As dialog), abort close.
+                    if self._is_dirty:
+                        event.Veto()
+                        return
         self._recorder.stop_all()
         self._midi.close()
         self._frame = None
@@ -1575,17 +1788,19 @@ class App:
     # ------------------------------------------------------------------
 
     def _on_keydown(self, event: wx.KeyEvent) -> None:
-        ctrl = event.ControlDown()
-        alt  = event.AltDown()
-        kc   = event.GetKeyCode()
-        key  = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
+        ctrl  = event.ControlDown()
+        alt   = event.AltDown()
+        shift = event.ShiftDown()
+        kc    = event.GetKeyCode()
+        key   = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
 
         # Quit
         if ctrl and key == 'q':
             self._on_quit()
 
-        # Escape – stop
+        # Escape – stop recording/playback; also clear selection
         elif key == 'escape':
+            self._clear_selection()
             was_recording = self._recorder.state == AppState.RECORDING
             self._recorder.stop_all()
             if was_recording and self.recording_mode == RECORDING_MODE_OVERWRITE:
@@ -1593,7 +1808,7 @@ class App:
             self.speak("Stopped")
 
         # R – record
-        elif key == 'r' and not ctrl:
+        elif key == 'r' and not ctrl and not shift:
             if self._recorder.state == AppState.IDLE:
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
                     self._start_overwrite_session()
@@ -1619,64 +1834,86 @@ class App:
                 elif self._recorder.state == AppState.PLAYING:
                     self._recorder.stop_all()
 
-        # Navigation
-        # Left/Right: chord navigation by default; Ctrl: by measure; Alt: by beat
-        elif key == 'left' and not self._is_s_hook_active():
+        # Navigation – Left/Right
+        # Shift+Left/Right: extend selection
+        # Ctrl+Left/Right: by measure; Alt+Left/Right: by beat; plain: by chord
+        elif key == 'left':
             if self._recorder.state == AppState.IDLE:
-                self.navigate('left', by_measure=ctrl, by_beat=alt)
-        elif key == 'right' and not self._is_s_hook_active():
+                if shift and not ctrl and not alt:
+                    self._extend_selection('left')
+                else:
+                    self._clear_selection()
+                    self.navigate('left', by_measure=ctrl, by_beat=alt)
+        elif key == 'right':
             if self._recorder.state == AppState.IDLE:
-                self.navigate('right', by_measure=ctrl, by_beat=alt)
+                if shift and not ctrl and not alt:
+                    self._extend_selection('right')
+                else:
+                    self._clear_selection()
+                    self.navigate('right', by_measure=ctrl, by_beat=alt)
         elif key == 'home' and ctrl:
             if self._recorder.state == AppState.IDLE:
+                self._clear_selection()
                 self.navigate_home()
         elif key == 'end' and ctrl:
             if self._recorder.state == AppState.IDLE:
+                self._clear_selection()
                 self.navigate_end()
 
         # Ctrl+O – open file
-        elif ctrl and key == 'o':
+        elif ctrl and key == 'o' and not shift:
             if self._recorder.state == AppState.IDLE:
                 self.open_file()
 
         # Ctrl+S – save
-        elif ctrl and key == 's':
+        elif ctrl and key == 's' and not shift:
             self.save()
 
         # Ctrl+E – export iReal Pro HTML
-        elif ctrl and key == 'e' and not event.ShiftDown():
+        elif ctrl and key == 'e' and not shift:
             self.export_ireal()
 
         # Ctrl+Shift+E – export QR code
-        elif ctrl and key == 'e' and event.ShiftDown():
+        elif ctrl and shift and key == 'e':
             self.export_qr_code()
 
         # Ctrl+Z – undo
-        elif ctrl and key == 'z':
+        elif ctrl and key == 'z' and not shift:
             self.undo()
 
         # Ctrl+Y – redo
-        elif ctrl and key == 'y':
+        elif ctrl and key == 'y' and not shift:
             self.redo()
 
-        # Ctrl+C – copy chord
-        elif ctrl and key == 'c':
-            self.copy_chord()
+        # Ctrl+A – select all chords
+        elif ctrl and key == 'a' and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self._select_all()
 
-        # Ctrl+X – cut chord
-        elif ctrl and key == 'x':
-            self.cut_chord()
+        # Ctrl+C – copy chord (or selection)
+        elif ctrl and key == 'c' and not shift:
+            if self._selected_range() is not None:
+                self._copy_selection()
+            else:
+                self.copy_chord()
+
+        # Ctrl+X – cut chord (or selection)
+        elif ctrl and key == 'x' and not shift:
+            if self._selected_range() is not None:
+                self._cut_selection()
+            else:
+                self.cut_chord()
 
         # Ctrl+V – paste chord
-        elif ctrl and key == 'v':
+        elif ctrl and key == 'v' and not shift:
             self.paste_chord()
 
         # Ctrl+L – speak recent log entries
-        elif ctrl and key == 'l':
+        elif ctrl and key == 'l' and not shift:
             self._speak_recent_log()
 
         # Ctrl+P – project settings
-        elif ctrl and key == 'p':
+        elif ctrl and key == 'p' and not shift:
             if self._recorder.state == AppState.IDLE:
                 self._open_project_settings()
 
@@ -1685,45 +1922,45 @@ class App:
             if self._recorder.state == AppState.IDLE:
                 self._insert_chord_from_menu()
 
-        # Delete/Backspace
+        # Ctrl+Shift+A/B/C/D/V/I – section marks
+        elif ctrl and shift and len(key) == 1 and key in 'abcdvi':
+            if self._recorder.state == AppState.IDLE:
+                self.add_section_mark(key)
+
+        # Delete/Backspace – delete selection or chord at cursor
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                self.delete_at_cursor()
+                if self._selected_range() is not None:
+                    self._delete_selection()
+                else:
+                    self.delete_at_cursor()
 
         # N – toggle no chord
-        elif key == 'n' and not ctrl and not self._is_s_hook_active() and not self.slash_held:
+        elif key == 'n' and not ctrl and not shift and not self.slash_held:
             if self._recorder.state == AppState.IDLE:
                 self.toggle_no_chord()
-
-        # S key – arm section-mark hook (1-second window)
-        elif key == 's' and not ctrl:
-            self.s_held = True
-            self._s_hook_time = time.monotonic()
 
         # / held for slash chords
         elif key == 'slash':
             self.slash_held = True
 
         # P – verbose position (section, ending, chord, bar, beat)
-        elif key == 'p' and not ctrl and not self._is_s_hook_active():
+        elif key == 'p' and not ctrl and not shift:
             self._announce_position_verbose()
 
-        # V key – volta (only when not using S modifier)
-        elif key == 'v' and not ctrl and not self._is_s_hook_active():
+        # V key – volta
+        elif key == 'v' and not ctrl and not shift:
             self.add_volta()
 
         # D key – debug: speak beat offset during recording/pre-count/playback
-        elif key == 'd' and not ctrl and not self._is_s_hook_active():
+        elif key == 'd' and not ctrl and not shift:
             if self._recorder.state != AppState.IDLE:
                 offset = self._recorder.beat_offset_ms()
                 self.speak(f"Beat offset {offset:.0f} milliseconds")
 
-        # Letter keys A-Z
-        elif len(key) == 1 and key.isalpha():
-            if self._is_s_hook_active():
-                self.add_section_mark(key)
-                self.s_held = False
-            elif self.slash_held:
+        # Letter keys for slash-chord bass note (plain alpha only)
+        elif len(key) == 1 and key.isalpha() and not ctrl and not shift:
+            if self.slash_held:
                 self.add_bass_note(key)
                 self.slash_held = False
 
@@ -1732,7 +1969,6 @@ class App:
     def _on_keyup(self, event: wx.KeyEvent) -> None:
         kc  = event.GetKeyCode()
         key = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
-        # S keyup no longer clears the hook — the 1-second timer handles expiry.
         if key == 'slash':
             self.slash_held = False
         event.Skip()
@@ -1747,7 +1983,8 @@ class App:
         bpm_info = f"BPM: {self.progression.bpm}"
         if self.recording_bpm != self.progression.bpm:
             bpm_info += f"  Rec BPM: {self.recording_bpm}"
-        file_name = self._current_file.name if self._current_file else "[unsaved]"
+        dirty_marker = "*" if self._is_dirty else ""
+        file_name = (self._current_file.name if self._current_file else "[unsaved]") + dirty_marker
         rec_mode_info = (
             f" [{self.recording_mode}"
             + (" whole" if self.overwrite_whole_measure and self.recording_mode == RECORDING_MODE_OVERWRITE else "")
@@ -1765,6 +2002,10 @@ class App:
             lines[3] = f"Here: {chords_here[0].chord_name()}"
         elif self.progression.is_no_chord(self.cursor.measure):
             lines[3] = "Here: N.C."
+        # Show selection info if active
+        if self._sel_anchor is not None and self._sel_active is not None:
+            n = len(self._chords_in_selection())
+            lines[3] += f"  [SEL: {n} chord{'s' if n != 1 else ''}]"
         for lbl, text in zip(self._status_labels, lines):
             lbl.SetLabel(text)
         wx.CallLater(50, self._schedule_display_update)
