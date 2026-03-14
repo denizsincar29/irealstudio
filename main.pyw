@@ -18,7 +18,7 @@ Keyboard shortcuts:
   V             - Add volta/ending mark at current measure
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
   Delete/Backspace - Delete chord at current position
-  Ctrl+Delete   - Delete section mark / repeat bracket at current measure
+  Ctrl+Delete   - Delete section mark / repeat bracket / N.C. at current measure
   Ctrl+O        - Open progression file (.ips or .json)
   Ctrl+S        - Save progression (to current file, or prompts if new)
   Ctrl+E        - Export to iReal Pro format (HTML file, prompts for save location)
@@ -1903,7 +1903,7 @@ class App:
                 self._apply_overwrite()
             self.speak("Stopped")
 
-        # R – record (start if idle, stop if recording or playing)
+        # R – record (start if idle, stop if recording/pre-count/playing)
         elif key == 'r' and not ctrl and not shift:
             if self._recorder.state == AppState.IDLE:
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
@@ -1912,7 +1912,7 @@ class App:
                     self.progression, self.cursor,
                     recording_bpm=self.recording_bpm,
                 )
-            elif self._recorder.state == AppState.RECORDING:
+            elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
                 self._recorder.stop_all()
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
                     self._apply_overwrite()
@@ -1933,7 +1933,7 @@ class App:
             else:
                 if self._recorder.state == AppState.IDLE:
                     self._recorder.start_playback(self.progression, self.cursor)
-                elif self._recorder.state == AppState.RECORDING:
+                elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
                     self._recorder.stop_all()
                     if self.recording_mode == RECORDING_MODE_OVERWRITE:
                         self._apply_overwrite()
@@ -2039,7 +2039,7 @@ class App:
         #               at the current measure regardless of whether a chord is present
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                if ctrl:
+                if ctrl and key == 'delete':
                     self.delete_structural_at_cursor()
                 elif self._selected_range() is not None:
                     self._delete_selection()
