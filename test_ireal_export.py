@@ -825,10 +825,10 @@ class TestDom7b5Recognition(unittest.TestCase):
 
     def test_7b5_distinct_from_7sharp11(self):
         """7(b5) has no P5; 7(#11) has a P5 — they must be distinct."""
-        no_5th = self._chord(['C', 'E', 'Gb', 'Bb'])      # C7(b5)
-        with_5th = self._chord(['C', 'E', 'G', 'Bb', 'Gb'])  # C7(#11)
+        no_5th       = self._chord(['C', 'E', 'Gb', 'Bb'])          # C7(b5)
+        seven_sharp11 = self._chord(['C', 'E', 'G', 'Bb', 'Gb'])   # C7(#11)
         self.assertEqual('C7(b5)', no_5th)
-        self.assertEqual('C7(#11)', with_5th)
+        self.assertEqual('C7(#11)', seven_sharp11)
 
     def test_7b9b5_recognition(self):
         """C7(b9b5): C-E-Gb-Bb-Db."""

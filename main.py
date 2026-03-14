@@ -792,7 +792,7 @@ class App:
         """Generate a QR code SVG for the iReal Pro URL and open it in the browser."""
         try:
             import qrcode
-            import qrcode.image.svg as qr_svg  # noqa: F401 (import triggers svg extras check)
+            import qrcode.image.svg as qr_svg
         except ImportError:
             self.speak("QR code export requires the qrcode package (uv add qrcode)")
             return
@@ -1066,6 +1066,32 @@ class App:
         )
         if data is None:
             return
+        changed = False
+        if data.get('title', '').strip() and data['title'].strip() != self.progression.title:
+            changed = True
+        if data.get('composer', '').strip() and data['composer'].strip() != self.progression.composer:
+            changed = True
+        if data.get('key') and data['key'] != self.progression.key:
+            changed = True
+        if data.get('style') and data['style'] != self.progression.style:
+            changed = True
+        try:
+            bpm = int(data.get('bpm', self.progression.bpm))
+            if BPM_MIN <= bpm <= BPM_MAX and bpm != self.progression.bpm:
+                changed = True
+        except (ValueError, TypeError):
+            pass
+        try:
+            rec_bpm = int(data.get('recording_bpm', self.recording_bpm))
+            if BPM_MIN <= rec_bpm <= BPM_MAX and rec_bpm != self.recording_bpm:
+                changed = True
+        except (ValueError, TypeError):
+            pass
+        ts_str = data.get('time_signature', '')
+        if ts_str and ts_str != str(self.progression.time_signature):
+            changed = True
+        if not changed:
+            return
         self._push_undo()
         if data.get('title', '').strip():
             self.progression.title = data['title'].strip()
@@ -1087,7 +1113,6 @@ class App:
                 self.recording_bpm = rec_bpm
         except (ValueError, TypeError):
             pass
-        ts_str = data.get('time_signature', '')
         if ts_str:
             try:
                 from chords import TimeSignature
