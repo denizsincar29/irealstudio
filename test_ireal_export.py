@@ -701,7 +701,7 @@ class TestSharpKeyRecognition(unittest.TestCase):
         self.assertNotIn('D#', notes)
 
     def test_minor_sharp_key(self):
-        """A- (A minor) is a relative minor of C, uses sharp names."""
+        """A- (A minor, iReal Pro '-' suffix) is relative minor of C; uses sharp names."""
         notes = self._notes_for_key('A-')
         self.assertIn('C#', notes)
 

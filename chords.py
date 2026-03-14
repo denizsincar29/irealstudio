@@ -467,7 +467,7 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('m6',      '-6'),
     ('m9',      '-9'),
     ('m11',     '-11'),
-    ('m13',     'min13'),
+    ('m13',     'min13'),   # iReal Pro uses 'min13', not '-13'
     ('m#5',     '-#5'),
     ('m',       '-'),      # minor triad — must follow all 'm…' patterns
     # Major-7th family
