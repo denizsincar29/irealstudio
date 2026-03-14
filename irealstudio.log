@@ -1173,3 +1173,15 @@
 23:54:29 INFO  A flat 6 bar 5 beat 1
 23:57:49 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 23:57:49 DEBUG MIDI reader thread stopped
+00:34:52 INFO  MIDI: 2 devices found
+00:34:52 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+00:34:52 INFO  MIDI connected: MOTU M Series MIDI In 0
+00:34:52 DEBUG MIDI reader thread stopped
+00:34:52 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+00:34:52 INFO  MIDI connected: Nord Piano 6 MIDI 1
+00:34:52 INFO  MIDI out: Nord Piano 6 MIDI 2
+00:34:58 INFO  IReal Studio ready. My Progression. Press R to record.
+00:34:58 DEBUG Update check failed: HTTP Error 404: Not Found
+00:35:00 INFO  Opened Denizian blues
+00:37:23 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+00:37:23 DEBUG MIDI reader thread stopped
