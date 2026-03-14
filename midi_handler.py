@@ -22,12 +22,16 @@ CHORD_WINDOW = 0.1
 class MidiHandler:
     """Manages a MIDI input port and detects chord note events."""
 
+    # MIDI CC numbers for sustain pedals
+    CC_SOFT_PEDAL = 67    # Left (una corda) pedal — used for "no chord" insertion
+
     def __init__(
         self,
         speak: Callable[[str], None],
         on_chord_released: Callable[[list[int], float], None],
         is_recording: Callable[[], bool],
         on_chord_preview: Callable[[list[int]], None] | None = None,
+        on_nc_pedal: Callable[[], None] | None = None,
     ) -> None:
         """
         Parameters
@@ -46,11 +50,15 @@ class MidiHandler:
             Optional callback called with ``(notes,)`` when a chord is
             released while *not* recording.  Used to give immediate feedback
             about recognized chords without recording them.
+        on_nc_pedal:
+            Optional callback called when the left (soft) pedal is pressed
+            (CC 67 value ≥ 64).  Used to mark the current measure as N.C.
         """
         self._speak = speak
         self._on_chord_released = on_chord_released
         self._is_recording = is_recording
         self._on_chord_preview = on_chord_preview
+        self._on_nc_pedal = on_nc_pedal
 
         self.midi_input = None
         self.midi_input_name: str = ''
@@ -202,6 +210,12 @@ class MidiHandler:
         note_off = msg.type == 'note_off' or (
             msg.type == 'note_on' and msg.velocity == 0
         )
+
+        if msg.type == 'control_change':
+            if msg.control == self.CC_SOFT_PEDAL and msg.value >= 64:
+                if self._on_nc_pedal is not None:
+                    self._on_nc_pedal()
+            return
 
         if note_on:
             now = time.monotonic()

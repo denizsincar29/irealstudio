@@ -196,6 +196,8 @@ def _identify_chord_name(notes: list[str]) -> str | None:
                 exts.append('#9')
             elif has_nat9:
                 exts.append('9')
+            if flat5:
+                exts.append('b5')
             if sharp11:
                 exts.append('#11')
             if has_6th:
@@ -506,6 +508,8 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('7(#9#11)', '7#9#11'),
     ('7(b9b5)',  '7b9b5'),
     ('7(#9b5)',  '7#9b5'),
+    ('7(9b5)',   '9b5'),
+    ('7(b5)',    '7b5'),
     ('7(#9#5)',  '7#9#5'),
     ('7(b9#5)',  '7b9#5'),
     ('7(b9)',   '7b9'),
@@ -627,6 +631,7 @@ class ChordProgression:
     bpm: int = 120
     composer: str = 'Unknown'
     total_measures: int = 0  # track how many measures have been used
+    no_chord_measures: set[int] = field(default_factory=set)  # measures marked as N.C.
 
     def __str__(self) -> str:
         lines = [f"{self.title} in {self.key} ({self.style}) @ {self.bpm} BPM, "
@@ -824,7 +829,22 @@ class ChordProgression:
         """Return the last measure that has content (chords or section marks)."""
         measures = [item.position.measure for item in self.items]
         measures += [s.measure for s in self.section_marks]
+        measures += list(self.no_chord_measures)
         return max(measures) if measures else 1
+
+    def add_no_chord(self, measure: int) -> None:
+        """Mark *measure* as a 'no chord' (N.C.) measure for iReal Pro export."""
+        self.no_chord_measures.add(measure)
+        if measure > self.total_measures:
+            self.total_measures = measure
+
+    def remove_no_chord(self, measure: int) -> None:
+        """Remove the no-chord mark from *measure* (if set)."""
+        self.no_chord_measures.discard(measure)
+
+    def is_no_chord(self, measure: int) -> bool:
+        """Return True if *measure* is marked as N.C."""
+        return measure in self.no_chord_measures
 
     # -----------------------------------------------------------------------
     # JSON serialisation
@@ -842,6 +862,7 @@ class ChordProgression:
             'items': [item.to_dict() for item in self.items],
             'section_marks': [s.to_dict() for s in self.section_marks],
             'volta_brackets': [vb.to_dict() for vb in self.volta_brackets],
+            'no_chord_measures': sorted(self.no_chord_measures),
         }
         return json.dumps(data, indent=2)
 
@@ -861,6 +882,7 @@ class ChordProgression:
         prog.items = [ProgressionItem.from_dict(d, ts) for d in data.get('items', [])]
         prog.section_marks = [SectionMark.from_dict(d) for d in data.get('section_marks', [])]
         prog.volta_brackets = [VoltaBracket.from_dict(d) for d in data.get('volta_brackets', [])]
+        prog.no_chord_measures = set(data.get('no_chord_measures', []))
         return prog
 
     # -----------------------------------------------------------------------
@@ -918,8 +940,12 @@ class ChordProgression:
                     chords_arg = chord_list[0]
                 else:
                     chords_arg = chord_list
+            elif self.is_no_chord(measure_num):
+                # Explicitly marked as "no chord" (N.C.)
+                chords_arg = 'n'
             else:
-                chords_arg = ' '  # empty measure placeholder
+                # No chord played → repeat-last-chord mark
+                chords_arg = '%'
 
             # Determine barline_open
             barline_open = ''
