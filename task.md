@@ -1,8 +1,25 @@
 # task
-1. Fix the hyperlatency (200 ms) of the metronome sound. Make a sound.py that opens the stream in a thread and sends metronome sound data to the stream in a loop.
-2. when not recording, playing a chord must speak the chord name just to make sure it recognizes it. When recording, also only the chord name without bars and beats must be spoken, because it's too verbose.
-3. If the time signature is 4/4, make precounting more jazzy: first measure must say "one", and "two" on third beat, than next measure one two three four. Use english words instead of digits in pre-counting.
-4. Make midi-out device submenu, for the future it will play the chords. Make the sound output submenu for metronome.
-5. Make sure the ireal pro format exports correctly. Check out [IReal pro file format](https://www.irealpro.com/ireal-pro-custom-chord-chart-protocol) and thoroughly review the code for correct chords and whatever.
-6. Make jazz style selection listbox instead of edit box. Styles are in the above link. Make sure the style is correctly applied to the generated chord progressions.
-7. A key signature should be selected with minor or major to detect if the chord is in flat or sharp keys. Chord recognition must folow this and recognize Db7 as C#7 if the key uses sharps. Keep in mind that ireal pro format doesn't specify major / minor key signatures, only the root note.
+## Menu
+Menu should be reorganized.
+- Add edit menu with select, copy, paste, undo redo and other things.
+- Add insert menu with all the things that can be inserted: chord, rehearsals, endings, no chord symbol, repeat last chord symbol, and so on. Chord can be chosen from listboxes with root, type and alterations checkboxes or from chord enter box with strict syntax validation.
+- Add record and playback menu, or shorter name.
+- Add settings menu with devices submenus and project settings item. Project settings groups everything into one dialog: bpm, time, key, style and so on.
+
+## recording
+Recording should have 2 modes:
+- overdub - if there is a chord on this exact place, replace it. If no chord, place it there.
+- Overwrite - deletes everything from start recording position to the position where the last chord is played, not the stop recording position, so that the user could have time to run from the piano to the pc to stop recording.
+
+Add a setting that toggles between whole measure overwrite or stop at last chord position. If the user played a chord in a measure, the whole measure will be overwritten, otherwise it will stop at the last chord position. This setting should be in record and playback menu, or in project settings, or in both.
+
+## no chord symbol and repeat last chord
+If the user didn't play any chord in the measure, ireal pro format should export it as repeat last chord. To write a no chord symbol, the user should press the left pedal on this measure or insert no chord symbol from the menu.
+
+## qr code ireal pro url
+In file menu, add export to ireal pro qr code url. It should generate a url with the current project in ireal pro url format and encode it to qr code. The user can scan this qr code with ireal pro app and import the project there. This is a very convenient way to transfer projects between this app and ireal pro app without using files.
+Run `uv add qrcode` to add python qrcode library as a dependency.
+
+## bugs in chord detection
+- half diminished are recognized as minor b5. Yep, this is correct, but ireal has half diminished chord symbol, so it should be recognized as half diminished, not minor b5.
+- The 7b5 chord is recognized as 7, ignoring b5. This is a bug. Btw #11 is recognized correctly where it needs to be, so it should be fixed.
