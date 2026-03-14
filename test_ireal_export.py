@@ -94,7 +94,10 @@ class TestSimpleProgression(unittest.TestCase):
         prog.add_chord_by_name('Dm7',   2, 1)
         prog.add_chord_by_name('G7',    2, 3)
         body = url_body(prog)
-        self.assertIn('Cmaj7', body)
+        # iReal Pro canonical: maj7 → ^7, m7 → -7
+        self.assertIn('C^7', body)
+        self.assertIn('A-7', body)
+        self.assertIn('D-7', body)
         self.assertIn('G7', body)
 
 
@@ -577,6 +580,208 @@ class TestChordRecognition(unittest.TestCase):
         """G7sus4: 4th + b7 → 7sus4."""
         name = self._chord(['G', 'C', 'D', 'F'])
         self.assertEqual('G7sus4', name)
+
+
+class TestIRealChordTranslation(unittest.TestCase):
+    """Tests that chord names are correctly translated to iReal Pro canonical form."""
+
+    def _ireal(self, chord_name: str, bass: str = '') -> str:
+        from chords import ProgressionItem, Chord, Position, TimeSignature
+        pos = Position(1, 1, TimeSignature(4, 4))
+        item = ProgressionItem(chord=Chord(chord_name), position=pos, bass_note=bass)
+        return item.ireal_chord_name()
+
+    def test_major_triad(self):
+        self.assertEqual('C', self._ireal('C'))
+
+    def test_major7_to_caret7(self):
+        self.assertEqual('C^7', self._ireal('Cmaj7'))
+
+    def test_minor_to_dash(self):
+        self.assertEqual('A-', self._ireal('Am'))
+
+    def test_minor7_to_dash7(self):
+        self.assertEqual('A-7', self._ireal('Am7'))
+
+    def test_minor_major7(self):
+        self.assertEqual('A-^7', self._ireal('AmM7'))
+
+    def test_half_diminished(self):
+        self.assertEqual('Bh7', self._ireal('Bm7b5'))
+
+    def test_diminished7(self):
+        self.assertEqual('Bo7', self._ireal('Bdim7'))
+
+    def test_diminished_triad(self):
+        self.assertEqual('Bo', self._ireal('Bdim'))
+
+    def test_augmented_triad(self):
+        self.assertEqual('C+', self._ireal('Caug'))
+
+    def test_six_nine_no_slash(self):
+        """C6/9 must become C69 — the slash would be misread as a bass note."""
+        self.assertEqual('C69', self._ireal('C6/9'))
+
+    def test_sus4_to_sus(self):
+        self.assertEqual('Csus', self._ireal('Csus4'))
+
+    def test_7sus4_to_7sus(self):
+        self.assertEqual('G7sus', self._ireal('G7sus4'))
+
+    def test_dominant7_unchanged(self):
+        self.assertEqual('G7', self._ireal('G7'))
+
+    def test_bass_note_preserved(self):
+        self.assertEqual('G7/B', self._ireal('G7', bass='B'))
+
+    def test_bass_note_with_translation(self):
+        self.assertEqual('C^7/E', self._ireal('Cmaj7', bass='E'))
+
+    def test_six_nine_with_bass(self):
+        """C6/9 with bass note D: must produce C69/D not C6/9/D."""
+        self.assertEqual('C69/D', self._ireal('C6/9', bass='D'))
+
+    def test_minor7_with_extensions_in_url(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Am7', 1, 1)
+        body = url_body(prog)
+        self.assertIn('A-7', body)
+
+    def test_maj7_in_url(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        body = url_body(prog)
+        self.assertIn('C^7', body)
+
+    def test_dim7_in_url(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Bdim7', 1, 1)
+        body = url_body(prog)
+        self.assertIn('Bo7', body)
+
+    def test_aug_in_url(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Caug', 1, 1)
+        body = url_body(prog)
+        self.assertIn('C+', body)
+
+    def test_maj7_with_9(self):
+        """Cmaj7(9) (major 9) must translate to C^9."""
+        self.assertEqual('C^9', self._ireal('Cmaj7(9)'))
+
+    def test_maj7_with_sharp11(self):
+        """Cmaj7(#11) must translate to C^7#11."""
+        self.assertEqual('C^7#11', self._ireal('Cmaj7(#11)'))
+
+    def test_maj7_with_13(self):
+        """Cmaj7(13) (major 13) must translate to C^13."""
+        self.assertEqual('C^13', self._ireal('Cmaj7(13)'))
+
+    def test_maj7_with_9_sharp11(self):
+        """Cmaj7(9#11) (Lydian voicing) must translate to C^9#11."""
+        self.assertEqual('C^9#11', self._ireal('Cmaj7(9#11)'))
+
+    def test_m7b5_with_b9(self):
+        """Bm7b5(b9) half-dim with b9 must translate to Bh7b9."""
+        self.assertEqual('Bh7b9', self._ireal('Bm7b5(b9)'))
+
+    def test_mM7_with_9(self):
+        """AmM7(9) minor-major 9 must translate to A-^9."""
+        self.assertEqual('A-^9', self._ireal('AmM7(9)'))
+
+
+class TestSharpKeyRecognition(unittest.TestCase):
+    """Tests sharp/flat note-name selection based on key signature."""
+
+    def _notes_for_key(self, key: str) -> list[str]:
+        from chords import get_note_names_for_key
+        return get_note_names_for_key(key)
+
+    def test_flat_key_uses_flats(self):
+        notes = self._notes_for_key('F')
+        self.assertIn('Bb', notes)
+        self.assertNotIn('A#', notes)
+
+    def test_sharp_key_uses_sharps(self):
+        notes = self._notes_for_key('G')
+        self.assertIn('F#', notes)
+        self.assertNotIn('Gb', notes)
+
+    def test_c_major_uses_sharps(self):
+        """C major is a sharp key (no accidentals, but uses sharp names for raised degrees)."""
+        notes = self._notes_for_key('C')
+        self.assertIn('C#', notes)
+
+    def test_d_major_uses_sharps(self):
+        notes = self._notes_for_key('D')
+        self.assertIn('C#', notes)
+        self.assertIn('F#', notes)
+
+    def test_bb_major_uses_flats(self):
+        notes = self._notes_for_key('Bb')
+        self.assertIn('Bb', notes)
+        self.assertIn('Eb', notes)
+        self.assertNotIn('A#', notes)
+        self.assertNotIn('D#', notes)
+
+    def test_minor_sharp_key(self):
+        """A- (A minor, iReal Pro '-' suffix) is relative minor of C; uses sharp names."""
+        notes = self._notes_for_key('A-')
+        self.assertIn('C#', notes)
+
+    def test_minor_flat_key(self):
+        """D- (D minor) is a relative minor of F, uses flat names."""
+        notes = self._notes_for_key('D-')
+        self.assertIn('Bb', notes)
+
+    # ------------------------------------------------------------------
+    # Integration: chord recognition must work with sharp note names
+    # ------------------------------------------------------------------
+
+    def _chord_from_sharp_notes(self, notes: list[str]) -> str | None:
+        from chords import Chord
+        c = Chord.from_notes(notes)
+        return c.name if c is not None else None
+
+    def test_e7_with_sharp_major_third(self):
+        """E7 uses G# (sharp major 3rd); ['E','G#','B','D'] → E7."""
+        name = self._chord_from_sharp_notes(['E', 'G#', 'B', 'D'])
+        self.assertEqual('E7', name)
+
+    def test_d_major_sharp_notes(self):
+        """D major triad uses F# and C#; ['D','F#','A'] → D."""
+        name = self._chord_from_sharp_notes(['D', 'F#', 'A'])
+        self.assertEqual('D', name)
+
+    def test_sharp_minor7(self):
+        """F#m7: ['F#','A','C#','E'] → F#m7."""
+        name = self._chord_from_sharp_notes(['F#', 'A', 'C#', 'E'])
+        self.assertEqual('F#m7', name)
+
+    def test_sharp_dominant_recognized_not_none(self):
+        """A7 with sharp spellings: ['A','C#','E','G'] must be recognised."""
+        name = self._chord_from_sharp_notes(['A', 'C#', 'E', 'G'])
+        self.assertIsNotNone(name)
+        self.assertEqual('A7', name)
+
+    def test_sharp_flat_mixed(self):
+        """Mixed sharp/flat input: ['G','Bb','D'] → Gm (Bb = flat, but still recognised)."""
+        name = self._chord_from_sharp_notes(['G', 'Bb', 'D'])
+        self.assertEqual('Gm', name)
+
+    # ------------------------------------------------------------------
+    # Verify that invalid keys fall back to defaults in _SHARP_KEYS
+    # ------------------------------------------------------------------
+
+    def test_invalid_key_returns_flat_list(self):
+        """An unrecognised key string must not raise; flat list is returned."""
+        notes = self._notes_for_key('X')  # not a valid iReal Pro key
+        self.assertEqual(notes, self._notes_for_key('Db'))  # falls back to flat
+
+    def test_f_sharp_major_not_sharp_key(self):
+        """F# is not a valid iReal Pro key; get_note_names_for_key returns flats."""
+        notes = self._notes_for_key('F#')
+        self.assertIn('Gb', notes)  # flat list, not sharp list
 
 
 if __name__ == '__main__':
