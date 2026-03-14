@@ -41,6 +41,8 @@ On Windows a native menu bar is available (use Alt to activate):
                   Key, Style interactively
 """
 import sys
+import os
+import json
 import time
 import logging
 import collections
@@ -53,6 +55,7 @@ from accessible_output3.outputs.auto import Auto
 from chords import (
     ChordProgression, TimeSignature, Position, Chord,
     SECTION_KEYS, NOTE_NAMES, get_note_names_for_key,
+    chord_name_to_spoken,
 )
 from sound import make_beep, get_output_devices, set_output_device, get_current_output_device
 from midi_handler import MidiHandler
@@ -78,14 +81,8 @@ _CMD_MIDI_OUT_NONE    = 2004
 _CMD_SOUND_OUT_REFRESH  = 2005
 _CMD_SOUND_OUT_NONE     = 2006
 _CMD_SOUND_OUT_DEFAULT  = 2007  # "System default" audio device
-_CMD_SETTINGS_BPM       = 3001
-_CMD_SETTINGS_KEY       = 3002
-_CMD_SETTINGS_STYLE     = 3003
-_CMD_SETTINGS_REC_BPM   = 3004
-_CMD_SETTINGS_TITLE     = 3005
-_CMD_SETTINGS_COMPOSER  = 3006
-_CMD_SETTINGS_TIME_SIG  = 3007
 _CMD_SETTINGS_PROJECT   = 3008  # "Project Settings…" (all-in-one dialog)
+_CMD_SETTINGS_UPDATE    = 3009  # "Check for Updates…"
 _CMD_EDIT_UNDO          = 4001
 _CMD_EDIT_REDO          = 4002
 _CMD_EDIT_CUT           = 4003
@@ -159,6 +156,38 @@ DEFAULT_TIME_SIG = TimeSignature(4, 4)
 SAVE_FILE = "progression.ips"
 
 
+def _get_settings_path() -> Path:
+    """Return the path to the per-user app settings file."""
+    if sys.platform == 'win32':
+        base = Path(os.environ.get('APPDATA', Path.home()))
+    else:
+        base = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
+    return base / 'irealstudio' / 'settings.json'
+
+
+def _load_app_settings() -> dict:
+    """Load saved app settings; return an empty dict on any error."""
+    path = _get_settings_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_settings_file(settings: dict) -> None:
+    """Persist *settings* to the user config directory."""
+    path = _get_settings_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as exc:
+        _app_logger.error("Could not save app settings: %s", exc)
+
+
 def _safe_filename(title: str) -> str:
     """Return a filesystem-safe version of *title* suitable for use as a base filename."""
     import re
@@ -203,6 +232,7 @@ class App:
         # Key modifier tracking (for multi-key shortcuts)
         self.s_held = False
         self.slash_held = False
+        self._s_hook_time: float = 0.0  # monotonic time when S key was pressed
 
         # Recording BPM (may differ from song BPM so user can record at a slower pace)
         self.recording_bpm: int = DEFAULT_BPM
@@ -242,6 +272,7 @@ class App:
             on_nc_pedal=self._on_nc_pedal,
         )
         self._midi.init()
+        self._apply_saved_settings()
 
         # wxPython frame, status labels, and menu handles (created in run())
         self._frame: wx.Frame | None = None
@@ -249,13 +280,6 @@ class App:
         self._midi_menu: wx.Menu | None = None
         self._midi_out_menu: wx.Menu | None = None
         self._sound_out_menu: wx.Menu | None = None
-        self._bpm_item:          wx.MenuItem | None = None
-        self._rec_bpm_item:      wx.MenuItem | None = None
-        self._key_item:          wx.MenuItem | None = None
-        self._style_item:        wx.MenuItem | None = None
-        self._title_item:        wx.MenuItem | None = None
-        self._composer_item:     wx.MenuItem | None = None
-        self._time_sig_item:     wx.MenuItem | None = None
 
         # Current open file path (None = unsaved / new project)
         self._current_file: Path | None = None
@@ -334,7 +358,7 @@ class App:
             self.progression.total_measures = measure
         if self.recording_mode == RECORDING_MODE_OVERWRITE:
             self._overwrite_recorded.add((measure, beat))
-        self.speak(chord.name)
+        self.speak(chord_name_to_spoken(chord.name))
 
     def _on_chord_preview(self, notes: list[int]) -> None:
         """Speak the recognized chord name when a chord is played outside recording."""
@@ -343,7 +367,7 @@ class App:
         ))
         chord = Chord.from_notes(note_names)
         if chord is not None:
-            self.speak(chord.name)
+            self.speak(chord_name_to_spoken(chord.name))
 
     def _on_nc_pedal(self) -> None:
         """Called when the left (soft) pedal is pressed: toggle N.C. on current measure.
@@ -534,35 +558,110 @@ class App:
         self._refresh_midi_devices()
         self._refresh_midi_out_devices()
         self._refresh_sound_out_devices()
-        self._update_settings_labels()
-
-    def _update_settings_labels(self) -> None:
-        """Update the Settings menu items to display current values."""
-        if self._title_item:
-            self._title_item.SetItemLabel(
-                f"&Title: {self.progression.title}...")
-        if self._composer_item:
-            self._composer_item.SetItemLabel(
-                f"C&omposer: {self.progression.composer}...")
-        if self._time_sig_item:
-            self._time_sig_item.SetItemLabel(
-                f"T&ime Signature: {self.progression.time_signature}...")
-        if self._bpm_item:
-            self._bpm_item.SetItemLabel(
-                f"&BPM: {self.progression.bpm}...")
-        if self._rec_bpm_item:
-            self._rec_bpm_item.SetItemLabel(
-                f"&Recording BPM: {self.recording_bpm}...")
-        if self._key_item:
-            self._key_item.SetItemLabel(
-                f"&Key: {self.progression.key}...")
-        if self._style_item:
-            self._style_item.SetItemLabel(
-                f"&Style: {self.progression.style}...")
 
     # ------------------------------------------------------------------
-    # Navigation
+    # App settings persistence (MIDI / audio device selection)
     # ------------------------------------------------------------------
+
+    def _apply_saved_settings(self) -> None:
+        """Restore MIDI and audio device selections from the user config file."""
+        settings = _load_app_settings()
+        if not settings:
+            return
+
+        midi_in = settings.get('midi_input_device', '')
+        if midi_in:
+            names = self._midi.get_input_names()
+            if midi_in in names:
+                self._midi.open_by_name(midi_in)
+            else:
+                _app_logger.warning("Saved MIDI input '%s' not found", midi_in)
+
+        midi_out = settings.get('midi_output_device', '')
+        if midi_out:
+            names = self._midi.get_output_names()
+            if midi_out in names:
+                self._midi.open_output_by_name(midi_out)
+            else:
+                _app_logger.warning("Saved MIDI output '%s' not found", midi_out)
+
+        audio_name = settings.get('audio_output_device_name', '')
+        if audio_name:
+            devices = get_output_devices()
+            for dev_id, dev_name in devices:
+                if dev_name == audio_name:
+                    set_output_device(dev_id)
+                    break
+            else:
+                _app_logger.warning("Saved audio output '%s' not found", audio_name)
+
+    def _save_app_settings(self) -> None:
+        """Persist current device selections to the user config file."""
+        current_out = get_current_output_device()
+        audio_name = ''
+        if current_out is not None:
+            for dev_id, dev_name in get_output_devices():
+                if dev_id == current_out:
+                    audio_name = dev_name
+                    break
+        settings = {
+            'midi_input_device': self._midi.midi_input_name,
+            'midi_output_device': self._midi.midi_output_name,
+            'audio_output_device_name': audio_name,
+        }
+        _save_settings_file(settings)
+
+    # ------------------------------------------------------------------
+    # Update checker
+    # ------------------------------------------------------------------
+
+    def _on_check_for_updates(self) -> None:
+        """Menu handler for Settings → Check for Updates."""
+        from updater import check_for_updates_sync
+        check_for_updates_sync(parent_window=self._frame, silent_if_current=False)
+
+    def _start_background_update_check(self) -> None:
+        """Silently check for updates on startup; notify the user if one is found."""
+        import wx
+        from updater import check_for_updates_async
+
+        def _on_found(tag: str, url: str) -> None:
+            wx.CallAfter(self._notify_update_available, tag, url)
+
+        check_for_updates_async(on_update_found=_on_found)
+
+    def _notify_update_available(self, tag: str, url: str) -> None:
+        """Show a non-blocking update notification in the wx main thread."""
+        import webbrowser as _wb
+        msg = (
+            f"A new version of IReal Studio is available: {tag}\n\n"
+            "Open the download page?"
+        )
+        dlg = wx.MessageDialog(
+            self._frame, msg, "Update Available",
+            wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION,
+        )
+        if dlg.ShowModal() == wx.ID_YES:
+            _wb.open(url)
+        dlg.Destroy()
+
+    # ------------------------------------------------------------------
+    # S-hook helper
+    # ------------------------------------------------------------------
+
+    def _is_s_hook_active(self) -> bool:
+        """Return True if the section-mark hook is armed (within 1 second of S press).
+
+        Side-effect: clears ``s_held`` when the 1-second window has expired,
+        so subsequent calls (and guards like ``not self._is_s_hook_active()``)
+        do not need to handle expiry themselves.
+        """
+        if not self.s_held:
+            return False
+        if time.monotonic() - self._s_hook_time >= 1.0:
+            self.s_held = False
+            return False
+        return True
 
     def navigate(self, direction: str, by_measure: bool = False, by_beat: bool = False) -> None:
         ts = self.progression.time_signature
@@ -627,7 +726,7 @@ class App:
     def _announce_position(self) -> None:
         """Speak a brief position: chord (if any) then 'bar N beat M'."""
         chords_here = self.progression.find_chords_at_position(self.cursor)
-        chord_part = chords_here[0].chord_name() if chords_here else ""
+        chord_part = chords_here[0].chord_name_spoken() if chords_here else ""
         pos_part = f"bar {self.cursor.measure} beat {self.cursor.beat}"
         self.speak(f"{chord_part} {pos_part}".strip())
 
@@ -648,7 +747,7 @@ class App:
                 parts.append("ending 2")
         chords_here = self.progression.find_chords_at_position(self.cursor)
         if chords_here:
-            parts.append(chords_here[0].chord_name())
+            parts.append(chords_here[0].chord_name_spoken())
         parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
         self.speak(" ".join(parts))
 
@@ -683,7 +782,7 @@ class App:
             target = chords[0]
         self._push_undo()
         target.bass_note = note
-        self.speak(target.chord_name())
+        self.speak(target.chord_name_spoken())
 
     def add_volta(self) -> None:
         self._push_undo()
@@ -862,6 +961,7 @@ class App:
             self._midi.open_by_name(names[idx])
             self._refresh_midi_devices()
             self.speak(f"MIDI: {names[idx]}")
+            self._save_app_settings()
 
     def _refresh_midi_out_devices(self) -> None:
         """Rebuild the MIDI Output submenu with currently available output ports."""
@@ -902,6 +1002,7 @@ class App:
         if 0 <= idx < len(names):
             self._midi.open_output_by_name(names[idx])
             self._refresh_midi_out_devices()
+            self._save_app_settings()
 
     def _refresh_sound_out_devices(self) -> None:
         """Rebuild the Sound Output submenu with available audio output devices."""
@@ -952,6 +1053,7 @@ class App:
         set_output_device(None)
         self.speak("Sound output: system default")
         self._refresh_sound_out_devices()
+        self._save_app_settings()
 
     def _on_menu_sound_out_device(self, event: wx.CommandEvent) -> None:
         list_idx = event.GetId() - _SOUND_OUT_DEVICE_BASE
@@ -963,6 +1065,7 @@ class App:
             else:
                 self.speak(f"Could not open: {dev_name}")
             self._refresh_sound_out_devices()
+            self._save_app_settings()
 
     def _menu_change_bpm(self) -> None:
         val = prompt_input(f"BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
@@ -972,7 +1075,6 @@ class App:
                 bpm = int(val)
                 if BPM_MIN <= bpm <= BPM_MAX:
                     self.progression.bpm = bpm
-                    self._update_settings_labels()
                     self.speak(f"BPM set to {bpm}")
                 else:
                     self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
@@ -989,7 +1091,6 @@ class App:
                 bpm = int(val)
                 if BPM_MIN <= bpm <= BPM_MAX:
                     self.recording_bpm = bpm
-                    self._update_settings_labels()
                     self.speak(f"Recording BPM set to {bpm}")
                 else:
                     self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
@@ -1001,7 +1102,6 @@ class App:
                            self.progression.title, parent=self._frame)
         if val is not None:
             self.progression.title = val.strip() or self.progression.title
-            self._update_settings_labels()
             self.speak(f"Title set to {self.progression.title}")
 
     def _menu_change_composer(self) -> None:
@@ -1009,7 +1109,6 @@ class App:
                            self.progression.composer, parent=self._frame)
         if val is not None:
             self.progression.composer = val.strip() or self.progression.composer
-            self._update_settings_labels()
             self.speak(f"Composer set to {self.progression.composer}")
 
     def _menu_change_time_signature(self) -> None:
@@ -1030,7 +1129,6 @@ class App:
                     min(self.cursor.beat, ts.numerator),
                     ts,
                 )
-                self._update_settings_labels()
                 self.speak(f"Time signature set to {ts}")
             except (ValueError, AttributeError):
                 self.speak(f"Invalid time signature: {val}. Use format N/D (e.g. 4/4)")
@@ -1047,7 +1145,6 @@ class App:
         if dlg.ShowModal() == wx.ID_OK:
             key = dlg.GetStringSelection()
             self.progression.key = key
-            self._update_settings_labels()
             self.speak(f"Key set to {key}")
         dlg.Destroy()
 
@@ -1063,7 +1160,6 @@ class App:
         if dlg.ShowModal() == wx.ID_OK:
             style = dlg.GetStringSelection()
             self.progression.style = style
-            self._update_settings_labels()
             self.speak(f"Style set to {style}")
         dlg.Destroy()
 
@@ -1142,7 +1238,6 @@ class App:
                 )
             except (ValueError, AttributeError):
                 pass
-        self._update_settings_labels()
         self.speak(f"Settings updated: {self.progression.title}")
 
     def _insert_chord_from_menu(self) -> None:
@@ -1257,6 +1352,9 @@ class App:
 
         self._schedule_display_update()
 
+        # Start background update check after the window is ready
+        self._start_background_update_check()
+
         wx_app.MainLoop()
 
     def _build_menu_bar(self) -> None:
@@ -1329,22 +1427,6 @@ class App:
         # --- Settings ---
         settings_menu = wx.Menu()
         settings_menu.Append(_CMD_SETTINGS_PROJECT, "&Project Settings...\tCtrl+P")
-        settings_menu.AppendSeparator()
-        self._title_item    = settings_menu.Append(
-            _CMD_SETTINGS_TITLE,    f"&Title: {self.progression.title}...")
-        self._composer_item = settings_menu.Append(
-            _CMD_SETTINGS_COMPOSER, f"C&omposer: {self.progression.composer}...")
-        self._time_sig_item = settings_menu.Append(
-            _CMD_SETTINGS_TIME_SIG, f"T&ime Signature: {self.progression.time_signature}...")
-        settings_menu.AppendSeparator()
-        self._bpm_item      = settings_menu.Append(
-            _CMD_SETTINGS_BPM,      f"&BPM: {self.progression.bpm}...")
-        self._rec_bpm_item  = settings_menu.Append(
-            _CMD_SETTINGS_REC_BPM,  f"&Recording BPM: {self.recording_bpm}...")
-        self._key_item      = settings_menu.Append(
-            _CMD_SETTINGS_KEY,      f"&Key: {self.progression.key}...")
-        self._style_item    = settings_menu.Append(
-            _CMD_SETTINGS_STYLE,    f"&Style: {self.progression.style}...")
 
         # Device sub-menus under Settings
         settings_menu.AppendSeparator()
@@ -1362,6 +1444,9 @@ class App:
         self._sound_out_menu.AppendSeparator()
         self._sound_out_menu.Append(_CMD_SOUND_OUT_REFRESH, "&Refresh devices")
         settings_menu.AppendSubMenu(self._sound_out_menu, "&Sound Output")
+
+        settings_menu.AppendSeparator()
+        settings_menu.Append(_CMD_SETTINGS_UPDATE, "Check for &Updates...")
 
         menu_bar.Append(settings_menu, "&Settings")
 
@@ -1430,6 +1515,8 @@ class App:
         # Settings
         self._frame.Bind(wx.EVT_MENU, lambda e: self._open_project_settings(),
                          id=_CMD_SETTINGS_PROJECT)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
+                         id=_CMD_SETTINGS_UPDATE)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
                          id=_CMD_MIDI_REFRESH)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_out_refresh,
@@ -1438,20 +1525,6 @@ class App:
                          id=_CMD_SOUND_OUT_REFRESH)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_default,
                          id=_CMD_SOUND_OUT_DEFAULT)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_title(),
-                         id=_CMD_SETTINGS_TITLE)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_composer(),
-                         id=_CMD_SETTINGS_COMPOSER)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_time_signature(),
-                         id=_CMD_SETTINGS_TIME_SIG)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_bpm(),
-                         id=_CMD_SETTINGS_BPM)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_recording_bpm(),
-                         id=_CMD_SETTINGS_REC_BPM)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_key(),
-                         id=_CMD_SETTINGS_KEY)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_style(),
-                         id=_CMD_SETTINGS_STYLE)
         # Bind entire device ID ranges (no per-device rebinding needed)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_device,
                          id=_MIDI_DEVICE_BASE, id2=_MIDI_DEVICE_BASE + 99)
@@ -1546,10 +1619,10 @@ class App:
 
         # Navigation
         # Left/Right: chord navigation by default; Ctrl: by measure; Alt: by beat
-        elif key == 'left' and not self.s_held:
+        elif key == 'left' and not self._is_s_hook_active():
             if self._recorder.state == AppState.IDLE:
                 self.navigate('left', by_measure=ctrl, by_beat=alt)
-        elif key == 'right' and not self.s_held:
+        elif key == 'right' and not self._is_s_hook_active():
             if self._recorder.state == AppState.IDLE:
                 self.navigate('right', by_measure=ctrl, by_beat=alt)
         elif key == 'home' and ctrl:
@@ -1616,35 +1689,36 @@ class App:
                 self.delete_at_cursor()
 
         # N – toggle no chord
-        elif key == 'n' and not ctrl and not self.s_held and not self.slash_held:
+        elif key == 'n' and not ctrl and not self._is_s_hook_active() and not self.slash_held:
             if self._recorder.state == AppState.IDLE:
                 self.toggle_no_chord()
 
-        # S key held for section marks
+        # S key – arm section-mark hook (1-second window)
         elif key == 's' and not ctrl:
             self.s_held = True
+            self._s_hook_time = time.monotonic()
 
         # / held for slash chords
         elif key == 'slash':
             self.slash_held = True
 
         # P – verbose position (section, ending, chord, bar, beat)
-        elif key == 'p' and not ctrl and not self.s_held:
+        elif key == 'p' and not ctrl and not self._is_s_hook_active():
             self._announce_position_verbose()
 
         # V key – volta (only when not using S modifier)
-        elif key == 'v' and not ctrl and not self.s_held:
+        elif key == 'v' and not ctrl and not self._is_s_hook_active():
             self.add_volta()
 
         # D key – debug: speak beat offset during recording/pre-count/playback
-        elif key == 'd' and not ctrl and not self.s_held:
+        elif key == 'd' and not ctrl and not self._is_s_hook_active():
             if self._recorder.state != AppState.IDLE:
                 offset = self._recorder.beat_offset_ms()
                 self.speak(f"Beat offset {offset:.0f} milliseconds")
 
         # Letter keys A-Z
         elif len(key) == 1 and key.isalpha():
-            if self.s_held:
+            if self._is_s_hook_active():
                 self.add_section_mark(key)
                 self.s_held = False
             elif self.slash_held:
@@ -1656,9 +1730,8 @@ class App:
     def _on_keyup(self, event: wx.KeyEvent) -> None:
         kc  = event.GetKeyCode()
         key = _WX_KEY_SYM.get(kc) or (chr(kc).lower() if 32 <= kc < 127 else '')
-        if key == 's':
-            self.s_held = False
-        elif key == 'slash':
+        # S keyup no longer clears the hook — the 1-second timer handles expiry.
+        if key == 'slash':
             self.slash_held = False
         event.Skip()
 

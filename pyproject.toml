@@ -19,3 +19,34 @@ dependencies = [
 dev = [
     "nuitka>=4.0.5",
 ]
+
+[tool.nuitka]
+# Entry point
+script-name = "main.pyw"
+
+# Output a self-contained single-file executable
+onefile = true
+output-dir = "dist"
+
+# Disable the Windows console window (GUI application)
+windows-console-mode = "disable"
+
+# Let Nuitka download any required C compiler tools automatically
+assume-yes-for-downloads = true
+
+# Suppress progress bar and most informational output in CI
+no-progressbar = true
+quiet = true
+
+# Follow all imports so that runtime-imported modules are included
+follow-imports = true
+
+# Reduce bloat by excluding test frameworks and unused stdlib modules
+nofollow-import-to = [
+    "unittest",
+    "doctest",
+    "pdb",
+    "tkinter",
+    "test",
+]
+

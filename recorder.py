@@ -249,7 +249,7 @@ class Recorder:
 
             chords_here = progression.find_chords_at_position(cur)
             if chords_here:
-                self._speak(chords_here[0].chord_name())
+                self._speak(chords_here[0].chord_name_spoken())
 
             play_sound(self._tick if cur.beat == 1 else self._tock)
 

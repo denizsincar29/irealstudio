@@ -919,5 +919,105 @@ class TestNoChordMeasure(unittest.TestCase):
         self.assertIn('x', meas)
 
 
+class TestChordSpokenName(unittest.TestCase):
+    """Tests for chord_name_to_spoken() human-readable chord name conversion."""
+
+    def _spoken(self, name: str) -> str:
+        from chords import chord_name_to_spoken
+        return chord_name_to_spoken(name)
+
+    def test_major_triad(self):
+        self.assertEqual('C', self._spoken('C'))
+
+    def test_minor_triad(self):
+        self.assertEqual('A minor', self._spoken('Am'))
+
+    def test_dominant7(self):
+        self.assertEqual('G 7', self._spoken('G7'))
+
+    def test_major7(self):
+        self.assertEqual('C major 7', self._spoken('Cmaj7'))
+
+    def test_minor7(self):
+        self.assertEqual('D minor 7', self._spoken('Dm7'))
+
+    def test_m7b5_half_diminished(self):
+        self.assertEqual('B half diminished', self._spoken('Bm7b5'))
+
+    def test_dim(self):
+        self.assertEqual('C diminished', self._spoken('Cdim'))
+
+    def test_dim7(self):
+        self.assertEqual('C diminished 7', self._spoken('Cdim7'))
+
+    def test_aug(self):
+        self.assertEqual('C augmented', self._spoken('Caug'))
+
+    def test_sus4(self):
+        self.assertEqual('C sus 4', self._spoken('Csus4'))
+
+    def test_7sus4(self):
+        self.assertEqual('G 7 sus 4', self._spoken('G7sus4'))
+
+    def test_mM7(self):
+        self.assertEqual('C minor major 7', self._spoken('CmM7'))
+
+    def test_add9(self):
+        self.assertEqual('C add 9', self._spoken('Cadd9'))
+
+    def test_six_nine(self):
+        self.assertEqual('C 6 9', self._spoken('C6/9'))
+
+    def test_six(self):
+        self.assertEqual('C 6', self._spoken('C6'))
+
+    def test_minor6(self):
+        self.assertEqual('A minor 6', self._spoken('Am6'))
+
+    def test_minor6_9(self):
+        self.assertEqual('C minor 6 9', self._spoken('Cm6/9'))
+
+    def test_sharp_root(self):
+        self.assertEqual('F sharp 7', self._spoken('F#7'))
+
+    def test_flat_root(self):
+        self.assertEqual('B flat major 7', self._spoken('Bbmaj7'))
+
+    def test_slash_chord(self):
+        self.assertEqual('C over E', self._spoken('C/E'))
+
+    def test_slash_chord_with_quality(self):
+        self.assertEqual('G 7 over B', self._spoken('G7/B'))
+
+    def test_slash_chord_flat_bass(self):
+        self.assertEqual('C major 7 over E flat', self._spoken('Cmaj7/Eb'))
+
+    def test_dominant7_with_b9_extension(self):
+        self.assertEqual('G 7 flat 9', self._spoken('G7(b9)'))
+
+    def test_dominant7_with_sharp9_extension(self):
+        self.assertEqual('C 7 sharp 9', self._spoken('C7(#9)'))
+
+    def test_m7b5_with_b9(self):
+        self.assertEqual('B half diminished flat 9', self._spoken('Bm7b5(b9)'))
+
+    def test_empty_string(self):
+        self.assertEqual('', self._spoken(''))
+
+    def test_progression_item_chord_name_spoken(self):
+        """ProgressionItem.chord_name_spoken() must use the spoken form."""
+        from chords import ProgressionItem, Chord, Position, TimeSignature
+        pos = Position(1, 1, TimeSignature(4, 4))
+        item = ProgressionItem(chord=Chord('Am7b5'), position=pos, bass_note='')
+        self.assertEqual('A half diminished', item.chord_name_spoken())
+
+    def test_progression_item_spoken_with_bass(self):
+        """Slash chords in ProgressionItem.chord_name_spoken() include 'over'."""
+        from chords import ProgressionItem, Chord, Position, TimeSignature
+        pos = Position(1, 1, TimeSignature(4, 4))
+        item = ProgressionItem(chord=Chord('Cmaj7'), position=pos, bass_note='E')
+        self.assertEqual('C major 7 over E', item.chord_name_spoken())
+
+
 if __name__ == '__main__':
     unittest.main()
