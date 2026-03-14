@@ -16,15 +16,6 @@ msgstr "Ошибка генерации QR-кода: {e}"
 msgid "QR code ready but no window to display it"
 msgstr "QR-код готов, но нет окна для отображения"
 
-msgid "QR code saved to {qr_file}"
-msgstr "QR-код сохранён в {qr_file}"
-
-msgid "QR code export failed: {e2}"
-msgstr "Ошибка экспорта QR-кода: {e2}"
-
-msgid "QR code for {title}. Press OK to close."
-msgstr "QR-код для «{title}». Нажмите OK для закрытия."
-
 # --- keyboard shortcuts dialog ---
 msgid "Keyboard Shortcuts – IReal Studio"
 msgstr "Горячие клавиши – IReal Studio"

@@ -1183,24 +1183,20 @@ class App:
             self.speak(_("QR code ready but no window to display it"))
             return
 
+        # Try to render the SVG as a bitmap; image is optional – the dialog
+        # is always shown regardless so the URL remains accessible.
+        bmp: wx.Bitmap | None = None
         try:
             svg_image = wx.SVGimage.CreateFromBytes(svg_bytes)
             bmp = svg_image.ConvertToScaledBitmap(wx.Size(320, 320), self._frame)
         except Exception:
-            # SVG rendering not available – save to file as fallback
-            qr_file = _safe_filename(self.progression.title) + '_qrcode.svg'
-            try:
-                with open(qr_file, 'wb') as f:
-                    f.write(svg_bytes)
-                self.speak(_("QR code saved to {qr_file}").format(qr_file=qr_file))
-            except Exception as e2:
-                self.speak(_("QR code export failed: {e2}").format(e2=e2))
-            return
+            pass  # No SVG support – dialog still shows without the image
 
         dlg = wx.Dialog(self._frame, title=f"QR Code – {self.progression.title}")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        static_bmp = wx.StaticBitmap(dlg, bitmap=bmp)
-        sizer.Add(static_bmp, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        if bmp is not None:
+            static_bmp = wx.StaticBitmap(dlg, bitmap=bmp)
+            sizer.Add(static_bmp, 0, wx.ALL | wx.ALIGN_CENTER, 10)
         url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
         url_label.SetMaxSize(wx.Size(320, -1))
         sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
@@ -1208,9 +1204,6 @@ class App:
         ok_btn.SetDefault()
         sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 10)
         dlg.SetSizerAndFit(sizer)
-        # Announce before ShowModal (which blocks) so screen readers hear it
-        self.speak(_("QR code for {title}. Press OK to close.").format(
-            title=self.progression.title))
         dlg.ShowModal()
         dlg.Destroy()
 
