@@ -86,7 +86,6 @@ dependencies = [
     { name = "accessible-output3" },
     { name = "mido" },
     { name = "numpy" },
-    { name = "pychord" },
     { name = "pyrealpro" },
     { name = "python-rtmidi" },
     { name = "sounddevice" },
@@ -98,7 +97,6 @@ requires-dist = [
     { name = "accessible-output3", specifier = ">=0.1.2" },
     { name = "mido", specifier = ">=1.3.3" },
     { name = "numpy", specifier = ">=2.4.3" },
-    { name = "pychord", specifier = ">=1.3.2" },
     { name = "pyrealpro", specifier = ">=0.2.0" },
     { name = "python-rtmidi", specifier = ">=1.5.8" },
     { name = "sounddevice", specifier = ">=0.5.5" },
@@ -222,15 +220,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/19/56/8d4c30c8a1d07013911a8fdbd8f89440ef9f08d07a1b50ab8ca8be5a20f9/platformdirs-4.9.4.tar.gz", hash = "sha256:1ec356301b7dc906d83f371c8f487070e99d3ccf9e501686456394622a01a934", size = 28737, upload-time = "2026-03-05T18:34:13.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/d7/97f7e3a6abb67d8080dd406fd4df842c2be0efaf712d1c899c32a075027c/platformdirs-4.9.4-py3-none-any.whl", hash = "sha256:68a9a4619a666ea6439f2ff250c12a853cd1cbd5158d258bd824a7df6be2f868", size = 21216, upload-time = "2026-03-05T18:34:12.172Z" },
-]
-
-[[package]]
-name = "pychord"
-version = "1.3.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0c/57/9b42e829d034d19dcba6b40f52d2884eaf036a2df05cdd09c6f49a203dcc/pychord-1.3.2.tar.gz", hash = "sha256:04dbdfe5b868eb2af6b0c7d3d04ce9e23f9c90751fd34b2d878365b2ce5314b5", size = 17089, upload-time = "2026-01-25T11:41:55.682Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/0c/0bcf8a79b677cf7a2b7ab7dfbcf8db4a256fcf7b21ccbe31d6d0e0b292ea/pychord-1.3.2-py3-none-any.whl", hash = "sha256:a45abb15aa407339a903f389108297deaf0b3935f54070cb115b966addd18719", size = 13687, upload-time = "2026-01-25T11:41:54.596Z" },
 ]
 
 [[package]]

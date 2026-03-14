@@ -44,6 +44,10 @@ class Recorder:
         self._playback_thread: threading.Thread | None = None
         self.playback_stopped_at: Position | None = None
 
+        # Beat-timing debug: updated each beat (monotonic time) so the UI can
+        # query the offset since the last beat fired.
+        self._last_beat_time: float | None = None
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -92,6 +96,8 @@ class Recorder:
                 self.state = AppState.IDLE
                 return
             b = i % beats
+            # Record when this beat fires for debug offset queries.
+            self._last_beat_time = time.monotonic()
             # Play the click first so the sound lands precisely on the beat;
             # speech follows asynchronously and is heard just after the click.
             play_sound(self._tick if b == 0 else self._tock)
@@ -139,6 +145,9 @@ class Recorder:
             abs_beat_0 = cursor_beat_offset + beat_count
             logical_measure = abs_beat_0 // beats + 1
             logical_beat = abs_beat_0 % beats + 1
+
+            # Record when this beat fires for debug offset queries.
+            self._last_beat_time = time.monotonic()
 
             if logical_beat == 1:
                 if progression.is_in_hidden_range(logical_measure):
@@ -217,6 +226,9 @@ class Recorder:
                 last_m = max(last_m, vb.ending2_start)
 
         while not self._playback_stop.is_set():
+            # Record when this beat fires for debug offset queries.
+            self._last_beat_time = time.monotonic()
+
             chords_here = progression.find_chords_at_position(cur)
             if chords_here:
                 self._speak(chords_here[0].chord_name())
@@ -245,6 +257,19 @@ class Recorder:
     # ------------------------------------------------------------------
     # Control
     # ------------------------------------------------------------------
+
+    def beat_offset_ms(self) -> float:
+        """
+        Return the time elapsed (in milliseconds) since the last metronome beat fired.
+
+        This is a phase metric: it tells you how far into the current beat interval
+        the query was made.  A small value means the beat just fired; a large value
+        means the query was made well after the beat.  Returns 0.0 when no beat has
+        been recorded yet.
+        """
+        if self._last_beat_time is None:
+            return 0.0
+        return (time.monotonic() - self._last_beat_time) * 1000.0
 
     def stop_all(self) -> None:
         """Stop both the metronome/recording and playback threads."""
