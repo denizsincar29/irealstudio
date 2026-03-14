@@ -641,6 +641,64 @@ def _spoken_root(root: str) -> str:
     return root
 
 
+# Extension-token spoken forms (order matters: longer tokens first)
+_EXT_SPOKEN: list[tuple[str, str]] = [
+    ('#11', 'sharp 11'), ('b13', 'flat 13'), ('#9', 'sharp 9'),
+    ('b9', 'flat 9'), ('#5', 'sharp 5'), ('b5', 'flat 5'),
+    ('13', '13'), ('11', '11'), ('9', '9'),
+]
+
+
+def _spoken_quality_fallback(quality: str) -> str:
+    """Spoken form for a quality string not found in ``_SPOKEN_QUALITY_MAP``.
+
+    Tries a longest-prefix match against the map for the base quality, then
+    reads any trailing extension tokens (e.g. ``#11``, ``b9``) aloud.
+    Falls back to the literal string when nothing matches.
+
+    Example::
+
+        _spoken_quality_fallback('mM7#11')  → 'minor major 7 sharp 11'
+        _spoken_quality_fallback('maj7b5')  → 'major 7 flat 5'
+    """
+    # Strip outer parentheses from extensions like "(#11)" → "#11"
+    inner = quality
+    if inner.startswith('(') and inner.endswith(')'):
+        inner = inner[1:-1]
+
+    # Try to find a known base quality prefix (longest match wins)
+    best_base = ''
+    best_base_spoken = ''
+    for src, dst in _SPOKEN_QUALITY_MAP:
+        if inner.startswith(src) and len(src) > len(best_base):
+            best_base = src
+            best_base_spoken = dst
+
+    remainder = inner[len(best_base):]
+    # Strip parentheses from the extension part
+    if remainder.startswith('(') and remainder.endswith(')'):
+        remainder = remainder[1:-1]
+
+    # Tokenize the remainder into recognised extension pieces
+    ext_parts: list[str] = []
+    pos = 0
+    while pos < len(remainder):
+        matched = False
+        for token, spoken in _EXT_SPOKEN:
+            if remainder[pos:].startswith(token):
+                ext_parts.append(spoken)
+                pos += len(token)
+                matched = True
+                break
+        if not matched:
+            # Unrecognized fragment - return whole string as-is to avoid garbling
+            return quality
+    combined = best_base_spoken
+    if ext_parts:
+        combined = (combined + ' ' if combined else '') + ' '.join(ext_parts)
+    return combined or quality
+
+
 def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
     """Convert a chord name to a human-readable spoken string.
 
@@ -699,9 +757,9 @@ def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
         if quality_and_ext == src:
             quality_spoken = dst
             break
-    # Unrecognized non-empty quality: use as-is
+    # Unrecognized non-empty quality: try longest-prefix match + spoken extension
     if not quality_spoken and quality_and_ext:
-        quality_spoken = quality_and_ext
+        quality_spoken = _spoken_quality_fallback(quality_and_ext)
 
     parts: list[str] = [_spoken_root(root)]
     if quality_spoken:
@@ -868,6 +926,13 @@ class ChordProgression:
     def get_section_mark(self, measure: int) -> str | None:
         for s in self.section_marks:
             if s.measure == measure:
+                return s.mark
+        return None
+
+    def get_section_at_measure(self, measure: int) -> str | None:
+        """Return the section mark that governs *measure* (the last mark at or before it)."""
+        for s in reversed(self.section_marks):
+            if s.measure <= measure:
                 return s.mark
         return None
 
