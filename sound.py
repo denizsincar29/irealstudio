@@ -73,6 +73,7 @@ def _open_stream(device: int | None = None) -> None:
             callback=_callback,
             blocksize=_BLOCK_SIZE,
             device=device,
+            latency='low',
         )
         _stream.start()
     except Exception:

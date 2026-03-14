@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: irealstudio.exe
+            nuitka_output: irealstudio.exe
+          - os: ubuntu-latest
+            artifact_name: irealstudio-linux
+            nuitka_output: irealstudio.bin
+          - os: macos-latest
+            artifact_name: irealstudio-macos
+            nuitka_output: irealstudio.bin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # wxPython wheels are not available for all Linux environments; install
+      # build tools and the GTK headers so pip can build from source if needed.
+      # These must come BEFORE `uv sync` so that native extensions (wxPython,
+      # sounddevice) can compile successfully when no binary wheel is available.
+      - name: Install Linux GTK deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            freeglut3-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libpng-dev \
+            libjpeg-dev \
+            libtiff-dev \
+            libsm-dev \
+            libxext-dev \
+            libxrender-dev \
+            libxxf86vm-dev \
+            libnotify-dev \
+            libsdl2-dev \
+            portaudio19-dev \
+            ccache \
+            patchelf
+
+      - name: Install macOS audio deps
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Build executable (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          uv run nuitka `
+            --onefile `
+            --output-filename=irealstudio.exe `
+            --output-dir=dist `
+            --windows-console-mode=disable `
+            --assume-yes-for-downloads `
+            --no-progressbar `
+            --quiet `
+            main.pyw
+
+      - name: Build executable (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          uv run nuitka \
+            --onefile \
+            --output-filename=irealstudio.bin \
+            --output-dir=dist \
+            --assume-yes-for-downloads \
+            --no-progressbar \
+            --quiet \
+            main.pyw
+
+      - name: Rename artifact (Linux)
+        if: runner.os == 'Linux'
+        run: cp dist/irealstudio.bin dist/irealstudio-linux
+
+      - name: Rename artifact (macOS)
+        if: runner.os == 'macOS'
+        run: cp dist/irealstudio.bin dist/irealstudio-macos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read news.md
+        id: changelog
+        run: |
+          # news.md contains only the current release notes; use it as-is.
+          cp news.md release_notes.txt
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: release_notes.txt
+          files: |
+            artifacts/irealstudio.exe/irealstudio.exe
+            artifacts/irealstudio-linux/irealstudio-linux
+            artifacts/irealstudio-macos/irealstudio-macos
+          draft: false
+          prerelease: false

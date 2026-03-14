@@ -558,6 +558,160 @@ def _chord_name_to_ireal(name: str) -> str:
     return name  # unchanged — already canonical or unknown
 
 
+# ---------------------------------------------------------------------------
+# Human-readable spoken chord names
+# ---------------------------------------------------------------------------
+
+# Spoken quality map: (quality_string, spoken_text).
+# Each entry is matched with strict equality against the quality portion of the
+# chord name, so ordering within this list does not affect which entry matches.
+# Entries that share a prefix (e.g. 'm7' and 'm7b5') are still distinct because
+# the comparison is exact.
+_SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
+    ('mM7',          'minor major 7'),
+    ('mM7(9)',        'minor major 9'),
+    ('m7b5',          'half diminished'),
+    ('m7(b5)',        'half diminished'),
+    ('m7b5(b9)',      'half diminished flat 9'),
+    ('m7b5(9)',       'half diminished 9'),
+    ('m7(9)',         'minor 9'),
+    ('m7(#11)',       'minor 7 sharp 11'),
+    ('m7(13)',        'minor 13'),
+    ('m7',            'minor 7'),
+    ('m6/9',          'minor 6 9'),
+    ('m6',            'minor 6'),
+    ('m9',            'minor 9'),
+    ('m11',           'minor 11'),
+    ('m13',           'minor 13'),
+    ('m#5',           'minor sharp 5'),
+    ('m',             'minor'),
+    ('maj13',         'major 13'),
+    ('maj9',          'major 9'),
+    ('maj7(9#11)',    'major 9 sharp 11'),
+    ('maj7(9)',       'major 9'),
+    ('maj7(#11)',     'major 7 sharp 11'),
+    ('maj7(13)',      'major 13'),
+    ('maj7',          'major 7'),
+    ('7(b9#11)',      '7 flat 9 sharp 11'),
+    ('7(#9#11)',      '7 sharp 9 sharp 11'),
+    ('7(b9b5)',       '7 flat 9 flat 5'),
+    ('7(#9b5)',       '7 sharp 9 flat 5'),
+    ('7(9b5)',        '9 flat 5'),
+    ('7(b5)',         '7 flat 5'),
+    ('7(#9#5)',       '7 sharp 9 sharp 5'),
+    ('7(b9#5)',       '7 flat 9 sharp 5'),
+    ('7(b9)',         '7 flat 9'),
+    ('7(#9)',         '7 sharp 9'),
+    ('7(9)',          '9'),
+    ('7(#11)',        '7 sharp 11'),
+    ('7(b13)',        '7 flat 13'),
+    ('7(13)',         '13'),
+    ('6/9',           '6 9'),
+    ('dim7',          'diminished 7'),
+    ('dim',           'diminished'),
+    ('aug7',          'augmented 7'),
+    ('augM7',         'augmented major 7'),
+    ('aug',           'augmented'),
+    ('7sus4',         '7 sus 4'),
+    ('sus4',          'sus 4'),
+    ('7sus',          '7 sus 4'),
+    ('sus',           'sus 4'),
+    ('add9',          'add 9'),
+    ('13',            '13'),
+    ('11',            '11'),
+    ('9',             '9'),
+    ('7',             '7'),
+    ('6',             '6'),
+]
+
+
+def _spoken_root(root: str) -> str:
+    """Convert a note name (``C#``, ``Bb``, etc.) to its spoken form.
+
+    Example::
+
+        _spoken_root('C#')  → 'C sharp'
+        _spoken_root('Bb')  → 'B flat'
+        _spoken_root('G')   → 'G'
+    """
+    if root.endswith('#'):
+        return root[:-1] + ' sharp'
+    if len(root) == 2 and root[1] == 'b':
+        return root[0] + ' flat'
+    return root
+
+
+def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
+    """Convert a chord name to a human-readable spoken string.
+
+    Parameters
+    ----------
+    name:
+        Chord name in canonical form (e.g. ``'Cmaj7'``, ``'Am7b5'``,
+        ``'C/E'``).  A slash followed by an upper-case letter is treated as a
+        bass-note inversion; ``'Cm6/9'`` is treated as a quality (the ``/``
+        precedes a digit).
+    bass_note:
+        Optional bass note supplied separately (e.g. from
+        ``ProgressionItem.bass_note``).  When provided it overrides any
+        slash-note embedded in *name*.
+
+    Example::
+
+        chord_name_to_spoken('Cmaj7')        → 'C major 7'
+        chord_name_to_spoken('Am7b5')        → 'A half diminished'
+        chord_name_to_spoken('Caug')         → 'C augmented'
+        chord_name_to_spoken('Csus4')        → 'C sus 4'
+        chord_name_to_spoken('G7(b9)')       → 'G 7 flat 9'
+        chord_name_to_spoken('C/E')          → 'C over E'
+        chord_name_to_spoken('Cm6/9')        → 'C minor 6 9'
+        chord_name_to_spoken('Cmaj7', 'E')   → 'C major 7 over E'
+    """
+    if not name:
+        return ''
+
+    # Parse root (try two-char roots first, then one-char)
+    root = ''
+    for r in _ALL_ROOTS:
+        if name.startswith(r):
+            root = r
+            break
+
+    quality_and_ext = name[len(root):]
+
+    # Detect slash-chord bass note embedded in *name*: a '/' not followed by a
+    # digit distinguishes 'C/E' (inversion) from 'Cm6/9' (quality).
+    # An explicit *bass_note* argument takes precedence.
+    embedded_bass = ''
+    for idx in range(len(quality_and_ext) - 1, -1, -1):
+        if quality_and_ext[idx] == '/':
+            after = quality_and_ext[idx + 1:]
+            if after and after[0].isupper():
+                embedded_bass = after
+                quality_and_ext = quality_and_ext[:idx]
+                break
+
+    resolved_bass = bass_note or embedded_bass
+
+    # Look up quality in the spoken map (empty quality → major triad, no suffix)
+    quality_spoken = ''
+    for src, dst in _SPOKEN_QUALITY_MAP:
+        if quality_and_ext == src:
+            quality_spoken = dst
+            break
+    # Unrecognized non-empty quality: use as-is
+    if not quality_spoken and quality_and_ext:
+        quality_spoken = quality_and_ext
+
+    parts: list[str] = [_spoken_root(root)]
+    if quality_spoken:
+        parts.append(quality_spoken)
+    result = ' '.join(parts)
+    if resolved_bass:
+        result += ' over ' + _spoken_root(resolved_bass)
+    return result
+
+
 @total_ordering
 @dataclass
 class ProgressionItem:
@@ -577,6 +731,10 @@ class ProgressionItem:
         if self.bass_note:
             name += f"/{self.bass_note}"
         return name
+
+    def chord_name_spoken(self) -> str:
+        """Return the full chord name as a human-readable spoken string."""
+        return chord_name_to_spoken(self.chord.name, self.bass_note)
 
     def ireal_chord_name(self) -> str:
         """Return the chord name translated to iReal Pro canonical format.
