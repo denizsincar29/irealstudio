@@ -278,3 +278,203 @@
 10:58:38 INFO  C7(b913)
 10:59:10 DEBUG Closing MIDI port: Nord Piano 6 MIDI 0
 10:59:10 DEBUG MIDI reader thread stopped
+18:44:53 INFO  MIDI: 2 devices found
+18:44:53 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+18:44:53 INFO  MIDI connected: MOTU M Series MIDI In 0
+18:50:52 INFO  IReal Studio ready. Denizian strange blues. Press R to record.
+18:51:26 INFO  Stopped
+18:51:27 INFO  Stopped
+18:51:28 DEBUG Closing MIDI port: MOTU M Series MIDI In 0
+18:51:28 DEBUG MIDI reader thread stopped
+18:52:02 INFO  MIDI: 2 devices found
+18:52:02 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+18:52:02 INFO  MIDI connected: MOTU M Series MIDI In 0
+18:52:06 INFO  IReal Studio ready. My Progression. Press R to record.
+18:52:43 INFO  MIDI out: Nord Piano 6 MIDI 2
+18:52:58 DEBUG MIDI reader thread stopped
+18:52:58 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+18:52:58 INFO  MIDI connected: Nord Piano 6 MIDI 1
+18:52:58 INFO  MIDI: Nord Piano 6 MIDI 1
+18:53:00 INFO  Gsus4
+18:53:02 INFO  Cm7
+18:53:04 INFO  F#6
+18:53:09 INFO  F#7(913)
+18:53:13 INFO  F#7(#913)
+18:53:17 INFO  C
+18:53:20 INFO  G7sus4(13)
+18:53:23 INFO  Csus4
+18:53:27 INFO  C7sus4
+18:53:28 INFO  C7sus4(b9)
+18:53:34 INFO  G#7sus4(13)
+18:53:36 INFO  G#7sus4(13)
+18:53:39 INFO  G#aug7
+18:53:41 INFO  G#7sus4(13)
+18:53:44 INFO  G#7sus4(b913)
+18:53:50 INFO  G#7sus4(b913)
+18:53:54 INFO  G#7sus4(b9)
+18:53:58 INFO  C7(b9#1113)
+18:54:04 INFO  C
+18:54:05 INFO  C
+18:54:09 INFO  C7(b9b5)
+18:54:13 INFO  C
+18:54:14 INFO  C7(b5)
+18:54:17 INFO  C
+18:54:17 INFO  E
+18:54:19 INFO  E
+18:54:20 INFO  F
+18:54:21 INFO  G
+18:54:21 INFO  A
+18:54:22 INFO  C
+18:54:25 INFO  F
+18:54:27 INFO  G#
+18:54:30 INFO  C#m7(9)
+18:54:32 INFO  F#7(913)
+18:54:33 INFO  Bmaj7(9)
+18:54:34 INFO  Bmaj7(9)
+18:54:35 INFO  D6
+18:54:38 INFO  Gmaj7
+18:54:41 INFO  Bmaj7(9)
+18:54:42 INFO  D6
+18:54:43 INFO  A#aug
+18:54:44 INFO  A#7(13)
+18:54:46 INFO  D#maj7(9)
+18:54:47 INFO  Am7(9)
+18:54:48 INFO  D7(b9)
+18:54:49 INFO  Gmaj7(9)
+18:54:50 INFO  A#aug7
+18:54:51 INFO  D#6/9
+18:54:52 INFO  F#7(13)
+18:54:53 INFO  Badd9
+18:54:53 INFO  C
+18:54:53 INFO  Fm7(9)
+18:54:54 INFO  A#7
+18:54:55 INFO  D#mM7
+18:55:44 INFO  Settings updated: Denizian sstrange blues
+18:55:48 INFO  Dbmaj7(13)
+18:55:50 INFO  Dbmaj7(9)
+18:55:52 INFO  Ebm7(9)
+18:55:52 INFO  Ab7(913)
+18:55:53 INFO  Dm7(9)
+18:55:54 INFO  G7(b913)
+18:55:56 INFO  Bmaj7(9)
+18:56:00 INFO  Bmaj7sus4(13)
+18:56:03 INFO  Bm#5
+18:56:04 INFO  C
+18:56:09 INFO  Dm7b5
+18:56:11 INFO  G7(b9)
+18:56:14 INFO  CmM7(9)
+18:56:19 INFO  Aaug7
+18:56:21 INFO  A
+18:56:22 INFO  C
+18:56:23 INFO  C
+18:56:23 INFO  C
+18:56:23 INFO  C
+18:56:23 INFO  C
+18:56:24 INFO  C
+18:56:24 INFO  C
+18:56:26 INFO  C
+18:56:30 INFO  C7sus4(13)
+18:56:31 INFO  Ebmaj7(#11)
+18:56:33 INFO  CmM7(913)
+18:56:36 INFO  Cm(13)
+18:56:38 INFO  Cm(13)
+18:56:40 INFO  Cm(13)
+18:56:45 INFO  C7sus4(13)
+18:56:51 INFO  C7sus4(b913)
+18:56:56 INFO  Fm
+18:56:57 INFO  Gdim
+18:56:59 INFO  Em#5
+18:57:01 INFO  F
+18:57:01 INFO  C
+18:57:01 INFO  Ab
+18:57:01 INFO  F
+18:57:02 INFO  G
+18:57:02 INFO  Db
+18:57:03 INFO  Bb
+18:57:03 INFO  F
+18:57:03 INFO  Csus4
+18:57:03 INFO  F
+18:57:04 INFO  C
+18:57:04 INFO  Ab
+18:57:04 INFO  F
+18:57:05 INFO  Db
+18:57:06 INFO  Fsus4
+18:57:06 INFO  Gsus4
+18:57:11 INFO  Dbmaj7(9#1113)
+18:57:12 INFO  Eb
+18:57:13 INFO  Bbm(9)
+18:57:13 INFO  Ab
+18:57:13 INFO  F
+18:57:13 INFO  Db
+18:57:13 INFO  Bb
+18:57:13 INFO  Ab
+18:57:14 INFO  Dbadd9
+18:57:14 INFO  C
+18:57:16 INFO  Ab6/9
+18:57:18 INFO  Absus4(13)
+18:57:20 INFO  Csus4(b9)
+18:57:21 INFO  Cm#5
+18:57:22 INFO  Cm#5
+18:57:23 INFO  Cm#5
+18:57:23 INFO  Cm
+18:57:25 INFO  Caug
+18:57:26 INFO  Caug
+18:57:27 INFO  Caug
+18:57:27 INFO  Caug
+18:57:28 INFO  C
+18:57:28 INFO  E
+18:57:28 INFO  Cm
+18:57:29 INFO  Ab
+18:57:29 INFO  C
+18:57:32 INFO  Bsus4(b913)
+18:57:36 INFO  bar 1 beat 1
+18:57:36 INFO  bar 1 beat 1
+18:57:37 INFO  bar 1 beat 1
+18:57:37 INFO  bar 1 beat 1
+18:57:40 INFO  one
+18:57:41 INFO  two
+18:57:42 INFO  one
+18:57:43 INFO  two
+18:57:43 INFO  three
+18:57:44 INFO  four
+18:57:44 INFO  Recording
+18:57:44 INFO  Eb7(9)
+18:57:47 INFO  Ab7(13)
+18:57:49 INFO  Eb7(9)
+18:57:50 INFO  D7(#9)
+18:57:51 INFO  Db7(#9)
+18:57:52 INFO  C7(#9)
+18:57:53 INFO  Bb7(#9)
+18:57:55 INFO  B
+18:57:56 INFO  Abdim7
+18:57:56 INFO  F
+18:57:57 INFO  Gsus4
+18:58:00 INFO  D7sus4(b913)
+18:58:03 INFO  Stopped
+18:58:03 INFO  Eb7(9)
+18:58:06 INFO  Ab7(13)
+18:58:08 INFO  Eb7(9)
+18:58:09 INFO  D7(#9)
+18:58:09 INFO  Db7(#9)
+18:58:09 INFO  Section D at measure 1
+18:58:10 INFO  Section D at measure 1
+18:58:10 INFO  C7(#9)
+18:58:10 INFO  Section D at measure 1
+18:58:11 INFO  Bb7(#9)
+18:58:12 INFO  Section D at measure 1
+18:58:14 INFO  Abdim7
+18:58:16 INFO  Eb7(9)
+18:58:18 INFO  Section D at measure 1
+18:58:22 INFO  Eb7(9) bar 1 beat 1
+18:58:23 INFO  Eb7(9) bar 1 beat 1
+18:58:24 INFO  Eb7(9) bar 1 beat 1
+18:58:25 INFO  Stopped
+18:58:26 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+18:58:26 DEBUG MIDI reader thread stopped
+19:30:56 INFO  MIDI: 2 devices found
+19:30:56 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+19:30:56 INFO  MIDI connected: MOTU M Series MIDI In 0
+19:31:01 INFO  IReal Studio ready. My Progression. Press R to record.
+19:31:03 INFO  Stopped
+19:31:03 DEBUG Closing MIDI port: MOTU M Series MIDI In 0
+19:31:03 DEBUG MIDI reader thread stopped
