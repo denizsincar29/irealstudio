@@ -1018,6 +1018,70 @@ class TestChordSpokenName(unittest.TestCase):
         item = ProgressionItem(chord=Chord('Cmaj7'), position=pos, bass_note='E')
         self.assertEqual('C major 7 over E', item.chord_name_spoken())
 
+    # ------------------------------------------------------------------ #
+    # Compound (non-map) quality fallback (Issue 3 fix)                   #
+    # ------------------------------------------------------------------ #
+
+    def test_mM7_sharp11_spoken(self):
+        """CmM7#11 must be spoken as 'C minor major 7 sharp 11', not literal."""
+        self.assertEqual('C minor major 7 sharp 11', self._spoken('CmM7#11'))
+
+    def test_mM7_b9_spoken(self):
+        """AmM7b9: minor major 7 flat 9."""
+        self.assertEqual('A minor major 7 flat 9', self._spoken('AmM7b9'))
+
+    def test_m7_sharp9_spoken(self):
+        """Dm7#9: minor 7 sharp 9."""
+        self.assertEqual('D minor 7 sharp 9', self._spoken('Dm7#9'))
+
+    def test_maj7_b5_spoken(self):
+        """Cmaj7b5: major 7 flat 5."""
+        self.assertEqual('C major 7 flat 5', self._spoken('Cmaj7b5'))
+
+
+class TestGetSectionAtMeasure(unittest.TestCase):
+    """Tests for ChordProgression.get_section_at_measure() (Issue 4 fix)."""
+
+    def _prog_with_sections(self) -> 'ChordProgression':
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        prog.add_chord_by_name('Dm7', 3, 1)
+        prog.add_chord_by_name('G7', 5, 1)
+        prog.add_section_mark(1, '*A')
+        prog.add_section_mark(5, '*B')
+        return prog
+
+    def test_exact_section_mark_measure(self):
+        """get_section_at_measure returns the mark on its own measure."""
+        prog = self._prog_with_sections()
+        self.assertEqual('*A', prog.get_section_at_measure(1))
+        self.assertEqual('*B', prog.get_section_at_measure(5))
+
+    def test_mid_section_measure(self):
+        """Measures inside section A (before *B) return '*A'."""
+        prog = self._prog_with_sections()
+        self.assertEqual('*A', prog.get_section_at_measure(2))
+        self.assertEqual('*A', prog.get_section_at_measure(3))
+        self.assertEqual('*A', prog.get_section_at_measure(4))
+
+    def test_section_b_member(self):
+        """Measures >= 5 (section B start) return '*B'."""
+        prog = self._prog_with_sections()
+        self.assertEqual('*B', prog.get_section_at_measure(6))
+        self.assertEqual('*B', prog.get_section_at_measure(10))
+
+    def test_before_first_section_mark(self):
+        """If no section mark at or before measure, returns None."""
+        prog = make_prog()
+        prog.add_section_mark(3, '*A')
+        self.assertIsNone(prog.get_section_at_measure(1))
+        self.assertIsNone(prog.get_section_at_measure(2))
+
+    def test_no_section_marks(self):
+        """Progression with no section marks returns None for any measure."""
+        prog = make_prog()
+        self.assertIsNone(prog.get_section_at_measure(1))
+
 
 if __name__ == '__main__':
     unittest.main()

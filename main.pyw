@@ -2,8 +2,8 @@
 IReal Studio - A blind-accessible chord progression recorder.
 
 Keyboard shortcuts:
-  R             - Start recording (2-measure metronome pre-count, then record)
-  Space         - Speak chord progression at metronome rhythm (playback)
+  R             - Start/stop recording (2-measure metronome pre-count, then record)
+  Space         - Speak chord progression at metronome rhythm (playback) / stop playback or recording
   Ctrl+Space    - Stop playback, navigate to stopped position
   Left          - Move cursor left (to previous chord)
   Right         - Move cursor right (to next chord)
@@ -18,9 +18,11 @@ Keyboard shortcuts:
   V             - Add volta/ending mark at current measure
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
   Delete/Backspace - Delete chord at current position
+  Ctrl+Delete   - Delete section mark / repeat bracket / N.C. at current measure
   Ctrl+O        - Open progression file (.ips or .json)
   Ctrl+S        - Save progression (to current file, or prompts if new)
-  Ctrl+E        - Export to iReal Pro format (HTML file)
+  Ctrl+E        - Export to iReal Pro format (HTML file, prompts for save location)
+  Ctrl+Shift+E  - Show QR code for iReal Pro URL in a popup dialog
   Ctrl+L        - Speak last 5 log entries (MIDI errors, etc.)
   Escape        - Stop recording/playback
   Ctrl+Q        - Quit
@@ -823,7 +825,13 @@ class App:
                     visible = self.progression.find_last_chord_to_left(search)
                     self.cursor = visible.position if visible else Position(new_m, 1, ts)
                 # else: no chord to the left — stay put
-        self._announce_position(announce_section=self.cursor.measure != old_measure)
+        new_measure = self.cursor.measure
+        if new_measure != old_measure:
+            old_section = self.progression.get_section_at_measure(old_measure)
+            new_section = self.progression.get_section_at_measure(new_measure)
+            self._announce_position(announce_section=new_section != old_section)
+        else:
+            self._announce_position(announce_section=False)
 
     def navigate_home(self) -> None:
         self.cursor = Position(1, 1, self.progression.time_signature)
@@ -847,7 +855,7 @@ class App:
         """Speak a brief position: optional section name, chord (if any), 'bar N beat M'."""
         parts: list[str] = []
         if announce_section:
-            sm = self.progression.get_section_mark(self.cursor.measure)
+            sm = self.progression.get_section_at_measure(self.cursor.measure)
             if sm:
                 parts.append(self._SECTION_MARK_NAMES.get(sm, sm))
         chords_here = self.progression.find_chords_at_position(self.cursor)
@@ -969,6 +977,43 @@ class App:
             else:
                 self.speak(f"Nothing to delete at measure {m} beat {self.cursor.beat}")
 
+    def delete_structural_at_cursor(self) -> None:
+        """Delete section marks, repeat brackets, and N.C. at the current measure.
+
+        Unlike :meth:`delete_at_cursor`, this method ignores any chord at the
+        cursor position so that structural marks can be removed even when a chord
+        occupies the same beat.  Bound to Ctrl+Delete.
+        """
+        m = self.cursor.measure
+        deleted: list[str] = []
+        if self.progression.get_section_mark(m):
+            self._push_undo()
+            self.progression.remove_section_mark(m)
+            self._mark_dirty()
+            deleted.append("section mark")
+        vbs_to_remove = [
+            vb for vb in self.progression.volta_brackets
+            if vb.repeat_start == m or vb.ending1_start == m
+            or (vb.is_complete() and vb.ending2_start == m)
+        ]
+        if vbs_to_remove:
+            if not deleted:
+                self._push_undo()
+            for vb in vbs_to_remove:
+                self.progression.volta_brackets.remove(vb)
+            self._mark_dirty()
+            deleted.append("repeat bracket")
+        if self.progression.is_no_chord(m):
+            if not deleted:
+                self._push_undo()
+            self.progression.remove_no_chord(m)
+            self._mark_dirty()
+            deleted.append("N.C.")
+        if deleted:
+            self.speak(f"Deleted {', '.join(deleted)} at measure {m}")
+        else:
+            self.speak(f"Nothing to delete at measure {m}")
+
     # ------------------------------------------------------------------
     # Save / Export
     # ------------------------------------------------------------------
@@ -1065,27 +1110,48 @@ class App:
     def export_ireal(self) -> None:
         try:
             url = self.progression.to_ireal_url()
-            html_file = _safe_filename(self.progression.title) + '.html'
-            html = (
-                "<!DOCTYPE html>\n<html>\n<head><title>"
-                + self.progression.title
-                + "</title></head>\n<body>\n<p>Opening in iReal Pro...</p>\n<p><a href=\""
-                + url + "\">" + self.progression.title + "</a></p>\n"
-                + "<script>window.location.href = \"" + url + "\";</script>\n"
-                + "</body>\n</html>"
+        except Exception as e:
+            self.speak(f"Export failed: {e}")
+            return
+        html = (
+            "<!DOCTYPE html>\n<html>\n<head><title>"
+            + self.progression.title
+            + "</title></head>\n<body>\n<p>Opening in iReal Pro...</p>\n<p><a href=\""
+            + url + "\">" + self.progression.title + "</a></p>\n"
+            + "<script>window.location.href = \"" + url + "\";</script>\n"
+            + "</body>\n</html>"
+        )
+        default_name = _safe_filename(self.progression.title) + '.html'
+        default_dir = (
+            str(self._current_file.parent)
+            if self._current_file is not None
+            else str(Path.cwd())
+        )
+        if self._frame is not None:
+            dlg = wx.FileDialog(
+                self._frame,
+                message="Export iReal Pro HTML",
+                defaultDir=default_dir,
+                defaultFile=default_name,
+                wildcard="HTML files (*.html)|*.html|All files (*.*)|*.*",
+                style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
             )
+            if dlg.ShowModal() != wx.ID_OK:
+                dlg.Destroy()
+                return
+            html_file = dlg.GetPath()
+            dlg.Destroy()
+        else:
+            html_file = default_name
+        try:
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(html)
-            self.speak(f"Exported to {html_file}")
-            try:
-                webbrowser.open(Path(html_file).resolve().as_uri())
-            except Exception:
-                pass
+            self.speak(f"Exported to {Path(html_file).name}")
         except Exception as e:
             self.speak(f"Export failed: {e}")
 
     def export_qr_code(self) -> None:
-        """Generate a QR code SVG for the iReal Pro URL and open it in the browser."""
+        """Generate a QR code for the iReal Pro URL and show it in a popup dialog."""
         try:
             import qrcode
             import qrcode.image.svg as qr_svg
@@ -1096,16 +1162,46 @@ class App:
             url = self.progression.to_ireal_url()
             factory = qr_svg.SvgFillImage
             img = qrcode.make(url, image_factory=factory)
-            qr_file = _safe_filename(self.progression.title) + '_qrcode.svg'
-            with open(qr_file, 'wb') as f:
-                img.save(f)
-            self.speak(f"QR code exported to {qr_file}")
-            try:
-                webbrowser.open(Path(qr_file).resolve().as_uri())
-            except Exception:
-                pass
+            import io
+            buf = io.BytesIO()
+            img.save(buf)
+            svg_bytes = buf.getvalue()
         except Exception as e:
-            self.speak(f"QR code export failed: {e}")
+            self.speak(f"QR code generation failed: {e}")
+            return
+
+        if self._frame is None:
+            self.speak("QR code ready but no window to display it")
+            return
+
+        try:
+            svg_image = wx.SVGimage.CreateFromBytes(svg_bytes)
+            bmp = svg_image.ConvertToScaledBitmap(wx.Size(320, 320), self._frame)
+        except Exception:
+            # SVG rendering not available – save to file as fallback
+            qr_file = _safe_filename(self.progression.title) + '_qrcode.svg'
+            try:
+                with open(qr_file, 'wb') as f:
+                    f.write(svg_bytes)
+                self.speak(f"QR code saved to {qr_file}")
+            except Exception as e2:
+                self.speak(f"QR code export failed: {e2}")
+            return
+
+        dlg = wx.Dialog(self._frame, title=f"QR Code - {self.progression.title}")
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        static_bmp = wx.StaticBitmap(dlg, bitmap=bmp)
+        sizer.Add(static_bmp, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
+        url_label.SetMaxSize(wx.Size(320, -1))
+        sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
+        ok_btn = wx.Button(dlg, wx.ID_OK, "Close")
+        ok_btn.SetDefault()
+        sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 10)
+        dlg.SetSizerAndFit(sizer)
+        dlg.ShowModal()
+        dlg.Destroy()
+        self.speak("QR code shown")
 
     # ------------------------------------------------------------------
     # Speech / logging
@@ -1807,7 +1903,7 @@ class App:
                 self._apply_overwrite()
             self.speak("Stopped")
 
-        # R – record
+        # R – record (start if idle, stop if recording/pre-count/playing)
         elif key == 'r' and not ctrl and not shift:
             if self._recorder.state == AppState.IDLE:
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
@@ -1816,10 +1912,16 @@ class App:
                     self.progression, self.cursor,
                     recording_bpm=self.recording_bpm,
                 )
+            elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
+                self._recorder.stop_all()
+                if self.recording_mode == RECORDING_MODE_OVERWRITE:
+                    self._apply_overwrite()
+                self.speak("Stopped")
             else:
-                self.speak("Already active")
+                self._recorder.stop_all()
+                self.speak("Stopped")
 
-        # Space – play / stop
+        # Space – play / stop (also stops recording)
         elif key == 'space':
             if ctrl:
                 if self._recorder.state == AppState.PLAYING:
@@ -1831,6 +1933,11 @@ class App:
             else:
                 if self._recorder.state == AppState.IDLE:
                     self._recorder.start_playback(self.progression, self.cursor)
+                elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
+                    self._recorder.stop_all()
+                    if self.recording_mode == RECORDING_MODE_OVERWRITE:
+                        self._apply_overwrite()
+                    self.speak("Stopped")
                 elif self._recorder.state == AppState.PLAYING:
                     self._recorder.stop_all()
 
@@ -1928,9 +2035,13 @@ class App:
                 self.add_section_mark(key)
 
         # Delete/Backspace – delete selection or chord at cursor
+        # Ctrl+Delete – delete structural marks (section mark, repeat bracket, N.C.)
+        #               at the current measure regardless of whether a chord is present
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                if self._selected_range() is not None:
+                if ctrl and key == 'delete':
+                    self.delete_structural_at_cursor()
+                elif self._selected_range() is not None:
                     self._delete_selection()
                 else:
                     self.delete_at_cursor()
