@@ -53,9 +53,9 @@ from accessible_output3.outputs.auto import Auto
 
 from chords import (
     ChordProgression, TimeSignature, Position, Chord,
-    SECTION_KEYS, NOTE_NAMES,
+    SECTION_KEYS, NOTE_NAMES, get_note_names_for_key,
 )
-from sound import make_beep
+from sound import make_beep, get_output_devices, set_output_device
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
@@ -67,8 +67,12 @@ _CMD_FILE_SAVE      = 1001
 _CMD_FILE_SAVE_AS   = 1003
 _CMD_FILE_OPEN      = 1004
 _CMD_FILE_EXPORT    = 1002
-_CMD_MIDI_REFRESH   = 2001
-_CMD_MIDI_NONE      = 2002   # placeholder shown when no devices are present
+_CMD_MIDI_REFRESH     = 2001
+_CMD_MIDI_NONE        = 2002   # placeholder shown when no devices are present
+_CMD_MIDI_OUT_REFRESH = 2003
+_CMD_MIDI_OUT_NONE    = 2004
+_CMD_SOUND_OUT_REFRESH = 2005
+_CMD_SOUND_OUT_NONE    = 2006
 _CMD_SETTINGS_BPM       = 3001
 _CMD_SETTINGS_KEY       = 3002
 _CMD_SETTINGS_STYLE     = 3003
@@ -76,7 +80,9 @@ _CMD_SETTINGS_REC_BPM   = 3004
 _CMD_SETTINGS_TITLE     = 3005
 _CMD_SETTINGS_COMPOSER  = 3006
 _CMD_SETTINGS_TIME_SIG  = 3007
-_MIDI_DEVICE_BASE   = 2100   # IDs 2100..2199 → MIDI device indices 0..99
+_MIDI_DEVICE_BASE      = 2100  # IDs 2100..2199 → MIDI input device indices 0..99
+_MIDI_OUT_DEVICE_BASE  = 2200  # IDs 2200..2299 → MIDI output device indices 0..99
+_SOUND_OUT_DEVICE_BASE = 2300  # IDs 2300..2399 → audio output device indices 0..99
 
 # ---------------------------------------------------------------------------
 # Logging setup — writes timestamped records to irealstudio.log and keeps
@@ -170,6 +176,7 @@ class App:
             speak=self.speak,
             on_chord_released=self._on_chord_released,
             is_recording=lambda: self._recorder.state == AppState.RECORDING,
+            on_chord_preview=self._on_chord_preview,
         )
         self._midi.init()
 
@@ -177,6 +184,8 @@ class App:
         self._frame: wx.Frame | None = None
         self._status_labels: list[wx.StaticText] = []
         self._midi_menu: wx.Menu | None = None
+        self._midi_out_menu: wx.Menu | None = None
+        self._sound_out_menu: wx.Menu | None = None
         self._bpm_item:          wx.MenuItem | None = None
         self._rec_bpm_item:      wx.MenuItem | None = None
         self._key_item:          wx.MenuItem | None = None
@@ -237,7 +246,9 @@ class App:
         """Commit a detected chord to the progression during recording."""
         # Deduplicate pitch classes (same note in different octaves counts once),
         # preserving lowest-first order so the root is the first element.
-        note_names = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
+        note_names = list(dict.fromkeys(
+            get_note_names_for_key(self.progression.key)[n % 12] for n in notes
+        ))
         chord = Chord.from_notes(note_names)
         if chord is None:
             return
@@ -257,7 +268,16 @@ class App:
         self.progression.add_chord(chord, measure, beat)
         if measure > self.progression.total_measures:
             self.progression.total_measures = measure
-        self.speak(f"{chord} at {measure} colon {beat}")
+        self.speak(chord.name)
+
+    def _on_chord_preview(self, notes: list[int]) -> None:
+        """Speak the recognized chord name when a chord is played outside recording."""
+        note_names = list(dict.fromkeys(
+            get_note_names_for_key(self.progression.key)[n % 12] for n in notes
+        ))
+        chord = Chord.from_notes(note_names)
+        if chord is not None:
+            self.speak(chord.name)
 
     # ------------------------------------------------------------------
     # MIDI device management
@@ -300,6 +320,8 @@ class App:
     def _refresh_menu_state(self) -> None:
         """Push current app state into the menu labels."""
         self._refresh_midi_devices()
+        self._refresh_midi_out_devices()
+        self._refresh_sound_out_devices()
         self._update_settings_labels()
 
     def _update_settings_labels(self) -> None:
@@ -602,6 +624,88 @@ class App:
             self._refresh_midi_devices()
             self.speak(f"MIDI: {names[idx]}")
 
+    def _refresh_midi_out_devices(self) -> None:
+        """Rebuild the MIDI Output submenu with currently available output ports."""
+        if self._midi_out_menu is None:
+            return
+        names = self._midi.get_output_names()
+        active: int | None = None
+        for i, n in enumerate(names):
+            if n == self._midi.midi_output_name:
+                active = i
+                break
+
+        count = self._midi_out_menu.GetMenuItemCount()
+        for _ in range(max(0, count - 2)):
+            item = self._midi_out_menu.FindItemByPosition(0)
+            self._midi_out_menu.Remove(item)
+
+        if names:
+            for idx, name in enumerate(names):
+                item = wx.MenuItem(self._midi_out_menu, _MIDI_OUT_DEVICE_BASE + idx,
+                                   name, kind=wx.ITEM_CHECK)
+                self._midi_out_menu.Insert(idx, item)
+                if idx == active:
+                    item.Check(True)
+        else:
+            placeholder = wx.MenuItem(self._midi_out_menu, _CMD_MIDI_OUT_NONE,
+                                      "No MIDI output devices found")
+            self._midi_out_menu.Insert(0, placeholder)
+            placeholder.Enable(False)
+
+    def _on_menu_midi_out_refresh(self, _event: wx.CommandEvent) -> None:
+        self._refresh_midi_out_devices()
+        self.speak("MIDI output devices refreshed")
+
+    def _on_menu_midi_out_device(self, event: wx.CommandEvent) -> None:
+        idx = event.GetId() - _MIDI_OUT_DEVICE_BASE
+        names = self._midi.get_output_names()
+        if 0 <= idx < len(names):
+            self._midi.open_output_by_name(names[idx])
+            self._refresh_midi_out_devices()
+
+    def _refresh_sound_out_devices(self) -> None:
+        """Rebuild the Sound Output submenu with available audio output devices."""
+        if self._sound_out_menu is None:
+            return
+        devices = get_output_devices()  # list of (device_id, name)
+
+        count = self._sound_out_menu.GetMenuItemCount()
+        for _ in range(max(0, count - 2)):
+            item = self._sound_out_menu.FindItemByPosition(0)
+            self._sound_out_menu.Remove(item)
+
+        if devices:
+            from sound import _current_device as current_out
+            for list_idx, (dev_id, dev_name) in enumerate(devices):
+                item = wx.MenuItem(
+                    self._sound_out_menu, _SOUND_OUT_DEVICE_BASE + list_idx,
+                    dev_name, kind=wx.ITEM_CHECK,
+                )
+                self._sound_out_menu.Insert(list_idx, item)
+                if dev_id == current_out:
+                    item.Check(True)
+        else:
+            placeholder = wx.MenuItem(self._sound_out_menu, _CMD_SOUND_OUT_NONE,
+                                      "No audio output devices found")
+            self._sound_out_menu.Insert(0, placeholder)
+            placeholder.Enable(False)
+
+    def _on_menu_sound_out_refresh(self, _event: wx.CommandEvent) -> None:
+        self._refresh_sound_out_devices()
+        self.speak("Sound output devices refreshed")
+
+    def _on_menu_sound_out_device(self, event: wx.CommandEvent) -> None:
+        list_idx = event.GetId() - _SOUND_OUT_DEVICE_BASE
+        devices = get_output_devices()
+        if 0 <= list_idx < len(devices):
+            dev_id, dev_name = devices[list_idx]
+            if set_output_device(dev_id):
+                self.speak(f"Sound output: {dev_name}")
+            else:
+                self.speak(f"Could not open: {dev_name}")
+            self._refresh_sound_out_devices()
+
     def _menu_change_bpm(self) -> None:
         val = prompt_input(f"BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
                            str(self.progression.bpm), parent=self._frame)
@@ -675,30 +779,35 @@ class App:
 
     def _menu_change_key(self) -> None:
         from pyrealpro import KEY_SIGNATURES
-        val = prompt_input("Key", "Enter key (e.g. C, Bb, F#-):",
-                           self.progression.key, parent=self._frame)
-        if val is not None:
-            key = val.strip()
-            if key in KEY_SIGNATURES:
-                self.progression.key = key
-                self._update_settings_labels()
-                self.speak(f"Key set to {key}")
-            else:
-                self.speak(f"Unknown key: {key}")
+        current = self.progression.key
+        sel_idx = KEY_SIGNATURES.index(current) if current in KEY_SIGNATURES else 0
+        dlg = wx.SingleChoiceDialog(
+            self._frame, "Select key signature:", "Key",
+            KEY_SIGNATURES,
+        )
+        dlg.SetSelection(sel_idx)
+        if dlg.ShowModal() == wx.ID_OK:
+            key = dlg.GetStringSelection()
+            self.progression.key = key
+            self._update_settings_labels()
+            self.speak(f"Key set to {key}")
+        dlg.Destroy()
 
     def _menu_change_style(self) -> None:
         from pyrealpro import STYLES_ALL
-        val = prompt_input("Style",
-                           "Enter style (e.g. Medium Swing, Bossa Nova):",
-                           self.progression.style, parent=self._frame)
-        if val is not None:
-            style = val.strip()
-            if style in STYLES_ALL:
-                self.progression.style = style
-                self._update_settings_labels()
-                self.speak(f"Style set to {style}")
-            else:
-                self.speak(f"Unknown style: {style}")
+        current = self.progression.style
+        sel_idx = STYLES_ALL.index(current) if current in STYLES_ALL else 0
+        dlg = wx.SingleChoiceDialog(
+            self._frame, "Select a style:", "Style",
+            STYLES_ALL,
+        )
+        dlg.SetSelection(sel_idx)
+        if dlg.ShowModal() == wx.ID_OK:
+            style = dlg.GetStringSelection()
+            self.progression.style = style
+            self._update_settings_labels()
+            self.speak(f"Style set to {style}")
+        dlg.Destroy()
 
     # ------------------------------------------------------------------
     # Main loop (wxPython)
@@ -793,11 +902,23 @@ class App:
         file_menu.Append(_CMD_FILE_EXPORT, "&Export to iReal Pro\tCtrl+E")
         menu_bar.Append(file_menu, "&File")
 
-        # --- MIDI Device (device items are populated by _refresh_midi_devices) ---
+        # --- MIDI Input Device (device items are populated by _refresh_midi_devices) ---
         self._midi_menu = wx.Menu()
         self._midi_menu.AppendSeparator()
         self._midi_menu.Append(_CMD_MIDI_REFRESH, "&Refresh devices")
-        menu_bar.Append(self._midi_menu, "&MIDI Device")
+        menu_bar.Append(self._midi_menu, "&MIDI Input")
+
+        # --- MIDI Output Device ---
+        self._midi_out_menu = wx.Menu()
+        self._midi_out_menu.AppendSeparator()
+        self._midi_out_menu.Append(_CMD_MIDI_OUT_REFRESH, "&Refresh devices")
+        menu_bar.Append(self._midi_out_menu, "MIDI &Output")
+
+        # --- Sound Output (for metronome) ---
+        self._sound_out_menu = wx.Menu()
+        self._sound_out_menu.AppendSeparator()
+        self._sound_out_menu.Append(_CMD_SOUND_OUT_REFRESH, "&Refresh devices")
+        menu_bar.Append(self._sound_out_menu, "&Sound Output")
 
         # --- Settings ---
         settings_menu = wx.Menu()
@@ -831,6 +952,10 @@ class App:
                          id=_CMD_FILE_EXPORT)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
                          id=_CMD_MIDI_REFRESH)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_out_refresh,
+                         id=_CMD_MIDI_OUT_REFRESH)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_refresh,
+                         id=_CMD_SOUND_OUT_REFRESH)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_title(),
                          id=_CMD_SETTINGS_TITLE)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_composer(),
@@ -845,9 +970,13 @@ class App:
                          id=_CMD_SETTINGS_KEY)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_style(),
                          id=_CMD_SETTINGS_STYLE)
-        # Bind the entire MIDI device ID range once (no per-device rebinding needed)
+        # Bind entire device ID ranges (no per-device rebinding needed)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_device,
                          id=_MIDI_DEVICE_BASE, id2=_MIDI_DEVICE_BASE + 99)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_out_device,
+                         id=_MIDI_OUT_DEVICE_BASE, id2=_MIDI_OUT_DEVICE_BASE + 99)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_device,
+                         id=_SOUND_OUT_DEVICE_BASE, id2=_SOUND_OUT_DEVICE_BASE + 99)
 
     def _on_close_window(self, event: wx.CloseEvent) -> None:
         """Handle window close: clean up resources then allow destruction."""

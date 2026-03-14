@@ -58,41 +58,93 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
     or ``None`` if the user cancelled.
     """
     _defaults: dict = defaults or {}
-    fields = [
+    # Text-entry fields (title, composer, bpm only — key and style get choices)
+    text_fields = [
         ('title',    'Title:',    _defaults.get('title',    'My Progression')),
         ('composer', 'Composer:', _defaults.get('composer', 'Unknown')),
-        ('key',      'Key:',      _defaults.get('key',      'C')),
-        ('style',    'Style:',    _defaults.get('style',    'Medium Swing')),
         ('bpm',      'BPM:',      str(_defaults.get('bpm',  120))),
     ]
+    default_key   = _defaults.get('key',   'C')
+    default_style = _defaults.get('style', 'Medium Swing')
 
     if not _IS_WINDOWS:
         result: dict = {}
-        for key, label, default in fields:
+        for key, label, default in text_fields:
             print(f"{label} [{default}]: ", end='', flush=True)
             try:
                 val = input().strip()
                 result[key] = val if val else default
             except (KeyboardInterrupt, EOFError):
                 return None
+        # Key: show numbered list
+        from pyrealpro import KEY_SIGNATURES
+        print("Key (enter number or name):")
+        for idx, k in enumerate(KEY_SIGNATURES, 1):
+            print(f"  {idx}: {k}")
+        try:
+            raw = input(f"[{default_key}]: ").strip()
+            if raw.isdigit():
+                idx = int(raw) - 1
+                result['key'] = KEY_SIGNATURES[idx] if 0 <= idx < len(KEY_SIGNATURES) else default_key
+            else:
+                result['key'] = raw if raw else default_key
+        except (KeyboardInterrupt, EOFError):
+            return None
+        # Style: show numbered list
+        from pyrealpro import STYLES_ALL
+        print("Style (enter number or name):")
+        for idx, s in enumerate(STYLES_ALL, 1):
+            print(f"  {idx}: {s}")
+        try:
+            raw = input(f"[{default_style}]: ").strip()
+            if raw.isdigit():
+                idx = int(raw) - 1
+                result['style'] = STYLES_ALL[idx] if 0 <= idx < len(STYLES_ALL) else default_style
+            else:
+                result['style'] = raw if raw else default_style
+        except (KeyboardInterrupt, EOFError):
+            return None
         return result
 
     try:
         import wx
+        from pyrealpro import STYLES_ALL, KEY_SIGNATURES
 
         class _NewProjectDlg(wx.Dialog):
             def __init__(self, parent_wnd):
                 super().__init__(parent_wnd, title="New Project",
                                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
-                grid = wx.FlexGridSizer(rows=len(fields), cols=2, vgap=6, hgap=8)
+
+                # Grid rows: text fields + key row + style row
+                grid = wx.FlexGridSizer(rows=len(text_fields) + 2, cols=2, vgap=6, hgap=8)
                 grid.AddGrowableCol(1, 1)
-                self._ctrls: dict[str, wx.TextCtrl] = {}
-                for key, label, default in fields:
+                self._ctrls: dict[str, wx.Control] = {}
+
+                for key, label, default in text_fields:
                     grid.Add(wx.StaticText(self, label=label),
                              flag=wx.ALIGN_CENTER_VERTICAL)
                     ctrl = wx.TextCtrl(self, value=str(default))
                     self._ctrls[key] = ctrl
                     grid.Add(ctrl, flag=wx.EXPAND)
+
+                # Key: wx.Choice with all valid iReal Pro key signatures
+                grid.Add(wx.StaticText(self, label='Key:'),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                key_choice = wx.Choice(self, choices=KEY_SIGNATURES)
+                key_sel = KEY_SIGNATURES.index(default_key) if default_key in KEY_SIGNATURES else 0
+                key_choice.SetSelection(key_sel)
+                self._ctrls['key'] = key_choice
+                grid.Add(key_choice, flag=wx.EXPAND)
+
+                # Style: wx.Choice (accessible listbox-style dropdown)
+                grid.Add(wx.StaticText(self, label='Style:'),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                style_choice = wx.Choice(self, choices=STYLES_ALL)
+                sel_idx = STYLES_ALL.index(default_style) if default_style in STYLES_ALL else 0
+                style_choice.SetSelection(sel_idx)
+                self._ctrls['style'] = style_choice
+                grid.Add(style_choice, flag=wx.EXPAND)
+
                 outer = wx.BoxSizer(wx.VERTICAL)
                 outer.Add(grid, proportion=1,
                           flag=wx.EXPAND | wx.ALL, border=12)
@@ -192,7 +244,13 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                     self._preview_metronome()
 
             def get_values(self) -> dict:
-                return {k: ctrl.GetValue() for k, ctrl in self._ctrls.items()}
+                result = {}
+                for k, ctrl in self._ctrls.items():
+                    if isinstance(ctrl, wx.Choice):
+                        result[k] = ctrl.GetString(ctrl.GetSelection())
+                    else:
+                        result[k] = ctrl.GetValue()
+                return result
 
         dlg = _NewProjectDlg(parent)
         result = dlg.get_values() if dlg.ShowModal() == wx.ID_OK else None

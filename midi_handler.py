@@ -27,6 +27,7 @@ class MidiHandler:
         speak: Callable[[str], None],
         on_chord_released: Callable[[list[int], float], None],
         is_recording: Callable[[], bool],
+        on_chord_preview: Callable[[list[int]], None] | None = None,
     ) -> None:
         """
         Parameters
@@ -35,19 +36,26 @@ class MidiHandler:
             Callable used to announce messages to the user.
         on_chord_released:
             Called with ``(notes, first_note_time)`` when all held keys are
-            released.  ``notes`` is a sorted list of MIDI note numbers;
-            ``first_note_time`` is the ``time.monotonic()`` value of the first
-            key press in the chord.
+            released during recording.  ``notes`` is a sorted list of MIDI
+            note numbers; ``first_note_time`` is the ``time.monotonic()``
+            value of the first key press in the chord.
         is_recording:
             Returns True when the app is in the RECORDING state so that the
             handler only commits chords during active recording.
+        on_chord_preview:
+            Optional callback called with ``(notes,)`` when a chord is
+            released while *not* recording.  Used to give immediate feedback
+            about recognized chords without recording them.
         """
         self._speak = speak
         self._on_chord_released = on_chord_released
         self._is_recording = is_recording
+        self._on_chord_preview = on_chord_preview
 
         self.midi_input = None
         self.midi_input_name: str = ''
+        self.midi_output = None
+        self.midi_output_name: str = ''
         self._stop_event = threading.Event()
 
         self._held_notes: dict[int, float] = {}
@@ -78,7 +86,7 @@ class MidiHandler:
         self.open_by_name(names[0])
 
     def open_by_name(self, name: str) -> None:
-        """Close any open port and open *name*."""
+        """Close any open input port and open *name*."""
         self._stop_event.set()
         if self.midi_input is not None:
             try:
@@ -98,6 +106,25 @@ class MidiHandler:
             self.midi_input_name = ''
             self._speak(f"MIDI open failed: {e}")
 
+    def open_output_by_name(self, name: str) -> None:
+        """Close any open output port and open *name* for MIDI output."""
+        if self.midi_output is not None:
+            try:
+                self.midi_output.close()
+            except Exception:
+                pass
+            self.midi_output = None
+        self.midi_output_name = ''
+        if not MIDO_AVAILABLE:
+            self._speak("MIDI not available")
+            return
+        try:
+            self.midi_output = mido.open_output(name)
+            self.midi_output_name = name
+            self._speak(f"MIDI out: {name}")
+        except Exception as e:
+            self._speak(f"MIDI output open failed: {e}")
+
     def get_input_names(self) -> list[str]:
         """Return available MIDI input port names (empty list if unavailable)."""
         if not MIDO_AVAILABLE:
@@ -109,8 +136,18 @@ class MidiHandler:
             self._speak(f"MIDI list error: {e}")
             return []
 
+    def get_output_names(self) -> list[str]:
+        """Return available MIDI output port names (empty list if unavailable)."""
+        if not MIDO_AVAILABLE:
+            return []
+        try:
+            return mido.get_output_names()
+        except Exception as e:
+            _logger.error("MIDI output list error: %s", e)
+            return []
+
     def close(self) -> None:
-        """Signal the reader thread to stop and close the port."""
+        """Signal the reader thread to stop and close both ports."""
         _logger.debug("Closing MIDI port: %s", self.midi_input_name)
         self._stop_event.set()
         if self.midi_input is not None:
@@ -119,6 +156,12 @@ class MidiHandler:
             except Exception:
                 pass
             self.midi_input = None
+        if self.midi_output is not None:
+            try:
+                self.midi_output.close()
+            except Exception:
+                pass
+            self.midi_output = None
 
     # ------------------------------------------------------------------
     # Internal
@@ -135,26 +178,26 @@ class MidiHandler:
             except Exception as e:
                 _logger.error("MIDI read error: %s", e)
                 break
-            # Trigger a pending chord once the chord window has elapsed,
-            # all keys have been released, and recording is still active.
+            # Trigger a pending chord once the chord window has elapsed and
+            # all keys have been released.
             if (
                 self._chord_pending
                 and self._chord_notes
                 and not self._held_notes
-                and self._is_recording()
             ):
                 if time.monotonic() - self._last_note_on_time >= CHORD_WINDOW:
                     notes = sorted(self._chord_notes)
                     first_time = self._chord_first_note_time
                     self._chord_notes = set()
                     self._chord_pending = False
-                    self._on_chord_released(notes, first_time)
+                    if self._is_recording():
+                        self._on_chord_released(notes, first_time)
+                    elif self._on_chord_preview is not None:
+                        self._on_chord_preview(notes)
             time.sleep(0.005)
         _logger.debug("MIDI reader thread stopped")
 
     def _handle(self, msg) -> None:
-        if not self._is_recording():
-            return
         note_on = msg.type == 'note_on' and msg.velocity > 0
         note_off = msg.type == 'note_off' or (
             msg.type == 'note_on' and msg.velocity == 0

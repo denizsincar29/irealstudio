@@ -15,6 +15,27 @@ from functools import total_ordering
 
 NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
+# Note names used when the current key uses sharps instead of flats.
+NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+# Keys that prefer sharp spellings (major and their relative minors).
+# Minor keys are stored with the iReal Pro "-" suffix.
+_SHARP_KEYS: frozenset[str] = frozenset({
+    'C', 'G', 'D', 'A', 'E', 'B', 'F#',          # major
+    'A-', 'E-', 'B-', 'F#-', 'C#-', 'G#-', 'D#-', # minor
+})
+
+
+def get_note_names_for_key(key: str) -> list[str]:
+    """Return the note-name list (flat or sharp) appropriate for *key*.
+
+    Keys that use sharp accidentals (C, G, D, A, E, B, F# major and their
+    relative minors) get ``NOTE_NAMES_SHARP``; all others get ``NOTE_NAMES``
+    (flat spellings).
+    """
+    return NOTE_NAMES_SHARP if key in _SHARP_KEYS else NOTE_NAMES
+
+
 # ---------------------------------------------------------------------------
 # Chord recognition system
 # ---------------------------------------------------------------------------
@@ -419,6 +440,93 @@ class VoltaBracket:
         )
 
 
+# ---------------------------------------------------------------------------
+# iReal Pro chord-name translation
+# ---------------------------------------------------------------------------
+
+# All valid pitch-class roots in both flat and sharp spellings, ordered
+# longest-first so the prefix scan always tries two-char roots before one-char.
+_ALL_ROOTS: list[str] = [
+    'C#', 'Db', 'D#', 'Eb', 'F#', 'Gb', 'G#', 'Ab', 'A#', 'Bb',
+    'C', 'D', 'E', 'F', 'G', 'A', 'B',
+]
+
+# Quality translations: (our_quality, ireal_quality)
+# Longer / more specific patterns must come BEFORE shorter ones so that
+# e.g. "mM7" is matched before "m".
+_IREAL_QUALITY_MAP: list[tuple[str, str]] = [
+    # Minor-major 7th / minor extended
+    ('mM7',     '-^7'),
+    ('m7b5',    'h7'),
+    ('m7(b5)',  'h7'),
+    ('m7(9)',   '-9'),
+    ('m7(#11)', '-11'),
+    ('m7(13)',  '-13'),
+    ('m7',      '-7'),
+    ('m6/9',    '-69'),
+    ('m6',      '-6'),
+    ('m9',      '-9'),
+    ('m11',     '-11'),
+    ('m13',     'min13'),
+    ('m#5',     '-#5'),
+    ('m',       '-'),      # minor triad — must follow all 'm…' patterns
+    # Major-7th family
+    ('maj13',   '^13'),
+    ('maj9',    '^9'),
+    ('maj7',    '^7'),
+    # Dominant with extensions in parentheses → unfold
+    ('7(b9#11)', '7b9#11'),
+    ('7(#9#11)', '7#9#11'),
+    ('7(b9b5)',  '7b9b5'),
+    ('7(#9b5)',  '7#9b5'),
+    ('7(#9#5)',  '7#9#5'),
+    ('7(b9#5)',  '7b9#5'),
+    ('7(b9)',   '7b9'),
+    ('7(#9)',   '7#9'),
+    ('7(9)',    '9'),
+    ('7(#11)',  '7#11'),
+    ('7(b13)',  '7b13'),
+    ('7(13)',   '13'),
+    # 6/9 chord — slash would be misread as bass-note separator in iReal Pro
+    ('6/9',    '69'),
+    # Diminished / augmented
+    ('dim7',   'o7'),
+    ('dim',    'o'),
+    ('aug7',   '7#5'),
+    ('augM7',  '^7#5'),
+    ('aug',    '+'),
+    # Sus chords
+    ('7sus4',  '7sus'),
+    ('sus4',   'sus'),
+]
+
+
+def _chord_name_to_ireal(name: str) -> str:
+    """Translate *name* from our canonical form to iReal Pro notation.
+
+    Example::
+
+        _chord_name_to_ireal('Cmaj7')    → 'C^7'
+        _chord_name_to_ireal('Am7b5')    → 'Ah7'
+        _chord_name_to_ireal('Bdim7')    → 'Bo7'
+        _chord_name_to_ireal('C6/9')     → 'C69'
+        _chord_name_to_ireal('Daug')     → 'D+'
+        _chord_name_to_ireal('EmM7')     → 'E-^7'
+        _chord_name_to_ireal('G7(b9)')   → 'G7b9'
+    """
+    # Find the root prefix
+    root = ''
+    for r in _ALL_ROOTS:
+        if name.startswith(r):
+            root = r
+            break
+    quality = name[len(root):]
+    for src, dst in _IREAL_QUALITY_MAP:
+        if quality == src:
+            return root + dst
+    return name  # unchanged — already canonical or unknown
+
+
 @total_ordering
 @dataclass
 class ProgressionItem:
@@ -435,6 +543,21 @@ class ProgressionItem:
     def chord_name(self) -> str:
         """Return the full chord name including optional bass note."""
         name = self.chord.name
+        if self.bass_note:
+            name += f"/{self.bass_note}"
+        return name
+
+    def ireal_chord_name(self) -> str:
+        """Return the chord name translated to iReal Pro canonical format.
+
+        iReal Pro uses:  ``-`` for minor,  ``^7`` for major 7th,
+        ``h7`` for half-diminished,  ``o`` / ``o7`` for diminished,
+        ``+`` for augmented, ``69`` (no slash) for the 6/9 chord, etc.
+        Extensions in parentheses (e.g. ``7(b9)``) are unfolded
+        (``7b9``) because iReal Pro doesn't use the parenthesised form.
+        Bass-note inversions are preserved.
+        """
+        name = _chord_name_to_ireal(self.chord.name)
         if self.bass_note:
             name += f"/{self.bass_note}"
         return name
@@ -762,7 +885,7 @@ class ChordProgression:
                 for item in chords_in_measure:
                     beat_idx = item.position.beat - 1  # 0-based
                     if 0 <= beat_idx < beats:
-                        chord_list[beat_idx] = item.chord_name()
+                        chord_list[beat_idx] = item.ireal_chord_name()
                 # Compact: if all beats after first are empty, use string shorthand
                 if all(c == ' ' for c in chord_list[1:]):
                     chords_arg = chord_list[0]

@@ -80,13 +80,18 @@ class Recorder:
         self, progression: ChordProgression, cursor: Position
     ) -> None:
         beats = progression.time_signature.numerator
-        beat_names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
+        denom = progression.time_signature.denominator
+        beat_names = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
         interval = 60.0 / self.recording_bpm
 
         # Use time.monotonic() throughout so beat scheduling is immune to
         # wall-clock adjustments (NTP, manual time changes, etc.).
         t0 = time.monotonic()
         total_precount_beats = 2 * beats
+
+        # Jazz 4/4 mode: first measure gives a sparse "one … two …" cue;
+        # second measure gives the full "one two three four" count-in.
+        jazz_mode = (beats == 4 and denom == 4)
 
         # While loop (instead of for) so we can skip missed beats when the
         # system falls behind by more than one interval.
@@ -96,12 +101,25 @@ class Recorder:
                 self.state = AppState.IDLE
                 return
             b = i % beats
+            measure_idx = i // beats   # 0 = first precount measure, 1 = second
+
             # Record when this beat fires for debug offset queries.
             self._last_beat_time = time.monotonic()
             # Play the click first so the sound lands precisely on the beat;
             # speech follows asynchronously and is heard just after the click.
             play_sound(self._tick if b == 0 else self._tock)
-            self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
+
+            if jazz_mode and measure_idx == 0:
+                # First 4/4 precount measure: speak "one" on beat 1 and
+                # "two" on beat 3; stay silent on beats 2 and 4.
+                if b == 0:
+                    self._speak('one')
+                elif b == 2:
+                    self._speak('two')
+            else:
+                # Second precount measure (or non-4/4): full count.
+                self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
+
             # Sleep until the absolute time of the next beat.
             next_beat_time = t0 + (i + 1) * interval
             sleep_time = next_beat_time - time.monotonic()
