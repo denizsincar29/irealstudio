@@ -674,7 +674,6 @@ class App:
 
     def _extend_selection(self, direction: str) -> None:
         """Extend (or start) the chord selection one chord in *direction*."""
-        ts = self.progression.time_signature
         if self._sel_anchor is None:
             self._sel_anchor = self.cursor
         if direction == 'right':
@@ -728,15 +727,13 @@ class App:
         self.speak(f"All {n} chord{'s' if n != 1 else ''} selected")
 
     def _copy_selection(self) -> None:
-        """Copy the names of all selected chords to the clipboard (first chord)."""
+        """Copy the first chord of the selection to the clipboard."""
         chords = self._chords_in_selection()
         if not chords:
             self.speak("No chords selected")
             return
-        # Store as a list of names; single-chord paste is supported
         self._clipboard = chords[0].chord.name
-        n = len(chords)
-        self.speak(f"Copied {n} chord{'s' if n != 1 else ''}")
+        self.speak(f"Copied {chords[0].chord_name_spoken()}")
 
     def _cut_selection(self) -> None:
         """Cut all selected chords."""
@@ -1744,7 +1741,7 @@ class App:
 
     def _on_close_window(self, event: wx.CloseEvent) -> None:
         """Handle window close: prompt to save unsaved changes, then clean up."""
-        if self._is_dirty and (self.progression.items or self.progression.section_marks):
+        if self._is_dirty:
             dlg = wx.MessageDialog(
                 self._frame,
                 f"'{self.progression.title}' has unsaved changes.\n\nSave before closing?",
@@ -1895,14 +1892,14 @@ class App:
 
         # Ctrl+C – copy chord (or selection)
         elif ctrl and key == 'c' and not shift:
-            if self._sel_anchor is not None:
+            if self._selected_range() is not None:
                 self._copy_selection()
             else:
                 self.copy_chord()
 
         # Ctrl+X – cut chord (or selection)
         elif ctrl and key == 'x' and not shift:
-            if self._sel_anchor is not None:
+            if self._selected_range() is not None:
                 self._cut_selection()
             else:
                 self.cut_chord()
@@ -1933,7 +1930,7 @@ class App:
         # Delete/Backspace – delete selection or chord at cursor
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                if self._sel_anchor is not None:
+                if self._selected_range() is not None:
                     self._delete_selection()
                 else:
                     self.delete_at_cursor()

@@ -6,15 +6,15 @@ Usage::
     uv run python tag_release.py
 
 The script:
-1. Checks that there are no uncommitted changes.
+1. Checks that there are no uncommitted or untracked changes.
 2. Asks for a version number in ``x.x.x`` format (the ``v`` prefix is added
    automatically).
 3. Validates the format.
 4. Checks the tag does not already exist.
 5. Checks the new version is strictly higher than the last tag.
 6. Collects a multiline changelog entry (press Enter twice quickly to finish).
-7. Writes ``news.md`` with the version, date, and changelog.
-8. Commits ``news.md``.
+7. Writes ``news.md`` (current release) and updates ``changelog.md`` (history).
+8. Commits ``news.md`` and ``changelog.md``.
 9. Creates and pushes the git tag.
 """
 
@@ -28,8 +28,8 @@ import git
 
 
 def _check_clean_tree(repo: git.Repo) -> None:
-    if repo.is_dirty(untracked_files=False):
-        print("ERROR: There are uncommitted changes. Please commit or stash them first.")
+    if repo.is_dirty(untracked_files=True):
+        print("ERROR: There are uncommitted or untracked changes. Please commit or stash them first.")
         print(repo.git.status('--porcelain'))
         sys.exit(1)
 
