@@ -848,3 +848,271 @@
 22:02:13 INFO  Undo
 22:02:17 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 22:02:17 DEBUG MIDI reader thread stopped
+23:05:03 INFO  MIDI: 2 devices found
+23:05:03 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+23:05:03 INFO  MIDI connected: MOTU M Series MIDI In 0
+23:05:03 DEBUG MIDI reader thread stopped
+23:05:03 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+23:05:03 INFO  MIDI connected: Nord Piano 6 MIDI 1
+23:05:03 INFO  MIDI out: Nord Piano 6 MIDI 2
+23:05:06 INFO  G
+23:05:06 INFO  C
+23:05:07 INFO  E
+23:05:09 INFO  G sharp sus4(13)
+23:05:09 INFO  F sharp sus4(13)
+23:05:53 INFO  IReal Studio ready. Denizian blues. Press R to record.
+23:05:54 DEBUG Update check failed: HTTP Error 404: Not Found
+23:06:17 INFO  Settings updated: Denizian blues
+23:06:20 INFO  bar 1 beat 1
+23:06:20 INFO  bar 1 beat 1
+23:06:24 INFO  bar 1 beat 1
+23:06:24 INFO  bar 1 beat 1
+23:06:28 INFO  Section A at measure 1
+23:06:28 INFO  bar 1 beat 1
+23:06:29 INFO  bar 1 beat 1
+23:06:29 INFO  bar 1 beat 1
+23:06:29 INFO  bar 1 beat 1
+23:06:31 INFO  bar 1 beat 1
+23:06:33 INFO  C
+23:06:33 INFO  E
+23:06:34 INFO  G
+23:06:34 INFO  C
+23:06:36 INFO  G minor sharp 5
+23:06:37 INFO  G
+23:06:42 INFO  E flat 7 sus 4
+23:06:43 INFO  G
+23:06:46 INFO  G
+23:06:47 INFO  E flat 9 flat 5
+23:06:51 INFO  E flat augmented 7
+23:06:53 INFO  G
+23:06:53 INFO  G
+23:06:54 INFO  G
+23:06:54 INFO  G
+23:06:55 INFO  G 7 flat 5
+23:06:56 INFO  G half diminished
+23:06:58 INFO  G half diminished
+23:07:00 INFO  G diminished 7
+23:07:01 INFO  G mM7(#11)
+23:07:03 INFO  E flat 7 sharp 9
+23:07:05 INFO  G
+23:07:08 INFO  one
+23:07:09 INFO  two
+23:07:10 INFO  one
+23:07:10 INFO  two
+23:07:11 INFO  three
+23:07:11 INFO  four
+23:07:12 INFO  Recording
+23:07:12 INFO  E flat 9
+23:07:14 INFO  A flat 13
+23:07:15 INFO  A diminished 7
+23:07:16 INFO  E flat 9
+23:07:18 INFO  B flat minor 7
+23:07:19 INFO  E flat 7 flat 9
+23:07:20 INFO  A flat 6
+23:07:22 INFO  A flat minor 9
+23:07:23 INFO  D flat 9
+23:07:24 INFO  G minor 7
+23:07:26 INFO  C 9
+23:07:27 INFO  C 7 flat 9
+23:07:28 INFO  F minor 7
+23:07:29 INFO  G minor 7
+23:07:30 INFO  A flat m(13)
+23:07:31 INFO  B flat 7 flat 9
+23:07:32 INFO  E major 7
+23:07:34 INFO  F minor 7
+23:07:35 INFO  B flat
+23:07:41 INFO  Already active
+23:07:42 INFO  Stopped
+23:07:47 INFO  QR code exported to Denizian_blues_qrcode.svg
+23:07:52 INFO  Stopped
+23:07:53 INFO  Stopped
+23:07:54 INFO  QR code exported to Denizian_blues_qrcode.svg
+23:09:46 INFO  E flat 9
+23:09:48 INFO  A flat 13
+23:09:49 INFO  A diminished 7
+23:09:50 INFO  E flat 9
+23:09:52 INFO  B flat minor 7
+23:09:53 INFO  E flat 7 flat 9
+23:09:54 INFO  A flat 6
+23:09:56 INFO  A flat minor 9
+23:09:57 INFO  D flat 9
+23:09:58 INFO  G minor 7
+23:10:00 INFO  C 9
+23:10:01 INFO  C 7 flat 9
+23:10:02 INFO  F minor 7
+23:10:03 INFO  G minor 7
+23:10:04 INFO  A flat m(13)
+23:10:05 INFO  B flat 7 flat 9
+23:10:06 INFO  E major 7
+23:10:08 INFO  F minor 7
+23:10:09 INFO  B flat
+23:10:15 INFO  B flat
+23:10:17 INFO  B flat 7 flat 9
+23:10:20 INFO  B flat 7
+23:10:21 INFO  B flat 7
+23:10:22 INFO  B flat 7 flat 9
+23:10:23 INFO  B 7 flat 9
+23:10:24 INFO  C 7 flat 9
+23:10:26 INFO  B flat 7
+23:10:27 INFO  B flat
+23:10:27 INFO  B flat
+23:10:29 INFO  B
+23:10:32 INFO  B flat
+23:10:33 INFO  B flat 13
+23:10:35 INFO  E minor 7
+23:10:40 INFO  E flat mM7(#11)
+23:10:43 INFO  E flat mM7(#11)
+23:10:46 INFO  E flat mM7(#11)
+23:10:56 INFO  E flat 9 bar 1 beat 1
+23:10:57 INFO  A flat 13 bar 2 beat 1
+23:12:21 INFO  C minor 7
+23:12:22 INFO  C minor 9
+23:12:24 INFO  B flat minor 9
+23:12:26 INFO  B flat minor 7
+23:12:30 INFO  C minor major 7
+23:12:31 INFO  C minor major 7
+23:12:32 INFO  C minor major 9
+23:12:34 INFO  C minor major 9
+23:12:36 INFO  C maj7sus4
+23:12:38 INFO  C mM7(9#11)
+23:12:43 INFO  C minor major 9
+23:12:47 INFO  C maj7sus4
+23:12:48 INFO  C major 9
+23:12:51 INFO  C minor major 9
+23:12:53 INFO  C minor major 9
+23:12:56 INFO  C
+23:12:58 INFO  D
+23:13:00 INFO  E
+23:13:04 INFO  C diminished 7
+23:13:06 INFO  C half diminished
+23:13:09 INFO  C mM7(#11)
+23:13:11 INFO  C mM7(#11)
+23:13:19 INFO  C mM7(#11)
+23:13:19 INFO  C minor major 7
+23:13:21 INFO  C mM7(#11)
+23:15:20 INFO  Section A E flat 9 bar 1 beat 1
+23:15:21 INFO  A flat 13 bar 2 beat 1
+23:15:21 INFO  Section A E flat 9 bar 1 beat 1
+23:15:22 INFO  A flat 13 bar 2 beat 1
+23:15:23 INFO  A diminished 7 bar 2 beat 3
+23:15:24 INFO  A flat 13 bar 2 beat 1
+23:15:25 INFO  A diminished 7 bar 2 beat 3
+23:15:25 INFO  E flat 9 bar 3 beat 1
+23:15:25 INFO  B flat minor 7 bar 4 beat 1
+23:15:27 INFO  E flat 7 flat 9 bar 4 beat 3
+23:15:27 INFO  B flat minor 7 bar 4 beat 1
+23:15:31 INFO  Section B at measure 4
+23:15:32 INFO  E flat 9 bar 3 beat 1
+23:15:33 INFO  Section B B flat minor 7 bar 4 beat 1
+23:15:34 INFO  E flat 9 bar 3 beat 1
+23:15:35 INFO  Section B B flat minor 7 bar 4 beat 1
+23:15:35 INFO  E flat 7 flat 9 bar 4 beat 3
+23:15:35 INFO  B flat minor 7 bar 4 beat 1
+23:15:37 INFO  E flat 9 bar 3 beat 1
+23:15:38 INFO  Section B B flat minor 7 bar 4 beat 1
+23:15:40 INFO  E flat 9 bar 3 beat 1
+23:15:40 INFO  A diminished 7 bar 2 beat 3
+23:15:41 INFO  A flat 13 bar 2 beat 1
+23:15:42 INFO  Section A E flat 9 bar 1 beat 1
+23:15:42 INFO  A flat 13 bar 2 beat 1
+23:15:43 INFO  Section A E flat 9 bar 1 beat 1
+23:15:43 INFO  E flat 9 bar 1 beat 1
+23:15:44 INFO  A flat 13 bar 2 beat 1
+23:15:44 INFO  Section A E flat 9 bar 1 beat 1
+23:15:45 INFO  E flat 9 bar 1 beat 1
+23:15:45 INFO  E flat 9 bar 1 beat 1
+23:15:46 INFO  A flat 13 bar 2 beat 1
+23:15:46 INFO  A diminished 7 bar 2 beat 3
+23:15:46 INFO  E flat 9 bar 3 beat 1
+23:15:47 INFO  Section B B flat minor 7 bar 4 beat 1
+23:16:58 INFO  E flat 7 flat 9 bar 4 beat 3
+23:16:59 INFO  B flat minor 7 bar 4 beat 1
+23:16:59 INFO  E flat 7 flat 9 bar 4 beat 3
+23:16:59 INFO  A flat 6 bar 5 beat 1
+23:16:59 INFO  A flat minor 9 bar 6 beat 1
+23:17:00 INFO  D flat 9 bar 6 beat 3
+23:17:00 INFO  G minor 7 bar 7 beat 1
+23:17:00 INFO  C 9 bar 8 beat 1
+23:17:00 INFO  C 7 flat 9 bar 8 beat 3
+23:17:01 INFO  F minor 7 bar 9 beat 1
+23:17:01 INFO  G minor 7 bar 9 beat 3
+23:17:01 INFO  A flat m(13) bar 10 beat 1
+23:17:01 INFO  B flat 7 flat 9 bar 10 beat 3
+23:17:02 INFO  E major 7 bar 11 beat 1
+23:17:02 INFO  F minor 7 bar 12 beat 1
+23:17:02 INFO  B flat bar 12 beat 3
+23:17:07 INFO  B flat bar 12 beat 3
+23:17:07 INFO  B flat bar 12 beat 3
+23:17:08 INFO  B flat bar 12 beat 3
+23:17:11 INFO  Exported to Denizian_blues.html
+23:19:28 INFO  Saved to Denizian_blues.ips
+23:19:58 INFO  Exported to Denizian_blues.html
+23:20:11 INFO  QR code exported to Denizian_blues_qrcode.svg
+23:21:22 INFO  B flat bar 12 beat 3
+23:21:23 INFO  F minor 7 bar 12 beat 1
+23:21:23 INFO  E major 7 bar 11 beat 1
+23:21:23 INFO  B flat 7 flat 9 bar 10 beat 3
+23:21:23 INFO  A flat m(13) bar 10 beat 1
+23:21:23 INFO  G minor 7 bar 9 beat 3
+23:21:23 INFO  F minor 7 bar 9 beat 1
+23:21:23 INFO  C 7 flat 9 bar 8 beat 3
+23:21:23 INFO  C 9 bar 8 beat 1
+23:21:23 INFO  G minor 7 bar 7 beat 1
+23:21:23 INFO  D flat 9 bar 6 beat 3
+23:21:23 INFO  A flat minor 9 bar 6 beat 1
+23:21:23 INFO  A flat 6 bar 5 beat 1
+23:21:24 INFO  Section B E flat 7 flat 9 bar 4 beat 3
+23:21:24 INFO  B flat minor 7 bar 4 beat 1
+23:21:24 INFO  E flat 9 bar 3 beat 1
+23:21:24 INFO  A diminished 7 bar 2 beat 3
+23:21:24 INFO  A flat 13 bar 2 beat 1
+23:21:24 INFO  Section A E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:24 INFO  E flat 9 bar 1 beat 1
+23:21:25 INFO  A flat 13 bar 2 beat 1
+23:21:26 INFO  A diminished 7 bar 2 beat 3
+23:21:27 INFO  E flat 9 bar 3 beat 1
+23:21:28 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:29 INFO  E flat 9 bar 3 beat 1
+23:21:30 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:32 INFO  E flat 9 bar 3 beat 1
+23:21:32 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:34 INFO  E flat 7 flat 9 bar 4 beat 3
+23:21:34 INFO  B flat minor 7 bar 4 beat 1
+23:21:39 INFO  E flat 9 bar 3 beat 1
+23:21:40 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:42 INFO  E flat 7 flat 9 bar 4 beat 3
+23:21:43 INFO  A flat 6 bar 5 beat 1
+23:21:45 INFO  Section B E flat 7 flat 9 bar 4 beat 3
+23:21:46 INFO  B flat minor 7 bar 4 beat 1
+23:21:47 INFO  E flat 9 bar 3 beat 1
+23:21:48 INFO  A diminished 7 bar 2 beat 3
+23:21:48 INFO  A flat 13 bar 2 beat 1
+23:21:48 INFO  Section A E flat 9 bar 1 beat 1
+23:21:49 INFO  E flat 9 bar 1 beat 1
+23:21:50 INFO  A flat 13 bar 2 beat 1
+23:21:51 INFO  A diminished 7 bar 2 beat 3
+23:21:52 INFO  E flat 9 bar 3 beat 1
+23:21:54 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:56 INFO  E flat 9 bar 3 beat 1
+23:21:57 INFO  Section B B flat minor 7 bar 4 beat 1
+23:21:59 INFO  E flat 7 flat 9 bar 4 beat 3
+23:22:00 INFO  B flat minor 7 bar 4 beat 1
+23:22:00 INFO  E flat 7 flat 9 bar 4 beat 3
+23:22:01 INFO  A flat 6 bar 5 beat 1
+23:22:03 INFO  Section B E flat 7 flat 9 bar 4 beat 3
+23:22:03 INFO  B flat minor 7 bar 4 beat 1
+23:22:40 INFO  Stopped
+23:22:41 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+23:22:41 DEBUG MIDI reader thread stopped
