@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from functools import total_ordering
+from i18n import _, ngettext
 
 NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
@@ -993,11 +994,15 @@ class ChordProgression:
         if hidden:
             cleared = self.delete_chords_in_measure_range(hidden[0], hidden[1])
 
-        msg = (f"Repeat from measure {repeat_start}, "
-               f"ending 1: {measure}–{ending1_end}, "
-               f"ending 2 starts at measure {ending2_start}")
+        msg = _("Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}").format(
+            repeat_start=repeat_start, e1_start=measure, e1_end=ending1_end, e2_start=ending2_start
+        )
         if cleared:
-            msg += f" ({cleared} hidden chord(s) removed)"
+            msg += ngettext(
+                " ({n} hidden chord removed)",
+                " ({n} hidden chords removed)",
+                cleared,
+            ).format(n=cleared)
         return msg
 
     def _find_section_start(self, measure: int) -> int:

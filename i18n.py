@@ -73,5 +73,10 @@ def _(text: str) -> str:
     return _translation.gettext(text)
 
 
+def ngettext(singular: str, plural: str, n: int) -> str:
+    """Return the singular or plural form of a translated string."""
+    return _translation.ngettext(singular, plural, n)
+
+
 # Auto-detect locale when the module is first imported.
 set_language()

@@ -1182,13 +1182,22 @@ class App:
             self.speak(_("QR code ready but no window to display it"))
             return
 
-        wx_img = wx.Image(io.BytesIO(png_bytes), wx.BITMAP_TYPE_PNG)
-        wx_img.Rescale(320, 320, wx.IMAGE_QUALITY_HIGH)
-        bmp = wx.Bitmap(wx_img)
+        bmp: wx.Bitmap | None = None
+        try:
+            wx_img = wx.Image(io.BytesIO(png_bytes), wx.BITMAP_TYPE_PNG)
+            if not wx_img.IsOk():
+                raise ValueError("wx.Image decode returned invalid image")
+            wx_img.Rescale(320, 320, wx.IMAGE_QUALITY_HIGH)
+            bmp = wx.Bitmap(wx_img)
+            if not bmp.IsOk():
+                raise ValueError("wx.Bitmap conversion failed")
+        except Exception as exc:
+            _app_logger.warning("QR image render failed: %s", exc)
 
         dlg = wx.Dialog(self._frame, title=f"QR Code – {self.progression.title}")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        if bmp is not None:
+            sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
         url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
         url_label.SetMaxSize(wx.Size(320, -1))
         sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)

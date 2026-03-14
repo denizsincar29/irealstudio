@@ -5,6 +5,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 # --- startup / status ---
 msgid "QR code export requires the qrcode package (uv add qrcode)"
@@ -82,8 +83,11 @@ msgstr "Нет аккорда для изменения"
 msgid "Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}"
 msgstr "Повтор с такта {repeat_start}, окончание 1: {e1_start}–{e1_end}, окончание 2 начинается с такта {e2_start}"
 
-msgid " ({n} hidden chord{s} removed)"
-msgstr " (удалено {n} скрытых аккорд{s})"
+msgid " ({n} hidden chord removed)"
+msgid_plural " ({n} hidden chords removed)"
+msgstr[0] " (удалён {n} скрытый аккорд)"
+msgstr[1] " (удалено {n} скрытых аккорда)"
+msgstr[2] " (удалено {n} скрытых аккордов)"
 
 # --- playback / recording ---
 msgid "Stopped"

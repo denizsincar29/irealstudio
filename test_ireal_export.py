@@ -1083,10 +1083,6 @@ class TestGetSectionAtMeasure(unittest.TestCase):
         self.assertIsNone(prog.get_section_at_measure(1))
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestDeleteChordsInRange(unittest.TestCase):
     """Tests for ChordProgression.delete_chords_in_measure_range()."""
 
@@ -1221,3 +1217,7 @@ class TestLocalization(unittest.TestCase):
             self.assertEqual(i18n._('Deleted'), 'Deleted')
         finally:
             i18n._translation = original_translation
+
+
+if __name__ == '__main__':
+    unittest.main()
