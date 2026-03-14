@@ -363,13 +363,13 @@ class TestNoteDeduplication(unittest.TestCase):
         self.assertEqual(deduped[-1], 'C')  # only one 'C'
 
     def test_chord_found_after_dedup(self):
-        """Chord.from_notes must succeed for C/E/G/C5 after deduplication."""
+        """Chord.from_notes must identify C major triad after deduplication."""
         from chords import NOTE_NAMES, Chord
         notes = [60, 64, 67, 72]  # C4, E4, G4, C5
         deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
         chord = Chord.from_notes(deduped)
         self.assertIsNotNone(chord)
-        self.assertIn('C', chord.name)
+        self.assertEqual('C', chord.name)
 
 
 class TestChordNavigation(unittest.TestCase):
@@ -453,6 +453,130 @@ class TestIpsFileFormat(unittest.TestCase):
         loaded = ChordProgression.from_json(prog.to_json())
         self.assertEqual(loaded.time_signature.numerator, 3)
         self.assertEqual(loaded.time_signature.denominator, 4)
+
+
+class TestChordRecognition(unittest.TestCase):
+    """Tests for the _identify_chord_name() recognition algorithm.
+
+    Covers every documented chord family and each of the three
+    disambiguation rules (b3+maj3 → #9, maj7/P5+tritone → #11, 4th → sus4).
+    """
+
+    def _chord(self, notes: list[str]) -> str:
+        from chords import Chord
+        c = Chord.from_notes(notes)
+        self.assertIsNotNone(c, f"from_notes({notes!r}) returned None")
+        return c.name
+
+    # ------------------------------------------------------------------ #
+    # Basic triads                                                         #
+    # ------------------------------------------------------------------ #
+
+    def test_major_triad(self):
+        self.assertEqual('C', self._chord(['C', 'E', 'G']))
+
+    def test_minor_triad(self):
+        self.assertEqual('Am', self._chord(['A', 'C', 'E']))
+
+    def test_diminished_triad(self):
+        self.assertEqual('Bdim', self._chord(['B', 'D', 'F']))
+
+    def test_augmented_triad(self):
+        self.assertEqual('Caug', self._chord(['C', 'E', 'Ab']))
+
+    def test_sus4_triad(self):
+        self.assertEqual('Csus4', self._chord(['C', 'F', 'G']))
+
+    # ------------------------------------------------------------------ #
+    # 7th chords                                                           #
+    # ------------------------------------------------------------------ #
+
+    def test_dominant_7(self):
+        self.assertEqual('G7', self._chord(['G', 'B', 'D', 'F']))
+
+    def test_major_7(self):
+        self.assertEqual('Cmaj7', self._chord(['C', 'E', 'G', 'B']))
+
+    def test_minor_7(self):
+        self.assertEqual('Dm7', self._chord(['D', 'F', 'A', 'C']))
+
+    def test_minor_major_7(self):
+        self.assertEqual('AmM7', self._chord(['A', 'C', 'E', 'Ab']))
+
+    def test_half_diminished(self):
+        self.assertEqual('Bm7b5', self._chord(['B', 'D', 'F', 'A']))
+
+    def test_diminished_7(self):
+        self.assertEqual('Bdim7', self._chord(['B', 'D', 'F', 'Ab']))
+
+    def test_sus4_dom7(self):
+        self.assertEqual('G7sus4', self._chord(['G', 'C', 'D', 'F']))
+
+    # ------------------------------------------------------------------ #
+    # Added-tone / extended chords                                         #
+    # ------------------------------------------------------------------ #
+
+    def test_add9(self):
+        self.assertEqual('Cadd9', self._chord(['C', 'E', 'G', 'D']))
+
+    def test_6th(self):
+        self.assertEqual('C6', self._chord(['C', 'E', 'G', 'A']))
+
+    def test_6_9(self):
+        self.assertEqual('C6/9', self._chord(['C', 'E', 'G', 'A', 'D']))
+
+    def test_dom9(self):
+        self.assertEqual('G7(9)', self._chord(['G', 'B', 'D', 'F', 'A']))
+
+    def test_dom_13(self):
+        self.assertEqual('G7(13)', self._chord(['G', 'B', 'D', 'F', 'E']))
+
+    # ------------------------------------------------------------------ #
+    # Validation rule 1: b3 + maj3 → #9                                   #
+    # ------------------------------------------------------------------ #
+
+    def test_rule1_sharp9_not_minor3(self):
+        """C7(#9): C-E-G-Bb-Eb — both b3(Eb) and maj3(E) present → #9."""
+        name = self._chord(['C', 'E', 'G', 'Bb', 'Eb'])
+        self.assertEqual('C7(#9)', name)
+
+    def test_rule1_b9_dominant(self):
+        """C7(b9): C-E-G-Bb-Db — only b9 (semitone 1), no #9 ambiguity."""
+        name = self._chord(['C', 'E', 'G', 'Bb', 'Db'])
+        self.assertEqual('C7(b9)', name)
+
+    # ------------------------------------------------------------------ #
+    # Validation rule 2: (maj7 or P5) + tritone → #11                    #
+    # ------------------------------------------------------------------ #
+
+    def test_rule2_sharp11_with_5th(self):
+        """G7(#11): tritone + perfect 5th → tritone is #11 not b5."""
+        name = self._chord(['G', 'B', 'D', 'F', 'Db'])
+        self.assertEqual('G7(#11)', name)
+
+    def test_rule2_sharp11_with_maj7(self):
+        """Cmaj7(#11): tritone + maj7 → tritone is #11 not b5."""
+        name = self._chord(['C', 'E', 'G', 'B', 'Gb'])
+        self.assertEqual('Cmaj7(#11)', name)
+
+    def test_rule2_flat5_without_5th(self):
+        """Bm7b5: tritone without maj7 or P5 → tritone stays b5."""
+        name = self._chord(['B', 'D', 'F', 'A'])
+        self.assertEqual('Bm7b5', name)
+
+    # ------------------------------------------------------------------ #
+    # Validation rule 3: perfect 4th → sus4                               #
+    # ------------------------------------------------------------------ #
+
+    def test_rule3_sus4_no_third(self):
+        """Csus4: perfect 4th present, no 3rd → sus4, not minor/major."""
+        name = self._chord(['C', 'F', 'G'])
+        self.assertEqual('Csus4', name)
+
+    def test_rule3_sus4_7(self):
+        """G7sus4: 4th + b7 → 7sus4."""
+        name = self._chord(['G', 'C', 'D', 'F'])
+        self.assertEqual('G7sus4', name)
 
 
 if __name__ == '__main__':

@@ -47,7 +47,6 @@ class Recorder:
         # Beat-timing debug: updated each beat (monotonic time) so the UI can
         # query the offset since the last beat fired.
         self._last_beat_time: float | None = None
-        self._beat_interval: float = 0.5
 
     # ------------------------------------------------------------------
     # Recording
@@ -83,7 +82,6 @@ class Recorder:
         beats = progression.time_signature.numerator
         beat_names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
         interval = 60.0 / self.recording_bpm
-        self._beat_interval = interval
 
         # Use time.monotonic() throughout so beat scheduling is immune to
         # wall-clock adjustments (NTP, manual time changes, etc.).
@@ -219,7 +217,6 @@ class Recorder:
         self, progression: ChordProgression, cursor: Position
     ) -> None:
         interval = 60.0 / progression.bpm
-        self._beat_interval = interval
         beats = progression.time_signature.numerator
         cur = Position(cursor.measure, cursor.beat, progression.time_signature)
 
@@ -263,12 +260,12 @@ class Recorder:
 
     def beat_offset_ms(self) -> float:
         """
-        Return the time elapsed (in milliseconds) since the last metronome beat.
+        Return the time elapsed (in milliseconds) since the last metronome beat fired.
 
-        Useful for debugging timing: a value consistently near 0 means the
-        metronome fires on time; a large positive value suggests the metronome
-        beat fired late (or the query was made well after the beat).
-        Returns 0.0 when no beat has been recorded yet.
+        This is a phase metric: it tells you how far into the current beat interval
+        the query was made.  A small value means the beat just fired; a large value
+        means the query was made well after the beat.  Returns 0.0 when no beat has
+        been recorded yet.
         """
         if self._last_beat_time is None:
             return 0.0
