@@ -1116,3 +1116,60 @@
 23:22:40 INFO  Stopped
 23:22:41 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 23:22:41 DEBUG MIDI reader thread stopped
+23:50:59 INFO  MIDI: 2 devices found
+23:50:59 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+23:50:59 INFO  MIDI connected: MOTU M Series MIDI In 0
+23:50:59 DEBUG MIDI reader thread stopped
+23:50:59 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+23:50:59 INFO  MIDI connected: Nord Piano 6 MIDI 1
+23:50:59 INFO  MIDI out: Nord Piano 6 MIDI 2
+23:51:04 INFO  IReal Studio ready. My Progression. Press R to record.
+23:51:04 DEBUG Update check failed: HTTP Error 404: Not Found
+23:51:09 INFO  Opened Denizian blues
+23:51:10 INFO  A flat 13 bar 2 beat 1
+23:51:11 INFO  E flat 9 bar 1 beat 1
+23:51:12 INFO  E flat 9
+23:51:14 INFO  A flat 13
+23:51:15 INFO  A flat 13 bar 2 beat 1
+23:51:15 INFO  E flat 9 bar 1 beat 1
+23:51:16 INFO  A flat 13 bar 2 beat 1
+23:51:17 INFO  A diminished 7 bar 2 beat 3
+23:51:17 INFO  E flat 9 bar 3 beat 1
+23:51:17 INFO  Section B B flat minor 7 bar 4 beat 1
+23:51:18 INFO  Section A E flat 9 bar 3 beat 1
+23:51:22 INFO  Section B B flat minor 7 bar 4 beat 1
+23:51:22 INFO  Section A E flat 9 bar 3 beat 1
+23:51:27 INFO  Nothing to delete at measure 3
+23:51:28 INFO  A diminished 7 bar 2 beat 3
+23:51:29 INFO  A flat 13 bar 2 beat 1
+23:51:30 INFO  E flat 9 bar 1 beat 1
+23:51:31 INFO  Deleted section mark at measure 1
+23:51:33 INFO  Section A at measure 1
+23:51:36 INFO  A flat 13 bar 2 beat 1
+23:51:36 INFO  A diminished 7 bar 2 beat 3
+23:51:36 INFO  E flat 9 bar 3 beat 1
+23:51:37 INFO  Section B B flat minor 7 bar 4 beat 1
+23:51:42 INFO  E flat 7 flat 9 bar 4 beat 3
+23:51:42 INFO  B flat minor 7 bar 4 beat 1
+23:51:43 INFO  Section A E flat 9 bar 3 beat 1
+23:51:43 INFO  Section B B flat minor 7 bar 4 beat 1
+23:51:46 INFO  Deleted
+23:51:46 INFO  E flat 9 bar 3 beat 1
+23:51:47 INFO  Undo
+23:51:48 INFO  Section B B flat minor 7 bar 4 beat 1
+23:51:48 INFO  Section A E flat 9 bar 3 beat 1
+23:51:54 INFO  Nothing to delete at measure 3
+23:51:55 INFO  Section B B flat minor 7 bar 4 beat 1
+23:52:00 INFO  Deleted section mark at measure 4
+23:52:58 INFO  QR code saved to Denizian_blues_qrcode.svg
+23:53:01 INFO  E flat 7 flat 9 bar 4 beat 3
+23:53:02 INFO  B flat minor 7 bar 4 beat 1
+23:53:09 INFO  QR code saved to Denizian_blues_qrcode.svg
+23:53:12 INFO  E flat 7 flat 9 bar 4 beat 3
+23:53:12 INFO  B flat minor 7 bar 4 beat 1
+23:54:26 INFO  E flat 9 bar 3 beat 1
+23:54:26 INFO  B flat minor 7 bar 4 beat 1
+23:54:28 INFO  E flat 7 flat 9 bar 4 beat 3
+23:54:29 INFO  A flat 6 bar 5 beat 1
+23:57:49 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+23:57:49 DEBUG MIDI reader thread stopped
