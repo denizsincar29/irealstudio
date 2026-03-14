@@ -501,8 +501,16 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
         print(f"Enter chord name [{default}]: ", end='', flush=True)
         try:
             val = input().strip()
-            return val if val else default
+            name = val if val else default
         except (KeyboardInterrupt, EOFError):
+            return None
+        if not name:
+            return None
+        try:
+            from chords import Chord
+            Chord(name)
+            return name
+        except Exception:
             return None
 
     try:

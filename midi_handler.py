@@ -71,6 +71,7 @@ class MidiHandler:
         self._chord_notes: set[int] = set()
         self._last_note_on_time: float = 0.0
         self._chord_pending: bool = False
+        self._soft_pedal_down: bool = False  # tracks rising-edge for CC 67
 
     # ------------------------------------------------------------------
     # Public API
@@ -212,9 +213,13 @@ class MidiHandler:
         )
 
         if msg.type == 'control_change':
-            if msg.control == self.CC_SOFT_PEDAL and msg.value >= 64:
-                if self._on_nc_pedal is not None:
-                    self._on_nc_pedal()
+            if msg.control == self.CC_SOFT_PEDAL:
+                pressed = msg.value >= 64
+                if pressed and not self._soft_pedal_down:
+                    # Rising edge only — ignore repeated CC messages while held
+                    if self._on_nc_pedal is not None:
+                        self._on_nc_pedal()
+                self._soft_pedal_down = pressed
             return
 
         if note_on:

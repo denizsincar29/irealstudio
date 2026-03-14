@@ -40,7 +40,6 @@ On Windows a native menu bar is available (use Alt to activate):
   Settings      - Change Title, Composer, Time Signature, BPM, Recording BPM,
                   Key, Style interactively
 """
-import os
 import sys
 import time
 import logging
@@ -92,7 +91,6 @@ _CMD_EDIT_REDO          = 4002
 _CMD_EDIT_CUT           = 4003
 _CMD_EDIT_COPY          = 4004
 _CMD_EDIT_PASTE         = 4005
-_CMD_EDIT_SELECT_ALL    = 4006
 _CMD_INSERT_CHORD       = 5001
 _CMD_INSERT_SM_A        = 5010
 _CMD_INSERT_SM_B        = 5011
@@ -102,7 +100,6 @@ _CMD_INSERT_SM_V        = 5014
 _CMD_INSERT_SM_I        = 5015
 _CMD_INSERT_VOLTA       = 5020
 _CMD_INSERT_NC          = 5021
-_CMD_INSERT_REPEAT      = 5022
 _CMD_INSERT_BASS        = 5023
 _CMD_RECORD_START             = 6001
 _CMD_RECORD_PLAY              = 6002
@@ -160,6 +157,15 @@ DEFAULT_KEY = "C"
 DEFAULT_STYLE = "Medium Swing"
 DEFAULT_TIME_SIG = TimeSignature(4, 4)
 SAVE_FILE = "progression.ips"
+
+
+def _safe_filename(title: str) -> str:
+    """Return a filesystem-safe version of *title* suitable for use as a base filename."""
+    import re
+    safe = re.sub(r'[\\/:*?"<>|]', '', title)   # strip Windows-forbidden chars + slashes
+    safe = safe.replace(' ', '_')
+    safe = safe.strip('._')                       # leading/trailing dots/underscores
+    return safe or 'export'
 
 # ---------------------------------------------------------------------------
 # wxPython key-code → symbolic-name map (used by both keydown and keyup)
@@ -340,7 +346,13 @@ class App:
             self.speak(chord.name)
 
     def _on_nc_pedal(self) -> None:
-        """Called when the left (soft) pedal is pressed: toggle N.C. on current measure."""
+        """Called when the left (soft) pedal is pressed: toggle N.C. on current measure.
+
+        Gated to IDLE state — during recording or playback the pedal has no
+        effect because the cursor doesn't reflect the live recording position.
+        """
+        if self._recorder.state != AppState.IDLE:
+            return
         self.toggle_no_chord()
 
     # ------------------------------------------------------------------
@@ -472,9 +484,10 @@ class App:
                 and item.position not in recorded_positions
             ]
 
-        for item in to_del:
-            self.progression.delete_chord_at(item.position)
-
+        if to_del:
+            self._push_undo()
+            for item in to_del:
+                self.progression.delete_chord_at(item.position)
         self._overwrite_start = None
         self._overwrite_recorded.clear()
 
@@ -646,6 +659,7 @@ class App:
     def add_section_mark(self, letter: str) -> None:
         mark = SECTION_KEYS.get(letter.lower())
         if mark:
+            self._push_undo()
             self.progression.add_section_mark(self.cursor.measure, mark)
             names = {
                 '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
@@ -667,14 +681,17 @@ class App:
             target = item
         else:
             target = chords[0]
+        self._push_undo()
         target.bass_note = note
         self.speak(target.chord_name())
 
     def add_volta(self) -> None:
+        self._push_undo()
         msg = self.progression.add_volta_start(self.cursor.measure)
         self.speak(msg)
 
     def delete_at_cursor(self) -> None:
+        self._push_undo()
         self.progression.delete_chord_at(self.cursor)
         self.speak(f"Deleted at measure {self.cursor.measure} beat {self.cursor.beat}")
 
@@ -769,7 +786,7 @@ class App:
     def export_ireal(self) -> None:
         try:
             url = self.progression.to_ireal_url()
-            html_file = self.progression.title.replace(' ', '_') + '.html'
+            html_file = _safe_filename(self.progression.title) + '.html'
             html = (
                 "<!DOCTYPE html>\n<html>\n<head><title>"
                 + self.progression.title
@@ -782,7 +799,7 @@ class App:
                 f.write(html)
             self.speak(f"Exported to {html_file}")
             try:
-                webbrowser.open('file://' + os.path.abspath(html_file))
+                webbrowser.open(Path(html_file).resolve().as_uri())
             except Exception:
                 pass
         except Exception as e:
@@ -800,12 +817,12 @@ class App:
             url = self.progression.to_ireal_url()
             factory = qr_svg.SvgFillImage
             img = qrcode.make(url, image_factory=factory)
-            qr_file = self.progression.title.replace(' ', '_') + '_qrcode.svg'
+            qr_file = _safe_filename(self.progression.title) + '_qrcode.svg'
             with open(qr_file, 'wb') as f:
                 img.save(f)
             self.speak(f"QR code exported to {qr_file}")
             try:
-                webbrowser.open('file://' + os.path.abspath(qr_file))
+                webbrowser.open(Path(qr_file).resolve().as_uri())
             except Exception:
                 pass
         except Exception as e:
@@ -1596,7 +1613,6 @@ class App:
         # Delete/Backspace
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                self._push_undo()
                 self.delete_at_cursor()
 
         # N – toggle no chord

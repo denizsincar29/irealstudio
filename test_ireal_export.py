@@ -36,6 +36,14 @@ def url_body(prog: ChordProgression) -> str:
     return unquote(url)
 
 
+def measures_body(prog: ChordProgression) -> str:
+    """Return only the measures payload (the part inside [ ... Z)."""
+    body = url_body(prog)
+    # URL format: ...=n=[T44<measures>Z  – extract everything from '[' onward
+    bracket = body.find('[')
+    return body[bracket:] if bracket != -1 else body
+
+
 class TestUrlFormat(unittest.TestCase):
     """Basic URL structure tests."""
 
@@ -860,13 +868,15 @@ class TestNoChordMeasure(unittest.TestCase):
     """Tests for the no-chord (N.C.) measure support."""
 
     def test_nc_measure_exports_n(self):
-        """A measure marked as N.C. must export the 'n' symbol."""
+        """A measure marked as N.C. must export the 'n' symbol in the measures section."""
         prog = make_prog()
         prog.add_chord_by_name('Cmaj7', 1, 1)
         prog.add_no_chord(2)
-        body = url_body(prog)
-        # N.C. measure must contain 'n'
-        self.assertIn('n', body)
+        meas = measures_body(prog)
+        # The NC marker appears as '|n,' (barline + n + beat separator)
+        # or 'n,' at the very start of a measure run.
+        # Either way, 'n,' must appear inside the measures payload.
+        self.assertIn('n,', meas)
 
     def test_is_no_chord_after_add(self):
         prog = make_prog()
