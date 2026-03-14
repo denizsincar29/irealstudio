@@ -243,6 +243,12 @@ class Recorder:
             if vb.is_complete():
                 last_m = max(last_m, vb.ending2_start)
 
+        # Anchor the beat grid to an absolute timeline so processing overhead
+        # (chord lookup, speak, play_sound enqueue) does not accumulate and
+        # drift the metronome — same pattern used in _precount_and_record.
+        t0 = time.monotonic()
+        beat_count = 0
+
         while not self._playback_stop.is_set():
             # Record when this beat fires for debug offset queries.
             self._last_beat_time = time.monotonic()
@@ -257,7 +263,18 @@ class Recorder:
                 cur.measure, cur.beat, progression.time_signature
             )
 
-            time.sleep(interval)
+            # Sleep until the absolute time of the next beat.
+            beat_count += 1
+            next_beat_time = t0 + beat_count * interval
+            sleep_time = next_beat_time - time.monotonic()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            elif sleep_time < -0.01:
+                _logger.debug(
+                    "Playback beat %d ran %.1f ms over budget",
+                    beat_count, -sleep_time * 1000,
+                )
+
             if self._playback_stop.is_set():
                 break
 
