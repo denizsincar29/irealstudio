@@ -36,6 +36,14 @@ def url_body(prog: ChordProgression) -> str:
     return unquote(url)
 
 
+def measures_body(prog: ChordProgression) -> str:
+    """Return only the measures payload (the part inside [ ... Z)."""
+    body = url_body(prog)
+    # URL format: ...=n=[T44<measures>Z  – extract everything from '[' onward
+    bracket = body.find('[')
+    return body[bracket:] if bracket != -1 else body
+
+
 class TestUrlFormat(unittest.TestCase):
     """Basic URL structure tests."""
 
@@ -682,8 +690,8 @@ class TestIRealChordTranslation(unittest.TestCase):
         self.assertEqual('C^9#11', self._ireal('Cmaj7(9#11)'))
 
     def test_m7b5_with_b9(self):
-        """Bm7b5(b9) half-dim with b9 must translate to Bh7b9."""
-        self.assertEqual('Bh7b9', self._ireal('Bm7b5(b9)'))
+        """Bm7b5(b9) half-dim with b9 translates to Bh9 (closest valid iReal Pro quality)."""
+        self.assertEqual('Bh9', self._ireal('Bm7b5(b9)'))
 
     def test_mM7_with_9(self):
         """AmM7(9) minor-major 9 must translate to A-^9."""
@@ -782,6 +790,133 @@ class TestSharpKeyRecognition(unittest.TestCase):
         """F# is not a valid iReal Pro key; get_note_names_for_key returns flats."""
         notes = self._notes_for_key('F#')
         self.assertIn('Gb', notes)  # flat list, not sharp list
+
+
+class TestDom7b5Recognition(unittest.TestCase):
+    """Tests that dominant 7(b5) chords are recognised and exported correctly.
+
+    Regression for bug: C7b5 was exported as C7, ignoring the flat-5.
+    """
+
+    def _chord(self, notes: list[str]) -> str:
+        from chords import Chord
+        c = Chord.from_notes(notes)
+        self.assertIsNotNone(c, f"from_notes({notes!r}) returned None")
+        return c.name
+
+    def _ireal(self, chord_name: str) -> str:
+        from chords import ProgressionItem, Chord, Position, TimeSignature
+        pos = Position(1, 1, TimeSignature(4, 4))
+        item = ProgressionItem(chord=Chord(chord_name), position=pos, bass_note='')
+        return item.ireal_chord_name()
+
+    def test_c7b5_recognition(self):
+        """C-E-Gb-Bb → C7(b5), not C7."""
+        # C major 3rd (E=4), tritone (Gb=6), b7 (Bb=10)
+        name = self._chord(['C', 'E', 'Gb', 'Bb'])
+        self.assertEqual('C7(b5)', name)
+
+    def test_c7b5_ireal_export(self):
+        """C7(b5) must export as C7b5, not C7."""
+        self.assertEqual('C7b5', self._ireal('C7(b5)'))
+
+    def test_c7b5_in_url(self):
+        prog = make_prog()
+        prog.add_chord_by_name('C7(b5)', 1, 1)
+        body = url_body(prog)
+        self.assertIn('C7b5', body)
+
+    def test_g7b5_recognition(self):
+        """G7b5: G-B-Db-F."""
+        name = self._chord(['G', 'B', 'Db', 'F'])
+        self.assertEqual('G7(b5)', name)
+
+    def test_7b5_distinct_from_7sharp11(self):
+        """7(b5) has no P5; 7(#11) has a P5 — they must be distinct."""
+        no_5th       = self._chord(['C', 'E', 'Gb', 'Bb'])          # C7(b5)
+        seven_sharp11 = self._chord(['C', 'E', 'G', 'Bb', 'Gb'])   # C7(#11)
+        self.assertEqual('C7(b5)', no_5th)
+        self.assertEqual('C7(#11)', seven_sharp11)
+
+    def test_7b9b5_recognition(self):
+        """C7(b9b5): C-E-Gb-Bb-Db."""
+        name = self._chord(['C', 'E', 'Gb', 'Bb', 'Db'])
+        self.assertEqual('C7(b9b5)', name)
+
+    def test_7b9b5_ireal_export(self):
+        self.assertEqual('C7b9b5', self._ireal('C7(b9b5)'))
+
+    def test_7sharp9b5_recognition(self):
+        """C7(#9b5): C-E-Gb-Bb-Eb (Eb = #9 / b3)."""
+        name = self._chord(['C', 'E', 'Gb', 'Bb', 'Eb'])
+        self.assertEqual('C7(#9b5)', name)
+
+    def test_7sharp9b5_ireal_export(self):
+        self.assertEqual('C7#9b5', self._ireal('C7(#9b5)'))
+
+    def test_9b5_recognition(self):
+        """C7(9b5): C-E-Gb-Bb-D."""
+        name = self._chord(['C', 'E', 'Gb', 'Bb', 'D'])
+        self.assertEqual('C7(9b5)', name)
+
+    def test_9b5_ireal_export(self):
+        """C7(9b5) must export as C9b5."""
+        self.assertEqual('C9b5', self._ireal('C7(9b5)'))
+
+
+class TestNoChordMeasure(unittest.TestCase):
+    """Tests for the no-chord (N.C.) measure support."""
+
+    def test_nc_measure_exports_n(self):
+        """A measure marked as N.C. must export the 'n' symbol in the measures section."""
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        prog.add_no_chord(2)
+        meas = measures_body(prog)
+        # The NC marker appears as '|n,' (barline + n + beat separator)
+        # or 'n,' at the very start of a measure run.
+        # Either way, 'n,' must appear inside the measures payload.
+        self.assertIn('n,', meas)
+
+    def test_is_no_chord_after_add(self):
+        prog = make_prog()
+        prog.add_no_chord(3)
+        self.assertTrue(prog.is_no_chord(3))
+        self.assertFalse(prog.is_no_chord(4))
+
+    def test_remove_no_chord(self):
+        prog = make_prog()
+        prog.add_no_chord(2)
+        prog.remove_no_chord(2)
+        self.assertFalse(prog.is_no_chord(2))
+
+    def test_remove_nonexistent_no_chord_is_safe(self):
+        prog = make_prog()
+        prog.remove_no_chord(99)  # must not raise
+
+    def test_no_chord_in_json_round_trip(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Am7', 1, 1)
+        prog.add_no_chord(2)
+        json_str = prog.to_json()
+        restored = ChordProgression.from_json(json_str)
+        self.assertTrue(restored.is_no_chord(2))
+        self.assertFalse(restored.is_no_chord(1))
+
+    def test_nc_last_measure_counted(self):
+        """A lone N.C. measure must be included in last_measure()."""
+        prog = make_prog()
+        prog.add_no_chord(5)
+        self.assertEqual(5, prog.last_measure())
+
+    def test_empty_measure_exports_x(self):
+        """A measure with no chord and no N.C. flag exports as 'x' (iReal Pro repeat-one-measure)."""
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        # Force a second measure with no chord
+        prog.total_measures = 2
+        meas = measures_body(prog)
+        self.assertIn('x', meas)
 
 
 if __name__ == '__main__':
