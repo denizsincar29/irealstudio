@@ -215,6 +215,11 @@ class Chord:
 
     # ------------------------------------------------------------------
 
+    @property
+    def name(self) -> str:
+        """The canonical chord name, e.g. 'Cmaj7', 'Am7'."""
+        return self._name
+
     def __str__(self) -> str:
         return self._name
 
@@ -266,13 +271,6 @@ class Chord:
         """Identify a chord from pitch-class note names (root = first/lowest)."""
         name = _identify_chord_name(notes)
         return cls(name, notes) if name else None
-
-
-def find_chords_from_notes(notes: list[str]) -> list[Chord]:
-    """Return the best-matching chord for the given note names (at most one)."""
-    chord = Chord.from_notes(notes)
-    return [chord] if chord else []
-
 
 # iReal Pro rehearsal marks supported by the app (S key + letter)
 SECTION_KEYS = {
@@ -429,14 +427,14 @@ class ProgressionItem:
     bass_note: str = ''  # For slash chords, e.g. 'G/B' -> bass_note='B'
 
     def __str__(self) -> str:
-        chord_str = str(self.chord)
+        chord_str = self.chord.name
         if self.bass_note:
             chord_str += f"/{self.bass_note}"
         return f"{chord_str} at {self.position}"
 
     def chord_name(self) -> str:
         """Return the full chord name including optional bass note."""
-        name = str(self.chord)
+        name = self.chord.name
         if self.bass_note:
             name += f"/{self.bass_note}"
         return name
@@ -444,17 +442,17 @@ class ProgressionItem:
     def __eq__(self, other) -> bool:
         if not isinstance(other, ProgressionItem):
             return NotImplemented
-        return self.position == other.position and str(self.chord) == str(other.chord)
+        return self.position == other.position and self.chord.name == other.chord.name
 
     def __lt__(self, other) -> bool:
         return self.position < other.position
 
     def __hash__(self):
-        return hash((str(self.chord), self.position))
+        return hash((self.chord.name, self.position))
 
     def to_dict(self) -> dict:
         return {
-            'chord': str(self.chord),
+            'chord': self.chord.name,
             'measure': self.position.measure,
             'beat': self.position.beat,
             'bass_note': self.bass_note,
@@ -507,28 +505,9 @@ class ChordProgression:
         self.add_chord(chord, measure, beat, bass_note)
 
     def add_chord_by_notes(self, notes: list[str], measure: int, beat: int, bass_note: str = ''):
-        chords = find_chords_from_notes(notes)
-        if chords:
-            self.add_chord(chords[0], measure, beat, bass_note)
-
-    def add_chord_by_raw_data(self, midi_notes: list[int], timestamp: float, bpm: int,
-                               recording_start_time: float = 0.0):
-        """
-        Convert a MIDI chord (recorded during playback) to a position.
-
-        timestamp        – time in seconds when the first note was pressed
-        recording_start_time – time when recording actually started (after pre-count)
-        """
-        beats_per_second = bpm / 60
-        elapsed = timestamp - recording_start_time
-        beat_pos = elapsed * beats_per_second  # 0-based float beat position from recording start
-        quantized_total_beat = round(beat_pos) + 1  # 1-based
-        if quantized_total_beat < 1:
-            quantized_total_beat = 1
-        measure = (quantized_total_beat - 1) // self.time_signature.numerator + 1
-        beat = (quantized_total_beat - 1) % self.time_signature.numerator + 1
-        notes = [NOTE_NAMES[n % 12] for n in midi_notes]
-        self.add_chord_by_notes(notes, measure, beat)
+        chord = Chord.from_notes(notes)
+        if chord is not None:
+            self.add_chord(chord, measure, beat, bass_note)
 
     def delete_chord_at(self, position: Position):
         self.items = [i for i in self.items if i.position != position]

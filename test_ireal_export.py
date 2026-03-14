@@ -363,13 +363,13 @@ class TestNoteDeduplication(unittest.TestCase):
         self.assertEqual(deduped[-1], 'C')  # only one 'C'
 
     def test_chord_found_after_dedup(self):
-        """find_chords_from_notes must succeed for C/E/G/C5 after deduplication."""
-        from chords import NOTE_NAMES, find_chords_from_notes
+        """Chord.from_notes must succeed for C/E/G/C5 after deduplication."""
+        from chords import NOTE_NAMES, Chord
         notes = [60, 64, 67, 72]  # C4, E4, G4, C5
         deduped = list(dict.fromkeys(NOTE_NAMES[n % 12] for n in notes))
-        chords = find_chords_from_notes(deduped)
-        self.assertTrue(len(chords) > 0)
-        self.assertIn('C', str(chords[0]))
+        chord = Chord.from_notes(deduped)
+        self.assertIsNotNone(chord)
+        self.assertIn('C', chord.name)
 
 
 class TestChordNavigation(unittest.TestCase):
