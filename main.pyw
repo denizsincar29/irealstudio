@@ -1163,18 +1163,17 @@ class App:
         """Generate a QR code for the iReal Pro URL and show it in a popup dialog."""
         try:
             import qrcode
-            import qrcode.image.svg as qr_svg
         except ImportError:
             self.speak(_("QR code export requires the qrcode package (uv add qrcode)"))
             return
         try:
-            url = self.progression.to_ireal_url()
-            factory = qr_svg.SvgFillImage
-            img = qrcode.make(url, image_factory=factory)
             import io
+            url = self.progression.to_ireal_url()
+            # Use the default PIL/Pillow factory which produces a PNG image
+            img = qrcode.make(url)
             buf = io.BytesIO()
-            img.save(buf)
-            svg_bytes = buf.getvalue()
+            img.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
         except Exception as e:
             self.speak(_("QR code generation failed: {e}").format(e=e))
             return
@@ -1183,20 +1182,13 @@ class App:
             self.speak(_("QR code ready but no window to display it"))
             return
 
-        # Try to render the SVG as a bitmap; image is optional – the dialog
-        # is always shown regardless so the URL remains accessible.
-        bmp: wx.Bitmap | None = None
-        try:
-            svg_image = wx.SVGimage.CreateFromBytes(svg_bytes)
-            bmp = svg_image.ConvertToScaledBitmap(wx.Size(320, 320), self._frame)
-        except Exception:
-            pass  # No SVG support – dialog still shows without the image
+        wx_img = wx.Image(io.BytesIO(png_bytes), wx.BITMAP_TYPE_PNG)
+        wx_img.Rescale(320, 320, wx.IMAGE_QUALITY_HIGH)
+        bmp = wx.Bitmap(wx_img)
 
         dlg = wx.Dialog(self._frame, title=f"QR Code – {self.progression.title}")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        if bmp is not None:
-            static_bmp = wx.StaticBitmap(dlg, bitmap=bmp)
-            sizer.Add(static_bmp, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
         url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
         url_label.SetMaxSize(wx.Size(320, -1))
         sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
