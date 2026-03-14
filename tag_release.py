@@ -93,20 +93,26 @@ def _read_multiline_changelog() -> str:
 def _write_news(version: str, changelog: str) -> None:
     today = date.today().isoformat()
     new_block = f"## {version} - {today}\n\n{changelog}\n"
+
+    # news.md: current release only — overwritten each time so the CI workflow
+    # can read the whole file as the release body without any parsing.
     news_path = Path('news.md')
-    if news_path.exists():
-        existing = news_path.read_text(encoding='utf-8')
-        # Insert the new block after the top-level "# News" header if present,
-        # otherwise simply prepend it.
-        if existing.startswith('# News'):
-            header, _, rest = existing.partition('\n')
-            content = header + '\n\n' + new_block + '\n' + rest.lstrip('\n')
-        else:
-            content = '# News\n\n' + new_block + '\n' + existing.lstrip('\n')
-    else:
-        content = '# News\n\n' + new_block
-    news_path.write_text(content, encoding='utf-8')
+    news_path.write_text(f"# {version} Release Notes\n\n{new_block}", encoding='utf-8')
     print(f"Wrote news.md for {version}")
+
+    # changelog.md: cumulative history — prepend the new block.
+    changelog_path = Path('changelog.md')
+    if changelog_path.exists():
+        existing = changelog_path.read_text(encoding='utf-8')
+        if existing.startswith('# Changelog'):
+            header, _, rest = existing.partition('\n')
+            accumulated = header + '\n\n' + new_block + '\n' + rest.lstrip('\n')
+        else:
+            accumulated = '# Changelog\n\n' + new_block + '\n' + existing.lstrip('\n')
+    else:
+        accumulated = '# Changelog\n\n' + new_block
+    changelog_path.write_text(accumulated, encoding='utf-8')
+    print(f"Updated changelog.md for {version}")
 
 
 def main() -> None:

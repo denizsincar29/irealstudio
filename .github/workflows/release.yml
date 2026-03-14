@@ -128,17 +128,8 @@ jobs:
       - name: Read news.md
         id: changelog
         run: |
-          # Extract only the section for this tag from news.md
-          TAG="${{ github.ref_name }}"
-          VERSION="${TAG#v}"
-          # Try to extract changelog block for this version (text between first ## and next ##)
-          BODY=$(awk "/^## ${VERSION}|^## ${TAG}/{found=1; next} found && /^## /{exit} found{print}" news.md)
-          if [ -z "$BODY" ]; then
-            # Fallback: use the whole news.md content
-            BODY=$(cat news.md)
-          fi
-          # Write to a file to avoid quoting issues
-          printf '%s' "$BODY" > release_notes.txt
+          # news.md contains only the current release notes; use it as-is.
+          cp news.md release_notes.txt
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
