@@ -163,3 +163,43 @@
 23:41:55 INFO  Stopped
 23:41:56 DEBUG Closing MIDI port: Nord Piano 6 MIDI 0
 23:41:56 DEBUG MIDI reader thread stopped
+09:49:40 INFO  No MIDI input devices found
+09:49:53 INFO  IReal Studio ready. My Progression. Press R to record.
+09:49:58 INFO  Beat offset 215 milliseconds
+09:49:58 INFO  Beat offset 250 milliseconds
+09:49:59 INFO  Beat offset 272 milliseconds
+09:49:59 INFO  Beat offset 212 milliseconds
+09:50:01 INFO  Beat offset 416 milliseconds
+09:50:01 INFO  Beat offset 202 milliseconds
+09:50:02 INFO  Beat offset 431 milliseconds
+09:50:04 INFO  Beat offset 143 milliseconds
+09:50:04 INFO  Beat offset 464 milliseconds
+09:50:05 INFO  Beat offset 500 milliseconds
+09:50:05 INFO  Beat offset 349 milliseconds
+09:50:06 INFO  Beat offset 144 milliseconds
+09:50:08 INFO  Beat offset 180 milliseconds
+09:50:08 INFO  Beat offset 184 milliseconds
+09:50:09 INFO  Beat offset 181 milliseconds
+09:50:17 INFO  One
+09:50:17 INFO  Two
+09:50:18 INFO  Three
+09:50:18 INFO  Four
+09:50:19 INFO  One
+09:50:19 INFO  Two
+09:50:20 INFO  Three
+09:50:20 INFO  Beat offset 367 milliseconds
+09:50:20 INFO  Four
+09:50:21 INFO  Recording
+09:50:22 INFO  Beat offset 22 milliseconds
+09:50:22 INFO  Beat offset 478 milliseconds
+09:50:23 INFO  Beat offset 461 milliseconds
+09:50:26 INFO  Stopped
+09:50:34 INFO  Beat offset 485 milliseconds
+09:50:37 INFO  Beat offset 431 milliseconds
+09:50:37 INFO  Beat offset 385 milliseconds
+09:50:38 INFO  Beat offset 513 milliseconds
+09:50:39 INFO  Beat offset 114 milliseconds
+09:50:40 INFO  Beat offset 226 milliseconds
+09:50:40 INFO  Beat offset 173 milliseconds
+09:50:41 INFO  Beat offset 190 milliseconds
+09:50:45 DEBUG Closing MIDI port: 
