@@ -1,0 +1,142 @@
+# IReal Studio – Russian translation
+# Русский перевод IReal Studio
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ru\n"
+
+# --- startup / status ---
+msgid "QR code export requires the qrcode package (uv add qrcode)"
+msgstr "Для экспорта QR-кода требуется пакет qrcode (uv add qrcode)"
+
+msgid "QR code generation failed: {e}"
+msgstr "Ошибка генерации QR-кода: {e}"
+
+msgid "QR code ready but no window to display it"
+msgstr "QR-код готов, но нет окна для отображения"
+
+msgid "QR code saved to {qr_file}"
+msgstr "QR-код сохранён в {qr_file}"
+
+msgid "QR code export failed: {e2}"
+msgstr "Ошибка экспорта QR-кода: {e2}"
+
+msgid "QR code for {title}. Press OK to close."
+msgstr "QR-код для «{title}». Нажмите OK для закрытия."
+
+# --- keyboard shortcuts dialog ---
+msgid "Keyboard Shortcuts – IReal Studio"
+msgstr "Горячие клавиши – IReal Studio"
+
+msgid "Keyboard shortcuts dialog opened. Press OK to close."
+msgstr "Диалог горячих клавиш открыт. Нажмите OK для закрытия."
+
+# --- about dialog ---
+msgid "A blind-accessible chord progression recorder\nfor musicians who use screen readers.\n\nExport chord charts to iReal Pro format."
+msgstr "Редактор аккордовых прогрессий с поддержкой экранного чтения\nдля незрячих музыкантов.\n\nЭкспорт в формат iReal Pro."
+
+msgid "(C) 2024 Deniz Sincar"
+msgstr "© 2024 Денис Синчар"
+
+# --- editing ---
+msgid "Deleted"
+msgstr "Удалено"
+
+msgid "section mark"
+msgstr "метка раздела"
+
+msgid "repeat bracket"
+msgstr "знак повтора"
+
+msgid "N.C."
+msgstr "N.C."
+
+msgid "Deleted {items} at measure {m}"
+msgstr "Удалено: {items} в такте {m}"
+
+msgid "Nothing to delete at measure {m} beat {b}"
+msgstr "Нечего удалять в такте {m} доле {b}"
+
+# --- section marks ---
+msgid "Section A"
+msgstr "Раздел A"
+
+msgid "Section B"
+msgstr "Раздел B"
+
+msgid "Section C"
+msgstr "Раздел C"
+
+msgid "Section D"
+msgstr "Раздел D"
+
+msgid "Verse"
+msgstr "Куплет"
+
+msgid "Intro"
+msgstr "Вступление"
+
+msgid "{section} at measure {m}"
+msgstr "{section} в такте {m}"
+
+# --- bass note ---
+msgid "Invalid note"
+msgstr "Неверная нота"
+
+msgid "No chord to modify"
+msgstr "Нет аккорда для изменения"
+
+# --- volta brackets ---
+msgid "Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}"
+msgstr "Повтор с такта {repeat_start}, окончание 1: {e1_start}–{e1_end}, окончание 2 начинается с такта {e2_start}"
+
+msgid " ({n} hidden chord{s} removed)"
+msgstr " (удалено {n} скрытых аккорд{s})"
+
+# --- playback / recording ---
+msgid "Stopped"
+msgstr "Остановлено"
+
+msgid "Beat offset {offset:.0f} milliseconds"
+msgstr "Смещение по доле: {offset:.0f} мс"
+
+# --- file operations ---
+msgid "Export failed: {e}"
+msgstr "Ошибка экспорта: {e}"
+
+msgid "Saved to {path}"
+msgstr "Сохранено в {path}"
+
+msgid "Open"
+msgstr "Открыть"
+
+# --- devices ---
+msgid "MIDI devices refreshed"
+msgstr "MIDI-устройства обновлены"
+
+msgid "MIDI input: {name}"
+msgstr "MIDI-вход: {name}"
+
+msgid "No MIDI input device"
+msgstr "Нет MIDI-устройства ввода"
+
+msgid "MIDI output: {name}"
+msgstr "MIDI-выход: {name}"
+
+msgid "No MIDI output device"
+msgstr "Нет MIDI-устройства вывода"
+
+# --- positions ---
+msgid "bar {m} beat {b}"
+msgstr "такт {m} доля {b}"
+
+msgid "ending 1"
+msgstr "окончание 1"
+
+msgid "ending 2"
+msgstr "окончание 2"
+
+# --- log ---
+msgid "Log is empty"
+msgstr "Журнал пуст"
