@@ -29,6 +29,9 @@ _DOMAIN = 'irealstudio'
 # Active translation object (NullTranslations = passthrough)
 _translation: gettext.NullTranslations = gettext.NullTranslations()
 
+# Currently active language code (None = English / no translation loaded)
+_current_lang: str | None = None
+
 
 def set_language(lang: str | None = None) -> None:
     """Load the translation catalogue for *lang*.
@@ -36,7 +39,7 @@ def set_language(lang: str | None = None) -> None:
     If *lang* is ``None`` the language is auto-detected from the environment
     variable ``IREALSTUDIO_LANG`` or the system locale.
     """
-    global _translation
+    global _translation, _current_lang
 
     if lang is None:
         lang = os.environ.get('IREALSTUDIO_LANG')
@@ -52,6 +55,7 @@ def set_language(lang: str | None = None) -> None:
 
     if lang is None or lang == 'en':
         _translation = gettext.NullTranslations()
+        _current_lang = 'en'
         return
 
     try:
@@ -60,12 +64,19 @@ def set_language(lang: str | None = None) -> None:
             localedir=str(_LOCALE_DIR),
             languages=[lang],
         )
+        _current_lang = lang
         _logger.info("Loaded '%s' translation from %s", lang, _LOCALE_DIR)
     except FileNotFoundError:
         _logger.debug(
             "No '%s' translation found in %s; using English", lang, _LOCALE_DIR
         )
         _translation = gettext.NullTranslations()
+        _current_lang = 'en'
+
+
+def get_language() -> str:
+    """Return the currently active language code (e.g. ``'en'``, ``'ru'``)."""
+    return _current_lang or 'en'
 
 
 def _(text: str) -> str:

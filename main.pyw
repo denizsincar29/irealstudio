@@ -69,7 +69,7 @@ from dialogs import (
     prompt_input, new_project_dialog, project_settings_dialog,
     insert_chord_dialog, BPM_MIN, BPM_MAX,
 )
-from i18n import _
+from i18n import _, set_language, get_language
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -80,6 +80,7 @@ _CMD_FILE_OPEN      = 1004
 _CMD_FILE_EXPORT    = 1002
 _CMD_FILE_QR        = 1005
 _CMD_FILE_QUIT      = 1006
+_CMD_FILE_NEW       = 1007
 _CMD_MIDI_REFRESH     = 2001
 _CMD_MIDI_NONE        = 2002   # placeholder shown when no devices are present
 _CMD_MIDI_OUT_REFRESH = 2003
@@ -89,6 +90,7 @@ _CMD_SOUND_OUT_NONE     = 2006
 _CMD_SOUND_OUT_DEFAULT  = 2007  # "System default" audio device
 _CMD_SETTINGS_PROJECT   = 3008  # "Project Settings…" (all-in-one dialog)
 _CMD_SETTINGS_UPDATE    = 3009  # "Check for Updates…"
+_CMD_SETTINGS_LANGUAGE  = 3010  # "Language…"
 _CMD_EDIT_UNDO          = 4001
 _CMD_EDIT_REDO          = 4002
 _CMD_EDIT_CUT           = 4003
@@ -305,38 +307,9 @@ class App:
                     with open(cli_path, encoding='utf-8') as f:
                         self.progression = ChordProgression.from_json(f.read())
                     self._current_file = cli_path
-                    self._is_new_project = False
                     self.speak(f"Loaded {self.progression.title}")
                 except Exception as e:
-                    self._is_new_project = True
                     self.speak(f"Could not load {cli_path.name}: {e}")
-            else:
-                self._is_new_project = True
-        # Load saved progression if it exists; otherwise flag for new-project dialog
-        # Try .ips first, then fall back to legacy .json
-        elif Path(SAVE_FILE).exists():
-            try:
-                with open(SAVE_FILE, encoding='utf-8') as f:
-                    self.progression = ChordProgression.from_json(f.read())
-                self._current_file = Path(SAVE_FILE)
-                self._is_new_project = False
-                self.speak(f"Loaded {self.progression.title}")
-            except Exception as e:
-                self._is_new_project = True
-                self.speak(f"Could not load: {e}")
-        elif Path("progression.json").exists():
-            # Backward-compatibility: migrate from legacy JSON file
-            try:
-                with open("progression.json", encoding='utf-8') as f:
-                    self.progression = ChordProgression.from_json(f.read())
-                self._current_file = None  # will prompt Save As on next Ctrl+S
-                self._is_new_project = False
-                self.speak(f"Loaded {self.progression.title} (legacy JSON)")
-            except Exception as e:
-                self._is_new_project = True
-                self.speak(f"Could not load: {e}")
-        else:
-            self._is_new_project = True
 
     # ------------------------------------------------------------------
     # MIDI chord callback
@@ -588,10 +561,15 @@ class App:
     # ------------------------------------------------------------------
 
     def _apply_saved_settings(self) -> None:
-        """Restore MIDI and audio device selections from the user config file."""
+        """Restore MIDI, audio device selections and language from the user config file."""
         settings = _load_app_settings()
         if not settings:
             return
+
+        # Restore language preference first so all subsequent messages are localised.
+        saved_lang = settings.get('language', '')
+        if saved_lang:
+            set_language(saved_lang)
 
         midi_in = settings.get('midi_input_device', '')
         if midi_in:
@@ -620,7 +598,7 @@ class App:
                 _app_logger.warning("Saved audio output '%s' not found", audio_name)
 
     def _save_app_settings(self) -> None:
-        """Persist current device selections to the user config file."""
+        """Persist current device selections and language to the user config file."""
         current_out = get_current_output_device()
         audio_name = ''
         if current_out is not None:
@@ -629,6 +607,7 @@ class App:
                     audio_name = dev_name
                     break
         settings = {
+            'language': get_language(),
             'midi_input_device': self._midi.midi_input_name,
             'midi_output_device': self._midi.midi_output_name,
             'audio_output_device_name': audio_name,
@@ -1116,6 +1095,94 @@ class App:
         else:
             dlg.Destroy()
 
+    def new_project(self) -> None:
+        """Prompt to save unsaved changes, then show New Project dialog and reset state."""
+        if self._is_dirty:
+            dlg = wx.MessageDialog(
+                self._frame,
+                f"'{self.progression.title}' has unsaved changes.\n\nSave before creating a new project?",
+                "Unsaved Changes",
+                wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT | wx.ICON_WARNING,
+            )
+            result = dlg.ShowModal()
+            dlg.Destroy()
+            if result == wx.ID_CANCEL:
+                return
+            if result == wx.ID_YES:
+                self.save()
+                if self._is_dirty:
+                    # User cancelled Save As dialog – abort
+                    return
+
+        data = new_project_dialog(
+            parent=self._frame,
+            defaults={
+                'title':    DEFAULT_TITLE,
+                'composer': '',
+                'key':      DEFAULT_KEY,
+                'style':    DEFAULT_STYLE,
+                'bpm':      DEFAULT_BPM,
+            },
+        )
+        if data is None:
+            return
+
+        self.progression = ChordProgression(
+            title=DEFAULT_TITLE,
+            time_signature=DEFAULT_TIME_SIG,
+            key=DEFAULT_KEY,
+            style=DEFAULT_STYLE,
+            bpm=DEFAULT_BPM,
+        )
+        self.progression.title    = data.get('title',    DEFAULT_TITLE)
+        self.progression.composer = data.get('composer', '')
+        self.progression.key      = data.get('key',      DEFAULT_KEY)
+        self.progression.style    = data.get('style',    DEFAULT_STYLE)
+        try:
+            bpm = int(data.get('bpm', DEFAULT_BPM))
+            if BPM_MIN <= bpm <= BPM_MAX:
+                self.progression.bpm = bpm
+                self.recording_bpm   = bpm
+        except (ValueError, TypeError):
+            pass
+
+        self.cursor = Position(1, 1, self.progression.time_signature)
+        self._current_file = None
+        self._is_dirty = False
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._clear_selection()
+        self.speak(f"New project: {self.progression.title}")
+
+    def _on_change_language(self) -> None:
+        """Show a language-selection dialog and save the chosen language to settings."""
+        # Build language list: code → display name
+        _LANGUAGES = [
+            ('en', 'English'),
+            ('ru', 'Русский'),
+        ]
+        codes   = [c for c, _ in _LANGUAGES]
+        names   = [n for _, n in _LANGUAGES]
+        current = get_language()
+        sel_idx = codes.index(current) if current in codes else 0
+
+        dlg = wx.SingleChoiceDialog(
+            self._frame, _("Select language:"), _("Language"),
+            names,
+        )
+        dlg.SetSelection(sel_idx)
+        if dlg.ShowModal() == wx.ID_OK:
+            chosen_idx  = dlg.GetSelection()
+            chosen_code = codes[chosen_idx]
+            dlg.Destroy()
+            set_language(chosen_code)
+            self._save_app_settings()
+            self.speak(
+                _("Language changed. Please restart IReal Studio for full effect.")
+            )
+        else:
+            dlg.Destroy()
+
     def export_ireal(self) -> None:
         try:
             url = self.progression.to_ireal_url()
@@ -1244,6 +1311,7 @@ Other
   / + (A–G)             Add bass note (slash chord)
   P                     Speak full position
   D                     Beat offset (debug)
+  Ctrl+N                New project
   Ctrl+O                Open file
   Ctrl+S                Save
   Ctrl+E                Export to iReal Pro
@@ -1644,37 +1712,7 @@ Other
     def run(self) -> None:
         wx_app = wx.App(False)
 
-        # --- New-project dialog (shown before the main window) ---
-        if self._is_new_project:
-            data = new_project_dialog(
-                parent=None,
-                defaults={
-                    'title':    self.progression.title,
-                    'composer': self.progression.composer,
-                    'key':      self.progression.key,
-                    'style':    self.progression.style,
-                    'bpm':      self.progression.bpm,
-                },
-            )
-            if data:
-                self.progression.title    = data['title']
-                self.progression.composer = data['composer']
-                self.progression.key      = data['key']
-                self.progression.style    = data['style']
-                try:
-                    bpm = int(data['bpm'])
-                    if BPM_MIN <= bpm <= BPM_MAX:
-                        self.progression.bpm = bpm
-                        self.recording_bpm   = bpm   # default rec BPM = song BPM
-                    else:
-                        self.speak(
-                            f"BPM {bpm} out of range ({BPM_MIN}–{BPM_MAX}); "
-                            f"using {self.progression.bpm}")
-                except ValueError:
-                    self.speak(
-                        f"Invalid BPM '{data['bpm']}'; "
-                        f"using {self.progression.bpm}")
-        self.speak(f"IReal Studio ready. {self.progression.title}. Press R to record.")
+        self.speak(_("IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."))
 
         self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
@@ -1726,6 +1764,7 @@ Other
 
         # --- File ---
         file_menu = wx.Menu()
+        file_menu.Append(_CMD_FILE_NEW,    "&New Project\tCtrl+N")
         file_menu.Append(_CMD_FILE_OPEN,   "&Open...\tCtrl+O")
         file_menu.Append(_CMD_FILE_SAVE,   "&Save\tCtrl+S")
         file_menu.Append(_CMD_FILE_SAVE_AS, "Save &As...")
@@ -1810,6 +1849,7 @@ Other
 
         settings_menu.AppendSeparator()
         settings_menu.Append(_CMD_SETTINGS_UPDATE, "Check for &Updates...")
+        settings_menu.Append(_CMD_SETTINGS_LANGUAGE, "&Language...")
 
         menu_bar.Append(settings_menu, "&Settings")
 
@@ -1823,6 +1863,8 @@ Other
         self._frame.SetMenuBar(menu_bar)
 
         # Bind fixed-ID menu events
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.new_project(),
+                         id=_CMD_FILE_NEW)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.open_file(),
                          id=_CMD_FILE_OPEN)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.save(),
@@ -1887,6 +1929,8 @@ Other
                          id=_CMD_SETTINGS_PROJECT)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
                          id=_CMD_SETTINGS_UPDATE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._on_change_language(),
+                         id=_CMD_SETTINGS_LANGUAGE)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
                          id=_CMD_MIDI_REFRESH)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_out_refresh,
@@ -2063,6 +2107,11 @@ Other
             if self._recorder.state == AppState.IDLE:
                 self._clear_selection()
                 self.navigate_end()
+
+        # Ctrl+N – new project
+        elif ctrl and key == 'n' and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self.new_project()
 
         # Ctrl+O – open file
         elif ctrl and key == 'o' and not shift:

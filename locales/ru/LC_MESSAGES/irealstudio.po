@@ -26,10 +26,30 @@ msgstr "Диалог горячих клавиш открыт. Нажмите OK
 
 # --- about dialog ---
 msgid "A blind-accessible chord progression recorder\nfor musicians who use screen readers.\n\nExport chord charts to iReal Pro format."
-msgstr "Редактор аккордовых прогрессий с поддержкой экранного чтения\nдля незрячих музыкантов.\n\nЭкспорт в формат iReal Pro."
+msgstr "Редактор последовательностей аккордов с поддержкой экранного чтения\nдля незрячих музыкантов.\n\nЭкспорт в формат iReal Pro."
 
 msgid "(C) 2024 Deniz Sincar"
 msgstr "© 2024 Денис Синчар"
+
+# --- undo / redo ---
+msgid "Nothing to undo"
+msgstr "Нечего отменить"
+
+msgid "Undo"
+msgstr "Отменено"
+
+msgid "Nothing to redo"
+msgstr "Нечего повторить"
+
+msgid "Redo"
+msgstr "Повторено"
+
+# --- clipboard ---
+msgid "No chord at cursor"
+msgstr "Нет аккорда под курсором"
+
+msgid "Clipboard is empty"
+msgstr "Буфер обмена пуст"
 
 # --- editing ---
 msgid "Deleted"
@@ -135,3 +155,17 @@ msgstr "окончание 2"
 # --- log ---
 msgid "Log is empty"
 msgstr "Журнал пуст"
+
+# --- startup ---
+msgid "IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."
+msgstr "IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла."
+
+# --- language dialog ---
+msgid "Select language:"
+msgstr "Выберите язык:"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Language changed. Please restart IReal Studio for full effect."
+msgstr "Язык изменён. Перезапустите IReal Studio для полного применения."
