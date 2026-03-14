@@ -482,11 +482,11 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('mM7(9)',  '-^9'),
     ('m7b5',    'h7'),
     ('m7(b5)',  'h7'),
-    ('m7b5(b9)', 'h7b9'),
+    ('m7b5(b9)', 'h9'),   # closest valid: half-dim 9; b9 not representable in iReal Pro
     ('m7b5(9)', 'h9'),
     ('m7(9)',   '-9'),
     ('m7(#11)', '-11'),
-    ('m7(13)',  '-13'),
+    ('m7(13)',  'min13'),   # iReal Pro uses 'min13' consistently (same as m13)
     ('m7',      '-7'),
     ('m6/9',    '-69'),
     ('m6',      '-6'),
@@ -944,8 +944,8 @@ class ChordProgression:
                 # Explicitly marked as "no chord" (N.C.)
                 chords_arg = 'n'
             else:
-                # No chord played → repeat-last-chord mark
-                chords_arg = '%'
+                # No chord played → "repeat one measure" symbol (iReal Pro: x)
+                chords_arg = 'x'
 
             # Determine barline_open
             barline_open = ''

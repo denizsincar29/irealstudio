@@ -690,8 +690,8 @@ class TestIRealChordTranslation(unittest.TestCase):
         self.assertEqual('C^9#11', self._ireal('Cmaj7(9#11)'))
 
     def test_m7b5_with_b9(self):
-        """Bm7b5(b9) half-dim with b9 must translate to Bh7b9."""
-        self.assertEqual('Bh7b9', self._ireal('Bm7b5(b9)'))
+        """Bm7b5(b9) half-dim with b9 translates to Bh9 (closest valid iReal Pro quality)."""
+        self.assertEqual('Bh9', self._ireal('Bm7b5(b9)'))
 
     def test_mM7_with_9(self):
         """AmM7(9) minor-major 9 must translate to A-^9."""
@@ -909,14 +909,14 @@ class TestNoChordMeasure(unittest.TestCase):
         prog.add_no_chord(5)
         self.assertEqual(5, prog.last_measure())
 
-    def test_empty_measure_exports_percent(self):
-        """A measure with no chord and no N.C. flag exports as '%' (repeat last chord)."""
+    def test_empty_measure_exports_x(self):
+        """A measure with no chord and no N.C. flag exports as 'x' (iReal Pro repeat-one-measure)."""
         prog = make_prog()
         prog.add_chord_by_name('Cmaj7', 1, 1)
         # Force a second measure with no chord
         prog.total_measures = 2
-        body = url_body(prog)
-        self.assertIn('%', body)
+        meas = measures_body(prog)
+        self.assertIn('x', meas)
 
 
 if __name__ == '__main__':
