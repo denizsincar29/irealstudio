@@ -55,7 +55,7 @@ from chords import (
     ChordProgression, TimeSignature, Position, Chord,
     SECTION_KEYS, NOTE_NAMES, get_note_names_for_key,
 )
-from sound import make_beep, get_output_devices, set_output_device
+from sound import make_beep, get_output_devices, set_output_device, get_current_output_device
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from dialogs import prompt_input, new_project_dialog, BPM_MIN, BPM_MAX
@@ -71,8 +71,9 @@ _CMD_MIDI_REFRESH     = 2001
 _CMD_MIDI_NONE        = 2002   # placeholder shown when no devices are present
 _CMD_MIDI_OUT_REFRESH = 2003
 _CMD_MIDI_OUT_NONE    = 2004
-_CMD_SOUND_OUT_REFRESH = 2005
-_CMD_SOUND_OUT_NONE    = 2006
+_CMD_SOUND_OUT_REFRESH  = 2005
+_CMD_SOUND_OUT_NONE     = 2006
+_CMD_SOUND_OUT_DEFAULT  = 2007  # "System default" audio device
 _CMD_SETTINGS_BPM       = 3001
 _CMD_SETTINGS_KEY       = 3002
 _CMD_SETTINGS_STYLE     = 3003
@@ -669,31 +670,50 @@ class App:
         if self._sound_out_menu is None:
             return
         devices = get_output_devices()  # list of (device_id, name)
+        current_out = get_current_output_device()  # None = system default
 
+        # Remove all device items (keep the trailing separator + "Refresh" = 2 items).
         count = self._sound_out_menu.GetMenuItemCount()
         for _ in range(max(0, count - 2)):
             item = self._sound_out_menu.FindItemByPosition(0)
             self._sound_out_menu.Remove(item)
 
+        insert_pos = 0
+
+        # Always offer a "System default" option at the top.
+        default_item = wx.MenuItem(
+            self._sound_out_menu, _CMD_SOUND_OUT_DEFAULT,
+            "System default", kind=wx.ITEM_CHECK,
+        )
+        self._sound_out_menu.Insert(insert_pos, default_item)
+        if current_out is None:
+            default_item.Check(True)
+        insert_pos += 1
+
         if devices:
-            from sound import _current_device as current_out
             for list_idx, (dev_id, dev_name) in enumerate(devices):
                 item = wx.MenuItem(
                     self._sound_out_menu, _SOUND_OUT_DEVICE_BASE + list_idx,
                     dev_name, kind=wx.ITEM_CHECK,
                 )
-                self._sound_out_menu.Insert(list_idx, item)
+                self._sound_out_menu.Insert(insert_pos, item)
                 if dev_id == current_out:
                     item.Check(True)
+                insert_pos += 1
         else:
             placeholder = wx.MenuItem(self._sound_out_menu, _CMD_SOUND_OUT_NONE,
                                       "No audio output devices found")
-            self._sound_out_menu.Insert(0, placeholder)
+            self._sound_out_menu.Insert(insert_pos, placeholder)
             placeholder.Enable(False)
 
     def _on_menu_sound_out_refresh(self, _event: wx.CommandEvent) -> None:
         self._refresh_sound_out_devices()
         self.speak("Sound output devices refreshed")
+
+    def _on_menu_sound_out_default(self, _event: wx.CommandEvent) -> None:
+        set_output_device(None)
+        self.speak("Sound output: system default")
+        self._refresh_sound_out_devices()
 
     def _on_menu_sound_out_device(self, event: wx.CommandEvent) -> None:
         list_idx = event.GetId() - _SOUND_OUT_DEVICE_BASE
@@ -956,6 +976,8 @@ class App:
                          id=_CMD_MIDI_OUT_REFRESH)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_refresh,
                          id=_CMD_SOUND_OUT_REFRESH)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_default,
+                         id=_CMD_SOUND_OUT_DEFAULT)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_title(),
                          id=_CMD_SETTINGS_TITLE)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._menu_change_composer(),

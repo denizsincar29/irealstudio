@@ -665,6 +665,30 @@ class TestIRealChordTranslation(unittest.TestCase):
         body = url_body(prog)
         self.assertIn('C+', body)
 
+    def test_maj7_with_9(self):
+        """Cmaj7(9) (major 9) must translate to C^9."""
+        self.assertEqual('C^9', self._ireal('Cmaj7(9)'))
+
+    def test_maj7_with_sharp11(self):
+        """Cmaj7(#11) must translate to C^7#11."""
+        self.assertEqual('C^7#11', self._ireal('Cmaj7(#11)'))
+
+    def test_maj7_with_13(self):
+        """Cmaj7(13) (major 13) must translate to C^13."""
+        self.assertEqual('C^13', self._ireal('Cmaj7(13)'))
+
+    def test_maj7_with_9_sharp11(self):
+        """Cmaj7(9#11) (Lydian voicing) must translate to C^9#11."""
+        self.assertEqual('C^9#11', self._ireal('Cmaj7(9#11)'))
+
+    def test_m7b5_with_b9(self):
+        """Bm7b5(b9) half-dim with b9 must translate to Bh7b9."""
+        self.assertEqual('Bh7b9', self._ireal('Bm7b5(b9)'))
+
+    def test_mM7_with_9(self):
+        """AmM7(9) minor-major 9 must translate to A-^9."""
+        self.assertEqual('A-^9', self._ireal('AmM7(9)'))
+
 
 class TestSharpKeyRecognition(unittest.TestCase):
     """Tests sharp/flat note-name selection based on key signature."""
@@ -709,6 +733,55 @@ class TestSharpKeyRecognition(unittest.TestCase):
         """D- (D minor) is a relative minor of F, uses flat names."""
         notes = self._notes_for_key('D-')
         self.assertIn('Bb', notes)
+
+    # ------------------------------------------------------------------
+    # Integration: chord recognition must work with sharp note names
+    # ------------------------------------------------------------------
+
+    def _chord_from_sharp_notes(self, notes: list[str]) -> str | None:
+        from chords import Chord
+        c = Chord.from_notes(notes)
+        return c.name if c is not None else None
+
+    def test_e7_with_sharp_major_third(self):
+        """E7 uses G# (sharp major 3rd); ['E','G#','B','D'] → E7."""
+        name = self._chord_from_sharp_notes(['E', 'G#', 'B', 'D'])
+        self.assertEqual('E7', name)
+
+    def test_d_major_sharp_notes(self):
+        """D major triad uses F# and C#; ['D','F#','A'] → D."""
+        name = self._chord_from_sharp_notes(['D', 'F#', 'A'])
+        self.assertEqual('D', name)
+
+    def test_sharp_minor7(self):
+        """F#m7: ['F#','A','C#','E'] → F#m7."""
+        name = self._chord_from_sharp_notes(['F#', 'A', 'C#', 'E'])
+        self.assertEqual('F#m7', name)
+
+    def test_sharp_dominant_recognized_not_none(self):
+        """A7 with sharp spellings: ['A','C#','E','G'] must be recognised."""
+        name = self._chord_from_sharp_notes(['A', 'C#', 'E', 'G'])
+        self.assertIsNotNone(name)
+        self.assertEqual('A7', name)
+
+    def test_sharp_flat_mixed(self):
+        """Mixed sharp/flat input: ['G','Bb','D'] → Gm (Bb = flat, but still recognised)."""
+        name = self._chord_from_sharp_notes(['G', 'Bb', 'D'])
+        self.assertEqual('Gm', name)
+
+    # ------------------------------------------------------------------
+    # Verify that invalid keys fall back to defaults in _SHARP_KEYS
+    # ------------------------------------------------------------------
+
+    def test_invalid_key_returns_flat_list(self):
+        """An unrecognised key string must not raise; flat list is returned."""
+        notes = self._notes_for_key('X')  # not a valid iReal Pro key
+        self.assertEqual(notes, self._notes_for_key('Db'))  # falls back to flat
+
+    def test_f_sharp_major_not_sharp_key(self):
+        """F# is not a valid iReal Pro key; get_note_names_for_key returns flats."""
+        notes = self._notes_for_key('F#')
+        self.assertIn('Gb', notes)  # flat list, not sharp list
 
 
 if __name__ == '__main__':

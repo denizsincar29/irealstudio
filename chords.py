@@ -18,11 +18,27 @@ NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 # Note names used when the current key uses sharps instead of flats.
 NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
+# Unified note-name → pitch-class mapping that accepts both flat and sharp
+# spellings.  This is the single source of truth used by the chord-recognition
+# engine so that notes spelled with sharps (C#, F#, …) are treated identically
+# to their enharmonic flat equivalents (Db, Gb, …).
+_NOTE_TO_PC: dict[str, int] = {
+    'C': 0,  'C#': 1,  'Db': 1,
+    'D': 2,  'D#': 3,  'Eb': 3,
+    'E': 4,
+    'F': 5,  'F#': 6,  'Gb': 6,
+    'G': 7,  'G#': 8,  'Ab': 8,
+    'A': 9,  'A#': 10, 'Bb': 10,
+    'B': 11,
+}
+
 # Keys that prefer sharp spellings (major and their relative minors).
 # Minor keys are stored with the iReal Pro "-" suffix.
+# Only keys that appear in pyrealpro.KEY_SIGNATURES are listed here to avoid
+# drift between the two modules.
 _SHARP_KEYS: frozenset[str] = frozenset({
-    'C', 'G', 'D', 'A', 'E', 'B', 'F#',          # major
-    'A-', 'E-', 'B-', 'F#-', 'C#-', 'G#-', 'D#-', # minor
+    'C', 'G', 'D', 'A', 'E', 'B',          # major sharp keys in iReal Pro
+    'A-', 'E-', 'B-', 'F#-', 'C#-', 'G#-', # minor sharp keys in iReal Pro
 })
 
 
@@ -48,29 +64,33 @@ def _identify_chord_name(notes: list[str]) -> str | None:
     """
     Identify a chord name from pitch-class note names (root = first note).
 
+    Accepts both flat spellings (Bb, Eb, …) and sharp spellings (A#, D#, …).
+    The root of the returned name uses the same spelling as the first element
+    of *notes* so that the caller's preferred enharmonic is preserved.
+
     Algorithm (see task.md):
     1. Root is the lowest (first) note.
     2. Calculate semitone intervals from root (mod 12).
     3. Apply validation rules to disambiguate enharmonic spellings.
     4. Return the chord name string.
     """
-    # Deduplicate while preserving order
+    # Deduplicate while preserving order; accept all known note spellings.
     seen: set[str] = set()
     clean: list[str] = []
     for n in notes:
-        if n in NOTE_NAMES and n not in seen:
+        if n in _NOTE_TO_PC and n not in seen:
             seen.add(n)
             clean.append(n)
     if not clean:
         return None
 
     root = clean[0]
-    root_idx = NOTE_NAMES.index(root)
+    root_pc = _NOTE_TO_PC[root]
 
     # Semitone interval set (mod 12, excluding 0 = root)
     ivals: set[int] = set()
     for n in clean[1:]:
-        st = (NOTE_NAMES.index(n) - root_idx) % 12
+        st = (_NOTE_TO_PC[n] - root_pc) % 12
         if st != 0:
             ivals.add(st)
 
@@ -223,12 +243,12 @@ class Chord:
         """
         self._name = name
         self._notes: list[str] = list(notes) if notes else []
-        if self._notes and self._notes[0] in NOTE_NAMES:
-            self._root_pc: int = NOTE_NAMES.index(self._notes[0])
+        if self._notes and self._notes[0] in _NOTE_TO_PC:
+            self._root_pc: int = _NOTE_TO_PC[self._notes[0]]
             self._ivals: frozenset[int] = frozenset(
-                (NOTE_NAMES.index(n) - self._root_pc) % 12
+                (_NOTE_TO_PC[n] - self._root_pc) % 12
                 for n in self._notes
-                if n in NOTE_NAMES
+                if n in _NOTE_TO_PC
             )
         else:
             self._root_pc = -1
@@ -279,7 +299,7 @@ class Chord:
         if st is None:
             return None
         for note in self._notes:
-            if note in NOTE_NAMES and (NOTE_NAMES.index(note) - self._root_pc) % 12 == st:
+            if note in _NOTE_TO_PC and (_NOTE_TO_PC[note] - self._root_pc) % 12 == st:
                 return note
         return None
 
@@ -457,8 +477,11 @@ _ALL_ROOTS: list[str] = [
 _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     # Minor-major 7th / minor extended
     ('mM7',     '-^7'),
+    ('mM7(9)',  '-^9'),
     ('m7b5',    'h7'),
     ('m7(b5)',  'h7'),
+    ('m7b5(b9)', 'h7b9'),
+    ('m7b5(9)', 'h9'),
     ('m7(9)',   '-9'),
     ('m7(#11)', '-11'),
     ('m7(13)',  '-13'),
@@ -470,10 +493,14 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('m13',     'min13'),   # iReal Pro uses 'min13', not '-13'
     ('m#5',     '-#5'),
     ('m',       '-'),      # minor triad — must follow all 'm…' patterns
-    # Major-7th family
-    ('maj13',   '^13'),
-    ('maj9',    '^9'),
-    ('maj7',    '^7'),
+    # Major-7th family — parenthesized extensions unfolded for iReal Pro
+    ('maj13',    '^13'),
+    ('maj9',     '^9'),
+    ('maj7(9#11)', '^9#11'),
+    ('maj7(9)',  '^9'),
+    ('maj7(#11)', '^7#11'),
+    ('maj7(13)', '^13'),
+    ('maj7',     '^7'),
     # Dominant with extensions in parentheses → unfold
     ('7(b9#11)', '7b9#11'),
     ('7(#9#11)', '7#9#11'),

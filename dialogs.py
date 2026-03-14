@@ -86,8 +86,10 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
             if raw.isdigit():
                 idx = int(raw) - 1
                 result['key'] = KEY_SIGNATURES[idx] if 0 <= idx < len(KEY_SIGNATURES) else default_key
+            elif raw in KEY_SIGNATURES:
+                result['key'] = raw
             else:
-                result['key'] = raw if raw else default_key
+                result['key'] = default_key
         except (KeyboardInterrupt, EOFError):
             return None
         # Style: show numbered list
@@ -100,8 +102,10 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
             if raw.isdigit():
                 idx = int(raw) - 1
                 result['style'] = STYLES_ALL[idx] if 0 <= idx < len(STYLES_ALL) else default_style
+            elif raw in STYLES_ALL:
+                result['style'] = raw
             else:
-                result['style'] = raw if raw else default_style
+                result['style'] = default_style
         except (KeyboardInterrupt, EOFError):
             return None
         return result

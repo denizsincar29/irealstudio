@@ -140,6 +140,14 @@ def play_sound(wave: np.ndarray) -> None:
             pass
 
 
+def get_current_output_device() -> int | None:
+    """Return the device_id of the currently active output stream.
+
+    Returns ``None`` when the system default device is in use.
+    """
+    return _current_device
+
+
 def get_output_devices() -> list[tuple[int, str]]:
     """Return ``[(device_id, name), ...]`` for all available output devices."""
     if not _SD_AVAILABLE:
