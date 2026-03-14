@@ -36,9 +36,11 @@ via "Open with" so that double-clicking a .ips file opens it in IReal Studio.
 
 On Windows a native menu bar is available (use Alt to activate):
   File          - Open, Save, Save As, Export to iReal Pro
-  MIDI Device   - Select MIDI input port, refresh device list
-  Settings      - Change Title, Composer, Time Signature, BPM, Recording BPM,
-                  Key, Style interactively
+  MIDI Device   - Select MIDI input port, MIDI output port, refresh device list
+  Sound         - Select audio output device
+  Settings      - Project Settings (Title, Composer, Time Signature, BPM,
+                  Recording BPM, Key, Style all in one dialog),
+                  Check for Updates
 """
 import sys
 import os

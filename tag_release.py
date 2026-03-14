@@ -92,8 +92,20 @@ def _read_multiline_changelog() -> str:
 
 def _write_news(version: str, changelog: str) -> None:
     today = date.today().isoformat()
-    content = f"# News\n\n## {version} - {today}\n\n{changelog}\n"
-    Path('news.md').write_text(content, encoding='utf-8')
+    new_block = f"## {version} - {today}\n\n{changelog}\n"
+    news_path = Path('news.md')
+    if news_path.exists():
+        existing = news_path.read_text(encoding='utf-8')
+        # Insert the new block after the top-level "# News" header if present,
+        # otherwise simply prepend it.
+        if existing.startswith('# News'):
+            header, _, rest = existing.partition('\n')
+            content = header + '\n\n' + new_block + '\n' + rest.lstrip('\n')
+        else:
+            content = '# News\n\n' + new_block + '\n' + existing.lstrip('\n')
+    else:
+        content = '# News\n\n' + new_block
+    news_path.write_text(content, encoding='utf-8')
     print(f"Wrote news.md for {version}")
 
 

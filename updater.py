@@ -92,6 +92,10 @@ def check_for_updates_async(
             return
         tag = data.get('tag_name', '')
         if not tag:
+            msg = data.get('message', 'GitHub API did not return a release tag.')
+            _logger.debug("Update check: unexpected response: %s", msg)
+            if on_error:
+                on_error(f"Update check failed: {msg}")
             return
         latest = _parse_version(tag)
         current = _current_version()
@@ -139,7 +143,16 @@ def check_for_updates_sync(
         return
 
     tag = data.get('tag_name', '')
-    latest = _parse_version(tag) if tag else (0,)
+    if not tag:
+        api_msg = data.get('message', 'GitHub API did not return a release tag.')
+        wx.MessageBox(
+            f"Update check failed: {api_msg}",
+            "Update Check Failed",
+            wx.OK | wx.ICON_WARNING,
+            parent_window,
+        )
+        return
+    latest = _parse_version(tag)
     current = _current_version()
 
     if latest > current:

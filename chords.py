@@ -562,8 +562,11 @@ def _chord_name_to_ireal(name: str) -> str:
 # Human-readable spoken chord names
 # ---------------------------------------------------------------------------
 
-# Spoken quality map: (our_quality, spoken_text).
-# Longer / more specific patterns must come first.
+# Spoken quality map: (quality_string, spoken_text).
+# Each entry is matched with strict equality against the quality portion of the
+# chord name, so ordering within this list does not affect which entry matches.
+# Entries that share a prefix (e.g. 'm7' and 'm7b5') are still distinct because
+# the comparison is exact.
 _SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
     ('mM7',          'minor major 7'),
     ('mM7(9)',        'minor major 9'),
