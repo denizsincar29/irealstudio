@@ -52,6 +52,7 @@ import logging
 import collections
 import webbrowser
 import wx
+import wx.adv
 from pathlib import Path
 
 from accessible_output3.outputs.auto import Auto
@@ -68,6 +69,7 @@ from dialogs import (
     prompt_input, new_project_dialog, project_settings_dialog,
     insert_chord_dialog, BPM_MIN, BPM_MAX,
 )
+from i18n import _
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -108,6 +110,8 @@ _CMD_RECORD_STOP              = 6003
 _CMD_RECORD_MODE_OVERDUB      = 6010
 _CMD_RECORD_MODE_OVERWRITE    = 6011
 _CMD_RECORD_OVERWRITE_WHOLE   = 6012
+_CMD_HELP_SHORTCUTS     = 7001
+_CMD_HELP_ABOUT         = 7002
 _MIDI_DEVICE_BASE      = 2100  # IDs 2100..2199 → MIDI input device indices 0..99
 _MIDI_OUT_DEVICE_BASE  = 2200  # IDs 2200..2299 → MIDI output device indices 0..99
 _SOUND_OUT_DEVICE_BASE = 2300  # IDs 2300..2399 → audio output device indices 0..99
@@ -409,7 +413,7 @@ class App:
 
     def undo(self) -> None:
         if not self._undo_stack:
-            self.speak("Nothing to undo")
+            self.speak(_("Nothing to undo"))
             return
         self._redo_stack.append(self.progression.to_json())
         snapshot = self._undo_stack.pop()
@@ -419,17 +423,17 @@ class App:
             1, self.progression.time_signature,
         )
         self._mark_dirty()
-        self.speak("Undo")
+        self.speak(_("Undo"))
 
     def redo(self) -> None:
         if not self._redo_stack:
-            self.speak("Nothing to redo")
+            self.speak(_("Nothing to redo"))
             return
         self._undo_stack.append(self.progression.to_json())
         snapshot = self._redo_stack.pop()
         self.progression = ChordProgression.from_json(snapshot)
         self._mark_dirty()
-        self.speak("Redo")
+        self.speak(_("Redo"))
 
     # ------------------------------------------------------------------
     # Clipboard
@@ -441,7 +445,7 @@ class App:
             self._clipboard = chords[0].chord.name
             self.speak(f"Copied {chords[0].chord.name}")
         else:
-            self.speak("No chord at cursor")
+            self.speak(_("No chord at cursor"))
 
     def cut_chord(self) -> None:
         chords = self.progression.find_chords_at_position(self.cursor)
@@ -452,11 +456,11 @@ class App:
             self._mark_dirty()
             self.speak(f"Cut {self._clipboard}")
         else:
-            self.speak("No chord at cursor")
+            self.speak(_("No chord at cursor"))
 
     def paste_chord(self) -> None:
         if self._clipboard is None:
-            self.speak("Clipboard is empty")
+            self.speak(_("Clipboard is empty"))
             return
         self._push_undo()
         self.progression.add_chord_by_name(
@@ -892,21 +896,22 @@ class App:
             self.progression.add_section_mark(self.cursor.measure, mark)
             self._mark_dirty()
             names = {
-                '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-                '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
+                '*A': _('Section A'), '*B': _('Section B'), '*C': _('Section C'),
+                '*D': _('Section D'), '*V': _('Verse'), '*i': _('Intro'),
             }
-            self.speak(f"{names.get(mark, mark)} at measure {self.cursor.measure}")
+            self.speak(_("{section} at measure {m}").format(
+                section=names.get(mark, mark), m=self.cursor.measure))
 
     def add_bass_note(self, letter: str) -> None:
         note = letter.upper()
         if note not in NOTE_NAMES:
-            self.speak("Invalid note")
+            self.speak(_("Invalid note"))
             return
         chords = self.progression.find_chords_at_position(self.cursor)
         if not chords:
             item = self.progression.find_last_chord_to_left(self.cursor)
             if not item:
-                self.speak("No chord to modify")
+                self.speak(_("No chord to modify"))
                 return
             target = item
         else:
@@ -941,7 +946,7 @@ class App:
                 self.cursor = prev_item.position
             else:
                 self.cursor = Position(1, 1, self.progression.time_signature)
-            self.speak("Deleted")
+            self.speak(_("Deleted"))
             self._announce_position()
         else:
             # No chord — try to delete structural marks at this measure.
@@ -951,7 +956,7 @@ class App:
                 self._push_undo()
                 self.progression.remove_section_mark(m)
                 self._mark_dirty()
-                deleted.append("section mark")
+                deleted.append(_("section mark"))
             # Remove any volta bracket whose ending1_start or ending2_start or
             # repeat_start coincides with the current measure.
             vbs_to_remove = [
@@ -965,24 +970,26 @@ class App:
                 for vb in vbs_to_remove:
                     self.progression.volta_brackets.remove(vb)
                 self._mark_dirty()
-                deleted.append("repeat bracket")
+                deleted.append(_("repeat bracket"))
             if self.progression.is_no_chord(m):
                 if not deleted:
                     self._push_undo()
                 self.progression.remove_no_chord(m)
                 self._mark_dirty()
-                deleted.append("N.C.")
+                deleted.append(_("N.C."))
             if deleted:
-                self.speak(f"Deleted {', '.join(deleted)} at measure {m}")
+                self.speak(_("Deleted {items} at measure {m}").format(
+                    items=", ".join(deleted), m=m))
             else:
-                self.speak(f"Nothing to delete at measure {m} beat {self.cursor.beat}")
+                self.speak(_("Nothing to delete at measure {m} beat {b}").format(
+                    m=m, b=self.cursor.beat))
 
     def delete_structural_at_cursor(self) -> None:
         """Delete section marks, repeat brackets, and N.C. at the current measure.
 
         Unlike :meth:`delete_at_cursor`, this method ignores any chord at the
         cursor position so that structural marks can be removed even when a chord
-        occupies the same beat.  Bound to Ctrl+Delete.
+        occupies the same beat.  Bound to Ctrl+Delete / Ctrl+Backspace.
         """
         m = self.cursor.measure
         deleted: list[str] = []
@@ -990,7 +997,7 @@ class App:
             self._push_undo()
             self.progression.remove_section_mark(m)
             self._mark_dirty()
-            deleted.append("section mark")
+            deleted.append(_("section mark"))
         vbs_to_remove = [
             vb for vb in self.progression.volta_brackets
             if vb.repeat_start == m or vb.ending1_start == m
@@ -1002,17 +1009,19 @@ class App:
             for vb in vbs_to_remove:
                 self.progression.volta_brackets.remove(vb)
             self._mark_dirty()
-            deleted.append("repeat bracket")
+            deleted.append(_("repeat bracket"))
         if self.progression.is_no_chord(m):
             if not deleted:
                 self._push_undo()
             self.progression.remove_no_chord(m)
             self._mark_dirty()
-            deleted.append("N.C.")
+            deleted.append(_("N.C."))
         if deleted:
-            self.speak(f"Deleted {', '.join(deleted)} at measure {m}")
+            self.speak(_("Deleted {items} at measure {m}").format(
+                items=", ".join(deleted), m=m))
         else:
-            self.speak(f"Nothing to delete at measure {m}")
+            self.speak(_("Nothing to delete at measure {m} beat {b}").format(
+                m=m, b=self.cursor.beat))
 
     # ------------------------------------------------------------------
     # Save / Export
@@ -1154,58 +1163,134 @@ class App:
         """Generate a QR code for the iReal Pro URL and show it in a popup dialog."""
         try:
             import qrcode
-            import qrcode.image.svg as qr_svg
         except ImportError:
-            self.speak("QR code export requires the qrcode package (uv add qrcode)")
+            self.speak(_("QR code export requires the qrcode package (uv add qrcode)"))
             return
         try:
-            url = self.progression.to_ireal_url()
-            factory = qr_svg.SvgFillImage
-            img = qrcode.make(url, image_factory=factory)
             import io
+            url = self.progression.to_ireal_url()
+            # Use the default PIL/Pillow factory which produces a PNG image
+            img = qrcode.make(url)
             buf = io.BytesIO()
-            img.save(buf)
-            svg_bytes = buf.getvalue()
+            img.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
         except Exception as e:
-            self.speak(f"QR code generation failed: {e}")
+            self.speak(_("QR code generation failed: {e}").format(e=e))
             return
 
         if self._frame is None:
-            self.speak("QR code ready but no window to display it")
+            self.speak(_("QR code ready but no window to display it"))
             return
 
+        bmp: wx.Bitmap | None = None
         try:
-            svg_image = wx.SVGimage.CreateFromBytes(svg_bytes)
-            bmp = svg_image.ConvertToScaledBitmap(wx.Size(320, 320), self._frame)
-        except Exception:
-            # SVG rendering not available – save to file as fallback
-            qr_file = _safe_filename(self.progression.title) + '_qrcode.svg'
-            try:
-                with open(qr_file, 'wb') as f:
-                    f.write(svg_bytes)
-                self.speak(f"QR code saved to {qr_file}")
-            except Exception as e2:
-                self.speak(f"QR code export failed: {e2}")
-            return
+            wx_img = wx.Image(io.BytesIO(png_bytes), wx.BITMAP_TYPE_PNG)
+            if not wx_img.IsOk():
+                raise ValueError("wx.Image decode returned invalid image")
+            wx_img.Rescale(320, 320, wx.IMAGE_QUALITY_HIGH)
+            bmp = wx.Bitmap(wx_img)
+            if not bmp.IsOk():
+                raise ValueError("wx.Bitmap conversion failed")
+        except Exception as exc:
+            _app_logger.warning("QR image render failed: %s", exc)
 
-        dlg = wx.Dialog(self._frame, title=f"QR Code - {self.progression.title}")
+        dlg = wx.Dialog(self._frame, title=f"QR Code – {self.progression.title}")
         sizer = wx.BoxSizer(wx.VERTICAL)
-        static_bmp = wx.StaticBitmap(dlg, bitmap=bmp)
-        sizer.Add(static_bmp, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        if bmp is not None:
+            sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
         url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
         url_label.SetMaxSize(wx.Size(320, -1))
         sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
-        ok_btn = wx.Button(dlg, wx.ID_OK, "Close")
+        ok_btn = wx.Button(dlg, wx.ID_OK, "OK")
         ok_btn.SetDefault()
         sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 10)
         dlg.SetSizerAndFit(sizer)
         dlg.ShowModal()
         dlg.Destroy()
-        self.speak("QR code shown")
 
-    # ------------------------------------------------------------------
-    # Speech / logging
-    # ------------------------------------------------------------------
+    _KEYBOARD_SHORTCUTS_TEXT = """\
+Keyboard Shortcuts – IReal Studio
+==================================
+
+Navigation
+  Left / Right          Move cursor one chord
+  Alt+Left / Alt+Right  Move cursor one beat
+  Ctrl+Left / Ctrl+Right  Move cursor one measure
+  Ctrl+Home / Ctrl+End  Go to beginning / end
+  Shift+Left / Right    Extend selection
+
+Playback & Recording
+  R                     Start / stop recording
+  Space                 Play / stop
+  Ctrl+Space            Stop and jump to last position
+  Escape                Stop recording or playback
+
+Editing
+  Delete / Backspace          Delete chord at cursor
+  Ctrl+Delete / Ctrl+Backspace  Delete structural mark at cursor
+                               (section mark, repeat bracket, N.C.)
+  Ctrl+Z / Ctrl+Y       Undo / Redo
+  Ctrl+X / Ctrl+C / Ctrl+V  Cut / Copy / Paste chord
+  Ctrl+Return           Insert chord (dialog)
+  N                     Toggle No Chord (N.C.)
+
+Section Marks (Ctrl+Shift+letter)
+  Ctrl+Shift+A/B/C/D    Section A / B / C / D
+  Ctrl+Shift+V          Verse
+  Ctrl+Shift+I          Intro
+
+Other
+  V                     Add volta / ending bracket
+  / + (A–G)             Add bass note (slash chord)
+  P                     Speak full position
+  D                     Beat offset (debug)
+  Ctrl+O                Open file
+  Ctrl+S                Save
+  Ctrl+E                Export to iReal Pro
+  Ctrl+Shift+E          Show QR code
+  Ctrl+L                Speak recent log entries
+  F1                    Keyboard shortcuts
+  Ctrl+Q                Quit
+"""
+
+    def _show_keyboard_shortcuts(self) -> None:
+        """Show keyboard shortcuts in an accessible dialog."""
+        if self._frame is None:
+            self.speak(self._KEYBOARD_SHORTCUTS_TEXT)
+            return
+        dlg = wx.Dialog(self._frame, title=_("Keyboard Shortcuts – IReal Studio"),
+                        style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        text_ctrl = wx.TextCtrl(
+            dlg, value=self._KEYBOARD_SHORTCUTS_TEXT,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
+            size=wx.Size(520, 400),
+        )
+        text_ctrl.SetFont(wx.Font(10, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
+                                  wx.FONTWEIGHT_NORMAL))
+        sizer.Add(text_ctrl, 1, wx.EXPAND | wx.ALL, 8)
+        ok_btn = wx.Button(dlg, wx.ID_OK, "OK")
+        ok_btn.SetDefault()
+        sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 8)
+        dlg.SetSizer(sizer)
+        dlg.Fit()
+        self.speak(_("Keyboard shortcuts dialog opened. Press OK to close."))
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def _show_about(self) -> None:
+        """Show the About dialog."""
+        from version import __version__
+        info = wx.adv.AboutDialogInfo()
+        info.SetName("IReal Studio")
+        info.SetVersion(__version__)
+        info.SetDescription(
+            _("A blind-accessible chord progression recorder\n"
+              "for musicians who use screen readers.\n\n"
+              "Export chord charts to iReal Pro format.")
+        )
+        info.SetCopyright(_("(C) 2024 Deniz Sincar"))
+        wx.adv.AboutBox(info, self._frame)
 
     def speak(self, text: str) -> None:
         _app_logger.info(text)
@@ -1220,7 +1305,7 @@ class App:
         if recent:
             self.speak(". ".join(recent))
         else:
-            self.speak("Log is empty")
+            self.speak(_("Log is empty"))
 
     # ------------------------------------------------------------------
     # Menu event handlers (EVT_MENU — fired directly by wxPython)
@@ -1228,7 +1313,7 @@ class App:
 
     def _on_menu_midi_refresh(self, _event: wx.CommandEvent) -> None:
         self._refresh_midi_devices()
-        self.speak("MIDI devices refreshed")
+        self.speak(_("MIDI devices refreshed"))
 
     def _on_menu_midi_device(self, event: wx.CommandEvent) -> None:
         idx = event.GetId() - _MIDI_DEVICE_BASE
@@ -1236,7 +1321,7 @@ class App:
         if 0 <= idx < len(names):
             self._midi.open_by_name(names[idx])
             self._refresh_midi_devices()
-            self.speak(f"MIDI: {names[idx]}")
+            self.speak(_("MIDI input: {name}").format(name=names[idx]))
             self._save_app_settings()
 
     def _refresh_midi_out_devices(self) -> None:
@@ -1728,6 +1813,13 @@ class App:
 
         menu_bar.Append(settings_menu, "&Settings")
 
+        # --- Help ---
+        help_menu = wx.Menu()
+        help_menu.Append(_CMD_HELP_SHORTCUTS, "&Keyboard Shortcuts\tF1")
+        help_menu.AppendSeparator()
+        help_menu.Append(_CMD_HELP_ABOUT, "&About IReal Studio")
+        menu_bar.Append(help_menu, "&Help")
+
         self._frame.SetMenuBar(menu_bar)
 
         # Bind fixed-ID menu events
@@ -1810,6 +1902,11 @@ class App:
                          id=_MIDI_OUT_DEVICE_BASE, id2=_MIDI_OUT_DEVICE_BASE + 99)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_sound_out_device,
                          id=_SOUND_OUT_DEVICE_BASE, id2=_SOUND_OUT_DEVICE_BASE + 99)
+        # Help
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._show_keyboard_shortcuts(),
+                         id=_CMD_HELP_SHORTCUTS)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._show_about(),
+                         id=_CMD_HELP_ABOUT)
 
     def _menu_record(self) -> None:
         if self._recorder.state == AppState.IDLE:
@@ -1833,7 +1930,7 @@ class App:
         self._recorder.stop_all()
         if was_recording and self.recording_mode == RECORDING_MODE_OVERWRITE:
             self._apply_overwrite()
-        self.speak("Stopped")
+        self.speak(_("Stopped"))
 
     def _on_close_window(self, event: wx.CloseEvent) -> None:
         """Handle window close: prompt to save unsaved changes, then clean up."""
@@ -1901,7 +1998,7 @@ class App:
             self._recorder.stop_all()
             if was_recording and self.recording_mode == RECORDING_MODE_OVERWRITE:
                 self._apply_overwrite()
-            self.speak("Stopped")
+            self.speak(_("Stopped"))
 
         # R – record (start if idle, stop if recording/pre-count/playing)
         elif key == 'r' and not ctrl and not shift:
@@ -1916,10 +2013,10 @@ class App:
                 self._recorder.stop_all()
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
                     self._apply_overwrite()
-                self.speak("Stopped")
+                self.speak(_("Stopped"))
             else:
                 self._recorder.stop_all()
-                self.speak("Stopped")
+                self.speak(_("Stopped"))
 
         # Space – play / stop (also stops recording)
         elif key == 'space':
@@ -1937,7 +2034,7 @@ class App:
                     self._recorder.stop_all()
                     if self.recording_mode == RECORDING_MODE_OVERWRITE:
                         self._apply_overwrite()
-                    self.speak("Stopped")
+                    self.speak(_("Stopped"))
                 elif self._recorder.state == AppState.PLAYING:
                     self._recorder.stop_all()
 
@@ -2035,11 +2132,12 @@ class App:
                 self.add_section_mark(key)
 
         # Delete/Backspace – delete selection or chord at cursor
-        # Ctrl+Delete – delete structural marks (section mark, repeat bracket, N.C.)
-        #               at the current measure regardless of whether a chord is present
+        # Ctrl+Delete / Ctrl+Backspace – delete structural marks (section mark,
+        #   repeat bracket, N.C.) at the current measure regardless of whether
+        #   a chord is present
         elif key in ('delete', 'backspace'):
             if self._recorder.state == AppState.IDLE:
-                if ctrl and key == 'delete':
+                if ctrl and key in ('delete', 'backspace'):
                     self.delete_structural_at_cursor()
                 elif self._selected_range() is not None:
                     self._delete_selection()
@@ -2074,6 +2172,10 @@ class App:
             if self.slash_held:
                 self.add_bass_note(key)
                 self.slash_held = False
+
+        # F1 – keyboard shortcuts help
+        elif kc == wx.WXK_F1 and not ctrl and not shift:
+            self._show_keyboard_shortcuts()
 
         event.Skip()
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from functools import total_ordering
+from i18n import _, ngettext
 
 NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
@@ -883,6 +884,18 @@ class ChordProgression:
     def delete_chord_at(self, position: Position):
         self.items = [i for i in self.items if i.position != position]
 
+    def delete_chords_in_measure_range(self, start_measure: int, end_measure: int) -> int:
+        """Remove all chords whose measure falls in [start_measure, end_measure].
+
+        Returns the number of chords removed.
+        """
+        before = len(self.items)
+        self.items = [
+            i for i in self.items
+            if not (start_measure <= i.position.measure <= end_measure)
+        ]
+        return before - len(self.items)
+
     def find_chords_at_position(self, position: Position) -> list[ProgressionItem]:
         return [item for item in self.items if item.position == position]
 
@@ -973,9 +986,24 @@ class ChordProgression:
             ending2_start=ending2_start,
         )
         self.volta_brackets.append(vb)
-        return (f"Repeat from measure {repeat_start}, "
-                f"ending 1: {measure}–{ending1_end}, "
-                f"ending 2 starts at measure {ending2_start}")
+
+        # Clear any chords that happen to sit in the hidden range so they do
+        # not interfere with iReal Pro export or confuse the user.
+        hidden = vb.hidden_range()
+        cleared = 0
+        if hidden:
+            cleared = self.delete_chords_in_measure_range(hidden[0], hidden[1])
+
+        msg = _("Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}").format(
+            repeat_start=repeat_start, e1_start=measure, e1_end=ending1_end, e2_start=ending2_start
+        )
+        if cleared:
+            msg += ngettext(
+                " ({n} hidden chord removed)",
+                " ({n} hidden chords removed)",
+                cleared,
+            ).format(n=cleared)
+        return msg
 
     def _find_section_start(self, measure: int) -> int:
         """Find the measure where the current section starts (for repeat bracket placement)."""

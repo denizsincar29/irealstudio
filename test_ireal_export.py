@@ -1083,5 +1083,141 @@ class TestGetSectionAtMeasure(unittest.TestCase):
         self.assertIsNone(prog.get_section_at_measure(1))
 
 
+class TestDeleteChordsInRange(unittest.TestCase):
+    """Tests for ChordProgression.delete_chords_in_measure_range()."""
+
+    def test_deletes_chords_in_range(self):
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        removed = prog.delete_chords_in_measure_range(3, 5)
+        self.assertEqual(removed, 3)
+        self.assertFalse(any(i.position.measure in (3, 4, 5) for i in prog.items))
+
+    def test_preserves_chords_outside_range(self):
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.delete_chords_in_measure_range(3, 5)
+        remaining = [i.position.measure for i in prog.items]
+        self.assertEqual(remaining, [1, 2, 6, 7, 8])
+
+    def test_returns_zero_when_range_empty(self):
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        removed = prog.delete_chords_in_measure_range(5, 10)
+        self.assertEqual(removed, 0)
+
+    def test_single_measure_range(self):
+        prog = make_prog()
+        for m in range(1, 5):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        removed = prog.delete_chords_in_measure_range(2, 2)
+        self.assertEqual(removed, 1)
+        self.assertFalse(any(i.position.measure == 2 for i in prog.items))
+
+
+class TestAddVoltaClearsHiddenChords(unittest.TestCase):
+    """Tests that add_volta_start() removes chords in the hidden range."""
+
+    def test_hidden_chords_removed_after_add_volta(self):
+        """Chords in measures ending1_end+1 .. ending2_start-1 must be cleared."""
+        prog = make_prog()
+        prog.add_section_mark(1, '*A')
+        prog.add_section_mark(5, '*B')
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        # V at measure 4 → hidden range should be measures 5..7
+        prog.add_volta_start(4)
+        vb = prog.volta_brackets[0]
+        hr = vb.hidden_range()
+        self.assertIsNotNone(hr)
+        hidden_start, hidden_end = hr
+        # No chord should remain in the hidden range
+        hidden_chords = [
+            i for i in prog.items
+            if hidden_start <= i.position.measure <= hidden_end
+        ]
+        self.assertEqual(hidden_chords, [])
+
+    def test_non_hidden_chords_preserved(self):
+        """Chords outside the hidden range must not be affected."""
+        prog = make_prog()
+        prog.add_section_mark(1, '*A')
+        prog.add_section_mark(5, '*B')
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_volta_start(4)
+        vb = prog.volta_brackets[0]
+        hr = vb.hidden_range()
+        hidden_start, hidden_end = hr
+        non_hidden = [
+            i for i in prog.items
+            if not (hidden_start <= i.position.measure <= hidden_end)
+        ]
+        # Should still have chords at measures 1-4 and 8
+        measures = sorted(i.position.measure for i in non_hidden)
+        self.assertEqual(measures, [1, 2, 3, 4, 8])
+
+    def test_return_message_includes_cleared_count(self):
+        """add_volta_start() return string mentions removed chords when any."""
+        prog = make_prog()
+        prog.add_section_mark(1, '*A')
+        prog.add_section_mark(5, '*B')
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        msg = prog.add_volta_start(4)
+        self.assertIn('removed', msg)
+
+    def test_no_hidden_chords_no_mention_in_message(self):
+        """When hidden range is already empty, message does not say removed."""
+        prog = make_prog()
+        prog.add_section_mark(1, '*A')
+        prog.add_section_mark(5, '*B')
+        # Only add chords at the non-hidden positions
+        for m in [1, 2, 3, 4, 8]:
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        msg = prog.add_volta_start(4)
+        self.assertNotIn('removed', msg)
+
+
+class TestLocalization(unittest.TestCase):
+    """Tests for the i18n module."""
+
+    def test_english_fallback(self):
+        """With no translation loaded, _() returns the original string."""
+        import i18n
+        original_translation = i18n._translation
+        import gettext
+        i18n._translation = gettext.NullTranslations()
+        try:
+            self.assertEqual(i18n._('Deleted'), 'Deleted')
+            self.assertEqual(i18n._('Log is empty'), 'Log is empty')
+        finally:
+            i18n._translation = original_translation
+
+    def test_russian_translation_loaded(self):
+        """The Russian .mo file provides correct translations."""
+        import i18n
+        original_translation = i18n._translation
+        try:
+            i18n.set_language('ru')
+            self.assertEqual(i18n._('Deleted'), 'Удалено')
+            self.assertEqual(i18n._('Log is empty'), 'Журнал пуст')
+            self.assertEqual(i18n._('MIDI devices refreshed'), 'MIDI-устройства обновлены')
+        finally:
+            i18n._translation = original_translation
+
+    def test_unknown_language_fallback(self):
+        """An unknown language code silently falls back to English."""
+        import i18n
+        original_translation = i18n._translation
+        try:
+            i18n.set_language('xx')
+            self.assertEqual(i18n._('Deleted'), 'Deleted')
+        finally:
+            i18n._translation = original_translation
+
+
 if __name__ == '__main__':
     unittest.main()
