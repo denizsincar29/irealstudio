@@ -79,6 +79,7 @@ class MidiHandler:
         self._preview_notes: list[int] = []
         self._preview_channel: int = 0
         self._preview_generation: int = 0  # incremented on every new chord
+        self._preview_timer: threading.Timer | None = None  # pending note-off timer
 
     # ------------------------------------------------------------------
     # Public API
@@ -210,6 +211,12 @@ class MidiHandler:
             return
 
         with self._preview_lock:
+            # Cancel any pending note-off timer so we don't accumulate sleeping
+            # threads during the steady playback loop.
+            if self._preview_timer is not None:
+                self._preview_timer.cancel()
+                self._preview_timer = None
+
             # Silence the previous chord immediately.
             prev_notes = list(self._preview_notes)
             prev_channel = self._preview_channel
@@ -243,13 +250,13 @@ class MidiHandler:
             return
 
         def _release() -> None:
-            time.sleep(duration)
             with self._preview_lock:
                 # If a newer chord was sent while we slept, do nothing — its
                 # send_chord() already sent our note-off (or will do so soon).
                 if self._preview_generation != my_gen:
                     return
                 self._preview_notes = []
+                self._preview_timer = None
             try:
                 if self.midi_output is not None:
                     for n in notes:
@@ -259,7 +266,14 @@ class MidiHandler:
             except Exception as e:
                 _logger.error("MIDI send_chord note_off error: %s", e)
 
-        threading.Thread(target=_release, daemon=True).start()
+        with self._preview_lock:
+            # Only arm the timer if our generation is still current (no new chord
+            # arrived between note-on and here).
+            if self._preview_generation == my_gen:
+                t = threading.Timer(duration, _release)
+                t.daemon = True
+                self._preview_timer = t
+                t.start()
 
     # ------------------------------------------------------------------
     # Internal

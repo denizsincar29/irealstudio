@@ -259,7 +259,10 @@ class Recorder:
             if chords_here:
                 self._speak(chords_here[0].chord_name_spoken())
                 if self._on_playback_chord is not None:
-                    self._on_playback_chord(chords_here[0].chord.name)
+                    try:
+                        self._on_playback_chord(chords_here[0].chord.name)
+                    except Exception:
+                        _logger.error("on_playback_chord callback raised", exc_info=True)
 
             play_sound(self._tick if cur.beat == 1 else self._tock)
 

@@ -769,10 +769,10 @@ msgstr "над"
 
 # --- chord quality spoken names ---
 msgid "minor major 7"
-msgstr "минор мажор 7"
+msgstr "большой минорный 7"
 
 msgid "minor major 9"
-msgstr "минор мажор 9"
+msgstr "большой минорный 9"
 
 msgid "half diminished"
 msgstr "полуменьшённый"
@@ -811,19 +811,19 @@ msgid "minor"
 msgstr "минор"
 
 msgid "major 13"
-msgstr "мажор 13"
+msgstr "мэйдж 13"
 
 msgid "major 9"
-msgstr "мажор 9"
+msgstr "мэйдж 9"
 
 msgid "major 9 sharp 11"
-msgstr "мажор 9 диез 11"
+msgstr "мэйдж 9 диез 11"
 
 msgid "major 7 sharp 11"
-msgstr "мажор 7 диез 11"
+msgstr "мэйдж 7 диез 11"
 
 msgid "major 7"
-msgstr "мажор 7"
+msgstr "мэйдж 7"
 
 msgid "7 flat 9 sharp 11"
 msgstr "7 бемоль 9 диез 11"
@@ -880,7 +880,7 @@ msgid "augmented 7"
 msgstr "увеличенный 7"
 
 msgid "augmented major 7"
-msgstr "увеличенный мажор 7"
+msgstr "увеличенный мэйдж 7"
 
 msgid "augmented"
 msgstr "увеличенный"
