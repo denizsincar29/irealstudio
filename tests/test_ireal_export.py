@@ -1237,11 +1237,11 @@ class TestVoiceChordMidi(unittest.TestCase):
         self.assertIn(4, pcs)      # E (major 3rd)
         self.assertIn(10, pcs)     # Bb (minor 7th)
 
-    def test_maj7_omits_fifth(self):
-        """Major 7th chord should NOT include the perfect fifth."""
+    def test_maj7_keeps_fifth(self):
+        """Major 7th chord MUST keep the perfect fifth (only dominant chords omit it)."""
         notes, _ = voice_chord_midi('Cmaj7')
         pcs = self._pc_set(notes)
-        self.assertNotIn(7, pcs)   # G
+        self.assertIn(7, pcs)      # G (fifth must be present for maj7)
         self.assertIn(0, pcs)      # C
         self.assertIn(4, pcs)      # E
         self.assertIn(11, pcs)     # B (major 7th)

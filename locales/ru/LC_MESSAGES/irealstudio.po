@@ -40,6 +40,9 @@ msgstr "QR-код готов, но нет окна для отображения
 msgid "QR Code – {title}"
 msgstr "QR-код – {title}"
 
+msgid "Scan this QR code with iReal Pro to import the chord chart."
+msgstr "Отсканируйте этот QR-код в iReal Pro, чтобы импортировать цифровку."
+
 # --- keyboard shortcuts dialog ---
 msgid "Keyboard Shortcuts – IReal Studio"
 msgstr "Горячие клавиши – IReal Studio"
@@ -693,7 +696,9 @@ msgid "Play chord on navigation: on"
 msgstr "Играть аккорд при навигации: включено"
 
 msgid "Play chord on navigation: off"
-msgstr "Играть аккорд при навигации: выключено"msgid "MIDI &Input Device"
+msgstr "Играть аккорд при навигации: выключено"
+
+msgid "MIDI &Input Device"
 msgstr "MIDI &Вход"
 
 msgid "MIDI &Output Device"

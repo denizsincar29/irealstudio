@@ -1532,11 +1532,13 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
     root_pc = _NOTE_TO_PC.get(root_str, 0)
     core_ivals, ext_ivals = _quality_to_intervals(quality)
 
-    # Jazz voicing: omit the perfect fifth (7 semitones) from non-minor 7th /
-    # extended chords (dominant, major-7th, maj9, maj13, 9, 11, 13, etc.).
-    # The fifth adds no harmonic colour to these chords.  Keep it for minor,
-    # diminished, augmented and sus chords where it matters.
-    if 4 in core_ivals and (10 in core_ivals or 11 in core_ivals):
+    # Jazz voicing: omit the perfect fifth (7 semitones) when the chord has
+    # both a major third (4) and a flat/minor seventh (10) — i.e. dominant 7th
+    # and related extended dominant chords.  The fifth adds no harmonic colour
+    # in that context.  We keep it for major-7th chords (4 + 11), minor,
+    # diminished, augmented and sus chords where the fifth is structurally
+    # important.
+    if 4 in core_ivals and 10 in core_ivals:
         try:
             core_ivals.remove(7)
         except ValueError:
