@@ -56,7 +56,8 @@ class KeysMixin:
                 self._recorder.stop_all()
                 self.speak(_("Stopped"))
 
-        # Space – play chord on MIDI output (if idle); also controls playback
+        # Space – play/stop playback; also previews the current chord on MIDI
+        # output when "play chord when navigating" is enabled.
         elif key == 'space':
             if ctrl:
                 if self._recorder.state == AppState.PLAYING:
@@ -68,11 +69,10 @@ class KeysMixin:
                         self._announce_position()
             else:
                 if self._recorder.state == AppState.IDLE:
-                    # Play the chord at cursor on MIDI output if available
-                    if self._midi.midi_output is not None:
+                    # Preview chord on MIDI output when the nav-play toggle is on.
+                    if self._midi.midi_output is not None and self.play_chord_on_nav:
                         self.play_current_chord_midi()
-                    else:
-                        self._recorder.start_playback(self.progression, self.cursor)
+                    self._recorder.start_playback(self.progression, self.cursor)
                 elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
                     self._recorder.stop_all()
                     if self.recording_mode == RECORDING_MODE_OVERWRITE:

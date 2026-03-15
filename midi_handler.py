@@ -73,6 +73,13 @@ class MidiHandler:
         self._chord_pending: bool = False
         self._soft_pedal_down: bool = False  # tracks rising-edge for CC 67
 
+        # Chord-preview state: tracks which notes are currently sounding so
+        # that a new send_chord() call can silence them immediately.
+        self._preview_lock = threading.Lock()
+        self._preview_notes: list[int] = []
+        self._preview_channel: int = 0
+        self._preview_generation: int = 0  # incremented on every new chord
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -181,6 +188,11 @@ class MidiHandler:
     ) -> None:
         """Play *notes* on the MIDI output port, releasing them after *duration* seconds.
 
+        If a chord is already sounding from a previous call (e.g. from rapid
+        navigation), its notes are silenced immediately before the new chord
+        starts.  Only the most-recent call's release thread actually sends
+        note-off, so there are never multiple chords ringing simultaneously.
+
         Does nothing if no MIDI output port is open or *notes* is empty.
 
         Parameters
@@ -196,6 +208,27 @@ class MidiHandler:
         """
         if not MIDO_AVAILABLE or self.midi_output is None or not notes:
             return
+
+        with self._preview_lock:
+            # Silence the previous chord immediately.
+            prev_notes = list(self._preview_notes)
+            prev_channel = self._preview_channel
+            if prev_notes:
+                try:
+                    for n in prev_notes:
+                        self.midi_output.send(mido.Message('note_off', note=n,
+                                                           velocity=0,
+                                                           channel=prev_channel))
+                except Exception as e:
+                    _logger.error("MIDI send_chord cancel note_off error: %s", e)
+
+            # Register the new chord and grab a generation stamp.
+            self._preview_generation += 1
+            my_gen = self._preview_generation
+            self._preview_notes = list(notes)
+            self._preview_channel = channel
+
+        # Send note-on for the new chord.
         try:
             for n in notes:
                 self.midi_output.send(mido.Message('note_on', note=n,
@@ -203,10 +236,20 @@ class MidiHandler:
                                                    channel=channel))
         except Exception as e:
             _logger.error("MIDI send_chord note_on error: %s", e)
+            with self._preview_lock:
+                if self._preview_generation == my_gen:
+                    self._preview_notes = []
+                    self._preview_channel = 0
             return
 
-        def _release():
+        def _release() -> None:
             time.sleep(duration)
+            with self._preview_lock:
+                # If a newer chord was sent while we slept, do nothing — its
+                # send_chord() already sent our note-off (or will do so soon).
+                if self._preview_generation != my_gen:
+                    return
+                self._preview_notes = []
             try:
                 if self.midi_output is not None:
                     for n in notes:
