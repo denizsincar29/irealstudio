@@ -2,10 +2,17 @@
 # Русский перевод IReal Studio
 msgid ""
 msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: ru\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+"X-Generator: Poedit 3.9\n"
 
 # --- startup ---
 msgid "Loaded {title}"
@@ -37,6 +44,7 @@ msgstr "QR-код – {title}"
 msgid "Keyboard Shortcuts – IReal Studio"
 msgstr "Горячие клавиши – IReal Studio"
 
+#, fuzzy
 msgid ""
 "Keyboard Shortcuts – IReal Studio\n"
 "==================================\n"
@@ -95,7 +103,7 @@ msgstr ""
 "Воспроизведение и запись\n"
 "  R                         Начать / остановить запись\n"
 "  Space                     Воспроизвести / остановить\n"
-"  Ctrl+Space                Стоп и перейти к последней позиции\n"
+"  Ctrl+Space                Остановить и перейти к точке остановки\n"
 "  Escape                    Остановить запись или воспроизведение\n"
 "\n"
 "Редактирование\n"
@@ -104,10 +112,10 @@ msgstr ""
 "  Ctrl+Z / Ctrl+Y           Отменить / Повторить\n"
 "  Ctrl+X / Ctrl+C / Ctrl+V  Вырезать / Скопировать / Вставить аккорд\n"
 "  Ctrl+Return               Вставить аккорд (диалог)\n"
-"  N                         Переключить N.C. (нет аккорда)\n"
+"  N                         Вставить или удалить знак N.C. (нет аккорда)\n"
 "\n"
-"Метки разделов (Ctrl+Shift+буква)\n"
-"  Ctrl+Shift+A/B/C/D        Раздел A / B / C / D\n"
+"Метки частей (Ctrl+Shift+буква)\n"
+"  Ctrl+Shift+A/B/C/D        Часть A / B / C / D\n"
 "  Ctrl+Shift+V              Куплет\n"
 "  Ctrl+Shift+I              Вступление\n"
 "\n"
@@ -126,14 +134,22 @@ msgstr ""
 "  Ctrl+Q                    Выход\n"
 
 msgid "Keyboard shortcuts dialog opened. Press OK to close."
-msgstr "Диалог горячих клавиш открыт. Нажмите OK для закрытия."
+msgstr "Диалог горячих клавиш. Нажмите OK для закрытия."
 
 # --- about dialog ---
-msgid "A blind-accessible chord progression recorder\nfor musicians who use screen readers.\n\nExport chord charts to iReal Pro format."
-msgstr "Редактор последовательностей аккордов с поддержкой экранного чтения\nдля незрячих музыкантов.\n\nЭкспорт в формат iReal Pro."
+msgid ""
+"A blind-accessible chord progression recorder\n"
+"for musicians who use screen readers.\n"
+"\n"
+"Export chord charts to iReal Pro format."
+msgstr ""
+"Редактор цифровок с поддержкой программ экранного доступа\n"
+"для незрячих музыкантов.\n"
+"\n"
+"Экспорт в формат iReal Pro."
 
 msgid "(C) 2024 Deniz Sincar"
-msgstr "© 2024 Денис Синчар"
+msgstr "© 2026 Дениз Синджар"
 
 # --- undo / redo ---
 msgid "Nothing to undo"
@@ -181,7 +197,7 @@ msgid "Deleted {items} at measure {m}"
 msgstr "Удалено: {items} в такте {m}"
 
 msgid "Nothing to delete at measure {m} beat {b}"
-msgstr "Нечего удалять в такте {m} доле {b}"
+msgstr "Нечего удалить в такте {m} доле {b}"
 
 msgid "N.C. removed at measure {m}"
 msgstr "N.C. убрано в такте {m}"
@@ -231,16 +247,16 @@ msgstr[2] "{n} аккордов"
 
 # --- section marks ---
 msgid "Section A"
-msgstr "Раздел A"
+msgstr "Часть A"
 
 msgid "Section B"
-msgstr "Раздел B"
+msgstr "Часть B"
 
 msgid "Section C"
-msgstr "Раздел C"
+msgstr "Часть C"
 
 msgid "Section D"
-msgstr "Раздел D"
+msgstr "Часть D"
 
 msgid "Verse"
 msgstr "Куплет"
@@ -253,10 +269,10 @@ msgstr "{section} в такте {m}"
 
 # --- bass note ---
 msgid "Bass Note"
-msgstr "Бас-нота"
+msgstr "Бас / обращениеОбращение"
 
 msgid "Enter bass note (e.g. E, Bb):"
-msgstr "Введите бас-ноту (напр. E, Bb):"
+msgstr "Введите басовую ноту (напр. E, Bb):"
 
 msgid "Invalid note"
 msgstr "Неверная нота"
@@ -266,7 +282,7 @@ msgstr "Нет аккорда для изменения"
 
 # --- volta brackets ---
 msgid "Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}"
-msgstr "Повтор с такта {repeat_start}, окончание 1: {e1_start}–{e1_end}, окончание 2 начинается с такта {e2_start}"
+msgstr "Реприза с такта {repeat_start}, вольта 1: {e1_start}–{e1_end}, вольта 2 начинается с такта {e2_start}"
 
 msgid " ({n} hidden chord removed)"
 msgid_plural " ({n} hidden chords removed)"
@@ -304,7 +320,7 @@ msgstr "Перезапись: {label}"
 
 # --- file operations ---
 msgid "Save progression"
-msgstr "Сохранить прогрессию"
+msgstr "Сохранить цифровку"
 
 msgid "IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*"
 msgstr "Файлы IReal Studio (*.ips)|*.ips|Все файлы (*.*)|*.*"
@@ -316,7 +332,7 @@ msgid "Saved to {name}"
 msgstr "Сохранено в {name}"
 
 msgid "Open progression"
-msgstr "Открыть прогрессию"
+msgstr "Открыть цифровку"
 
 msgid "Opened {title}"
 msgstr "Открыто: {title}"
@@ -337,8 +353,14 @@ msgid "Exported to {name}"
 msgstr "Экспортировано в {name}"
 
 # --- updates ---
-msgid "A new version of IReal Studio is available: {tag}\n\nOpen the download page?"
-msgstr "Доступна новая версия IReal Studio: {tag}\n\nОткрыть страницу загрузки?"
+msgid ""
+"A new version of IReal Studio is available: {tag}\n"
+"\n"
+"Open the download page?"
+msgstr ""
+"Доступна новая версия IReal Studio: {tag}\n"
+"\n"
+"Открыть страницу загрузки?"
 
 msgid "Update Available"
 msgstr "Доступно обновление"
@@ -391,10 +413,10 @@ msgid "bar {m} beat {b}"
 msgstr "такт {m} доля {b}"
 
 msgid "ending 1"
-msgstr "окончание 1"
+msgstr "Первая вольта"
 
 msgid "ending 2"
-msgstr "окончание 2"
+msgstr "Вторая вольта"
 
 # --- log ---
 msgid "Log is empty"
@@ -408,11 +430,23 @@ msgid "Inserted {name}"
 msgstr "Вставлен аккорд: {name}"
 
 # --- new / close project ---
-msgid "'{title}' has unsaved changes.\n\nSave before creating a new project?"
-msgstr "'{title}' содержит несохранённые изменения.\n\nСохранить перед созданием нового проекта?"
+msgid ""
+"'{title}' has unsaved changes.\n"
+"\n"
+"Save before creating a new project?"
+msgstr ""
+"'{title}' содержит несохранённые изменения.\n"
+"\n"
+"Сохранить перед созданием нового проекта?"
 
-msgid "'{title}' has unsaved changes.\n\nSave before closing?"
-msgstr "'{title}' содержит несохранённые изменения.\n\nСохранить перед закрытием?"
+msgid ""
+"'{title}' has unsaved changes.\n"
+"\n"
+"Save before closing?"
+msgstr ""
+"'{title}' содержит несохранённые изменения.\n"
+"\n"
+"Сохранить перед закрытием?"
 
 msgid "Unsaved Changes"
 msgstr "Несохранённые изменения"
@@ -431,7 +465,7 @@ msgid "Key"
 msgstr "Тональность"
 
 msgid "Rec BPM"
-msgstr "BPM записи"
+msgstr "Темп записи"
 
 msgid "[unsaved]"
 msgstr "[не сохранено]"
@@ -500,13 +534,13 @@ msgid "Composer:"
 msgstr "Композитор:"
 
 msgid "BPM:"
-msgstr "BPM:"
+msgstr "Темп:"
 
 msgid "Recording BPM:"
-msgstr "BPM записи:"
+msgstr "Темп записи:"
 
 msgid "Time Signature:"
-msgstr "Размер:"
+msgstr "Тактовый размер:"
 
 msgid "Key:"
 msgstr "Тональность:"
@@ -518,13 +552,13 @@ msgid "Chord:"
 msgstr "Аккорд:"
 
 msgid "Root:"
-msgstr "Основа:"
+msgstr "Тоника:"
 
 msgid "Quality:"
-msgstr "Тип:"
+msgstr "Функция:"
 
 msgid "Type a chord name directly, or choose root/quality above."
-msgstr "Введите название аккорда или выберите основу и тип выше."
+msgstr "Введите название аккорда или выберите тонику и функцию выше."
 
 # --- menu items ---
 msgid "&New Project"
@@ -573,19 +607,19 @@ msgid "&Add Chord..."
 msgstr "&Добавить аккорд..."
 
 msgid "&Section Mark"
-msgstr "&Метка раздела"
+msgstr "&Метка части"
 
 msgid "&A (Section A)"
-msgstr "&A (Раздел A)"
+msgstr "&A (Часть A)"
 
 msgid "&B (Section B)"
-msgstr "&B (Раздел B)"
+msgstr "&B (Часть B)"
 
 msgid "&C (Section C)"
-msgstr "&C (Раздел C)"
+msgstr "&C (Часть C)"
 
 msgid "&D (Section D)"
-msgstr "&D (Раздел D)"
+msgstr "&D (Часть D)"
 
 msgid "&Verse"
 msgstr "&Куплет"
@@ -600,7 +634,7 @@ msgid "&No Chord (N.C.)"
 msgstr "&Нет аккорда (N.C.)"
 
 msgid "&Bass Note..."
-msgstr "&Бас-нота..."
+msgstr "&Обращение / бас..."
 
 msgid "&Insert"
 msgstr "&Вставка"
@@ -654,7 +688,7 @@ msgid "&Help"
 msgstr "&Справка"
 
 msgid "My Progression"
-msgstr "Моя прогрессия"
+msgstr "Моя цифровка"
 
 msgid "Unknown"
 msgstr "Неизвестно"

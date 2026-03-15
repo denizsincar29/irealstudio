@@ -1293,3 +1293,18 @@
 12:35:46 DEBUG Update check failed: HTTP Error 404: Not Found
 12:35:49 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 12:35:49 DEBUG MIDI reader thread stopped
+12:36:41 INFO  MIDI: 2 devices found
+12:36:41 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+12:36:41 INFO  MIDI connected: MOTU M Series MIDI In 0
+12:36:41 INFO  Loaded 'ru' translation from C:\Users\user\files\pythons\irealstudio\locales
+12:36:41 DEBUG MIDI reader thread stopped
+12:36:41 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+12:36:41 INFO  MIDI connected: Nord Piano 6 MIDI 1
+12:36:41 INFO  MIDI out: Nord Piano 6 MIDI 2
+12:36:41 INFO  IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла.
+12:36:41 DEBUG Update check failed: HTTP Error 404: Not Found
+12:36:53 INFO  такт 1 доля 1
+12:36:53 INFO  такт 1 доля 1
+12:37:57 INFO  Новый проект: My Progression
+12:37:59 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+12:37:59 DEBUG MIDI reader thread stopped
