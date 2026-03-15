@@ -21,6 +21,16 @@ DEFAULT_STYLE = "Medium Swing"
 DEFAULT_TIME_SIG = TimeSignature(4, 4)
 SAVE_FILE = "progression.ips"
 
+# ---------------------------------------------------------------------------
+# MIDI metronome defaults
+# ---------------------------------------------------------------------------
+# General MIDI percussion note numbers for hi-hat / wood-block clicks.
+# 76 = High Wood Block (downbeat), 77 = Low Wood Block (upbeat).
+MIDI_METRO_ON_NOTE: int = 76    # hi wood block — beat 1
+MIDI_METRO_OFF_NOTE: int = 77   # low wood block — other beats
+MIDI_METRO_VELOCITY: int = 100
+MIDI_METRO_CHANNEL: int = 9     # channel 10 (0-indexed) — standard GM percussion
+
 
 def _get_settings_path() -> Path:
     """Return the path to the per-user app settings file."""

@@ -18,6 +18,7 @@ from commands import (
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
     _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE,
     _CMD_CHORD_PLAY_OFF, _CMD_CHORD_PLAY_NAV, _CMD_CHORD_PLAY_PB, _CMD_CHORD_PLAY_BOTH,
+    _CMD_MIDI_METRO_TOGGLE, _CMD_MIDI_METRO_SETUP,
     _CMD_MIDI_REFRESH, _CMD_MIDI_NONE, _CMD_MIDI_OUT_REFRESH, _CMD_MIDI_OUT_NONE,
     _CMD_SOUND_OUT_REFRESH, _CMD_SOUND_OUT_NONE, _CMD_SOUND_OUT_DEFAULT,
     _CMD_HELP_SHORTCUTS, _CMD_HELP_ABOUT,
@@ -248,6 +249,36 @@ class MenuMixin:
         }
         self.speak(labels.get(mode, mode))
 
+    def _toggle_midi_metronome(self) -> None:
+        """Toggle MIDI metronome on/off."""
+        self.midi_metro_enabled = not self.midi_metro_enabled
+        if self._midi_metro_toggle_item is not None:
+            self._midi_metro_toggle_item.Check(self.midi_metro_enabled)
+        self._save_app_settings()
+        if self.midi_metro_enabled:
+            self.speak(_("MIDI metronome enabled"))
+        else:
+            self.speak(_("MIDI metronome disabled (using audio beep)"))
+
+    def _open_midi_metro_setup(self) -> None:
+        """Open the MIDI metronome configuration dialog."""
+        from dialogs import prompt_midi_metro_settings
+        result = prompt_midi_metro_settings(
+            parent=self._frame,
+            on_note=self.midi_metro_on_note,
+            off_note=self.midi_metro_off_note,
+            velocity=self.midi_metro_velocity,
+            channel=self.midi_metro_channel,
+        )
+        if result is not None:
+            on_note, off_note, velocity, channel = result
+            self.midi_metro_on_note = on_note
+            self.midi_metro_off_note = off_note
+            self.midi_metro_velocity = velocity
+            self.midi_metro_channel = channel
+            self._save_app_settings()
+            self.speak(_("MIDI metronome settings saved"))
+
     # ------------------------------------------------------------------
     # Menu building
     # ------------------------------------------------------------------
@@ -347,6 +378,19 @@ class MenuMixin:
         idx = _mode_to_idx.get(self.chord_play_mode, 0)
         self._chord_play_items[idx].Check(True)
         settings_menu.AppendSubMenu(chord_play_menu, _("Chord &Playback"))
+
+        # MIDI metronome sub-menu
+        settings_menu.AppendSeparator()
+        midi_metro_menu = wx.Menu()
+        self._midi_metro_toggle_item = wx.MenuItem(
+            midi_metro_menu, _CMD_MIDI_METRO_TOGGLE,
+            _("&Enable MIDI Metronome"), kind=wx.ITEM_CHECK,
+        )
+        midi_metro_menu.Append(self._midi_metro_toggle_item)
+        if self.midi_metro_enabled:
+            self._midi_metro_toggle_item.Check(True)
+        midi_metro_menu.Append(_CMD_MIDI_METRO_SETUP, _("&Configure MIDI Metronome..."))
+        settings_menu.AppendSubMenu(midi_metro_menu, _("MIDI &Metronome"))
 
         # Device sub-menus under Settings
         settings_menu.AppendSeparator()
@@ -467,6 +511,10 @@ class MenuMixin:
                          id=_CMD_CHORD_PLAY_PB)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._set_chord_play_mode('both'),
                          id=_CMD_CHORD_PLAY_BOTH)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._toggle_midi_metronome(),
+                         id=_CMD_MIDI_METRO_TOGGLE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._open_midi_metro_setup(),
+                         id=_CMD_MIDI_METRO_SETUP)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
                          id=_CMD_SETTINGS_UPDATE)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_language,
