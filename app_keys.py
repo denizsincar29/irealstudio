@@ -69,8 +69,8 @@ class KeysMixin:
                         self._announce_position()
             else:
                 if self._recorder.state == AppState.IDLE:
-                    # Preview chord on MIDI output when the nav-play toggle is on.
-                    if self._midi.midi_output is not None and self.play_chord_on_nav:
+                    # Preview chord on MIDI output when navigation mode is active.
+                    if self._midi.midi_output is not None and self.chord_play_mode in ('navigation', 'both'):
                         self.play_current_chord_midi()
                     self._recorder.start_playback(self.progression, self.cursor)
                 elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
