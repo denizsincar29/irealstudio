@@ -26,8 +26,8 @@ dev = [
 # Entry point
 script-name = "main.py"
 
-# Output a self-contained single-file executable
-mode = "app"
+# Output a self-contained single-file executable using onefile mode
+mode = "onefile"
 output-dir = "dist"
 
 # Disable the Windows console window (GUI application)
