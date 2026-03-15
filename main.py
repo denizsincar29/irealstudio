@@ -200,7 +200,7 @@ class ChordGridPanel(wx.ScrolledWindow):
         # Collect section marks
         section_marks: dict[int, str] = {}
         for sm in prog.section_marks:
-            section_marks[sm.measure] = sm.name
+            section_marks[sm.measure] = sm.mark
 
         for m in range(1, total + 1):
             x, y, w, h = self._cell_rect(m)
