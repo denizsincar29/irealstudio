@@ -66,7 +66,7 @@ from sound import make_beep, get_output_devices, set_output_device, get_current_
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from dialogs import (
-    prompt_input, new_project_dialog, project_settings_dialog,
+    prompt_input, prompt_bpm, new_project_dialog, project_settings_dialog,
     insert_chord_dialog, BPM_MIN, BPM_MAX,
 )
 from i18n import _, set_language, get_language
@@ -1505,34 +1505,20 @@ Other
             self._save_app_settings()
 
     def _menu_change_bpm(self) -> None:
-        val = prompt_input(f"BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
-                           str(self.progression.bpm), parent=self._frame)
-        if val is not None:
-            try:
-                bpm = int(val)
-                if BPM_MIN <= bpm <= BPM_MAX:
-                    self.progression.bpm = bpm
-                    self.speak(f"BPM set to {bpm}")
-                else:
-                    self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
-            except ValueError:
-                self.speak("Invalid BPM value")
+        bpm = prompt_bpm("BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
+                         self.progression.bpm, parent=self._frame)
+        if bpm is not None:
+            self.progression.bpm = bpm
+            self.speak(f"BPM set to {bpm}")
 
     def _menu_change_recording_bpm(self) -> None:
-        val = prompt_input("Recording BPM",
-                           f"Enter recording BPM ({BPM_MIN}–{BPM_MAX})\n"
-                           "Record at a slower pace; playback uses the song BPM:",
-                           str(self.recording_bpm), parent=self._frame)
-        if val is not None:
-            try:
-                bpm = int(val)
-                if BPM_MIN <= bpm <= BPM_MAX:
-                    self.recording_bpm = bpm
-                    self.speak(f"Recording BPM set to {bpm}")
-                else:
-                    self.speak(f"BPM must be between {BPM_MIN} and {BPM_MAX}")
-            except ValueError:
-                self.speak("Invalid BPM value")
+        bpm = prompt_bpm("Recording BPM",
+                         f"Enter recording BPM ({BPM_MIN}–{BPM_MAX})\n"
+                         "Record at a slower pace; playback uses the song BPM:",
+                         self.recording_bpm, parent=self._frame)
+        if bpm is not None:
+            self.recording_bpm = bpm
+            self.speak(f"Recording BPM set to {bpm}")
 
     def _menu_change_title(self) -> None:
         val = prompt_input("Title", "Enter song title:",
