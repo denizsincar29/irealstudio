@@ -23,7 +23,7 @@ dev = [
 
 [tool.nuitka]
 # Entry point
-script-name = "main.pyw"
+script-name = "main.py"
 
 # Output a self-contained single-file executable
 onefile = true
