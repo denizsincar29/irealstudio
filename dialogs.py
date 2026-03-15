@@ -10,6 +10,8 @@ import sys
 import time
 import threading
 
+from i18n import _
+
 _IS_WINDOWS = sys.platform == 'win32'
 
 # BPM constraints — kept here so the dialog and main.py share one source.
@@ -60,9 +62,9 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
     _defaults: dict = defaults or {}
     # Text-entry fields (title, composer, bpm only — key and style get choices)
     text_fields = [
-        ('title',    'Title:',    _defaults.get('title',    'My Progression')),
-        ('composer', 'Composer:', _defaults.get('composer', 'Unknown')),
-        ('bpm',      'BPM:',      str(_defaults.get('bpm',  120))),
+        ('title',    _('Title:'),    _defaults.get('title',    _('My Progression'))),
+        ('composer', _('Composer:'), _defaults.get('composer', _('Unknown'))),
+        ('bpm',      _('BPM:'),      str(_defaults.get('bpm',  120))),
     ]
     default_key   = _defaults.get('key',   'C')
     default_style = _defaults.get('style', 'Medium Swing')
@@ -116,7 +118,7 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
 
         class _NewProjectDlg(wx.Dialog):
             def __init__(self, parent_wnd):
-                super().__init__(parent_wnd, title="New Project",
+                super().__init__(parent_wnd, title=_("New Project"),
                                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
 
                 # Grid rows: text fields + key row + style row
@@ -132,7 +134,7 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                     grid.Add(ctrl, flag=wx.EXPAND)
 
                 # Key: wx.Choice with all valid iReal Pro key signatures
-                grid.Add(wx.StaticText(self, label='Key:'),
+                grid.Add(wx.StaticText(self, label=_('Key:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
                 key_choice = wx.Choice(self, choices=KEY_SIGNATURES)
                 key_sel = KEY_SIGNATURES.index(default_key) if default_key in KEY_SIGNATURES else 0
@@ -141,7 +143,7 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                 grid.Add(key_choice, flag=wx.EXPAND)
 
                 # Style: wx.Choice (accessible listbox-style dropdown)
-                grid.Add(wx.StaticText(self, label='Style:'),
+                grid.Add(wx.StaticText(self, label=_('Style:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
                 style_choice = wx.Choice(self, choices=STYLES_ALL)
                 sel_idx = STYLES_ALL.index(default_style) if default_style in STYLES_ALL else 0
@@ -279,11 +281,11 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
     """
     _defaults: dict = defaults or {}
     text_fields = [
-        ('title',         'Title:',           _defaults.get('title',         'My Progression')),
-        ('composer',      'Composer:',        _defaults.get('composer',      'Unknown')),
-        ('bpm',           'BPM:',             str(_defaults.get('bpm',       120))),
-        ('recording_bpm', 'Recording BPM:',   str(_defaults.get('recording_bpm', 120))),
-        ('time_signature','Time Signature:',  _defaults.get('time_signature', '4/4')),
+        ('title',         _('Title:'),           _defaults.get('title',         _('My Progression'))),
+        ('composer',      _('Composer:'),        _defaults.get('composer',      _('Unknown'))),
+        ('bpm',           _('BPM:'),             str(_defaults.get('bpm',       120))),
+        ('recording_bpm', _('Recording BPM:'),   str(_defaults.get('recording_bpm', 120))),
+        ('time_signature',_('Time Signature:'),  _defaults.get('time_signature', '4/4')),
     ]
     default_key   = _defaults.get('key',   'C')
     default_style = _defaults.get('style', 'Medium Swing')
@@ -335,7 +337,7 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
 
         class _ProjectSettingsDlg(wx.Dialog):
             def __init__(self, parent_wnd):
-                super().__init__(parent_wnd, title="Project Settings",
+                super().__init__(parent_wnd, title=_("Project Settings"),
                                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
 
                 grid = wx.FlexGridSizer(rows=len(text_fields) + 2, cols=2, vgap=6, hgap=8)
@@ -349,7 +351,7 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                     self._ctrls[key] = ctrl
                     grid.Add(ctrl, flag=wx.EXPAND)
 
-                grid.Add(wx.StaticText(self, label='Key:'),
+                grid.Add(wx.StaticText(self, label=_('Key:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
                 key_choice = wx.Choice(self, choices=KEY_SIGNATURES)
                 key_sel = KEY_SIGNATURES.index(default_key) if default_key in KEY_SIGNATURES else 0
@@ -357,7 +359,7 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                 self._ctrls['key'] = key_choice
                 grid.Add(key_choice, flag=wx.EXPAND)
 
-                grid.Add(wx.StaticText(self, label='Style:'),
+                grid.Add(wx.StaticText(self, label=_('Style:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
                 style_choice = wx.Choice(self, choices=STYLES_ALL)
                 sel_idx = STYLES_ALL.index(default_style) if default_style in STYLES_ALL else 0
@@ -480,134 +482,6 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
         return None
 
 
-def prompt_bpm(title: str, prompt: str, default: int = 120,
-               parent=None) -> int | None:
-    """
-    Show a single-field BPM dialog with arrow-key adjustment and tap tempo.
-
-    * **Up / Down** — change BPM by 1 (hold **Ctrl** for ±10)
-    * **Space** — tap tempo
-    * **Enter** — play a short metronome preview then confirm
-
-    Returns the validated BPM integer on OK, or ``None`` if cancelled.
-    """
-    if not _IS_WINDOWS:
-        print(f"{title}: {prompt} [{default}]", flush=True)
-        try:
-            raw = input("> ").strip()
-            val = int(raw) if raw else default
-            return max(BPM_MIN, min(BPM_MAX, val))
-        except (ValueError, KeyboardInterrupt, EOFError):
-            return None
-
-    try:
-        import wx
-
-        class _BpmDlg(wx.Dialog):
-            def __init__(self, parent_wnd):
-                super().__init__(parent_wnd, title=title,
-                                 style=wx.DEFAULT_DIALOG_STYLE)
-
-                lbl  = wx.StaticText(self, label=prompt)
-                self._ctrl = wx.TextCtrl(self, value=str(default))
-
-                inner = wx.BoxSizer(wx.HORIZONTAL)
-                inner.Add(lbl,        flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
-                inner.Add(self._ctrl, proportion=1, flag=wx.EXPAND)
-
-                outer = wx.BoxSizer(wx.VERTICAL)
-                outer.Add(inner,
-                          flag=wx.EXPAND | wx.ALL, border=12)
-                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
-                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
-                          border=12)
-                self.SetSizerAndFit(outer)
-
-                self._preview_stop: threading.Event | None = None
-                self._tap_times: list[float] = []
-
-                self._ctrl.Bind(wx.EVT_KEY_DOWN, self._on_key)
-                self._ctrl.SetFocus()
-                self._ctrl.SetInsertionPointEnd()
-
-            def _get(self) -> int:
-                try:
-                    return max(BPM_MIN, min(BPM_MAX, int(self._ctrl.GetValue())))
-                except ValueError:
-                    return default
-
-            def _set(self, bpm: int) -> None:
-                self._ctrl.SetValue(str(max(BPM_MIN, min(BPM_MAX, bpm))))
-
-            def _on_key(self, event: wx.KeyEvent) -> None:
-                key = event.GetKeyCode()
-                if key == wx.WXK_UP:
-                    step = 10 if event.ControlDown() else 1
-                    self._set(self._get() + step)
-                    self._preview_metronome()
-                elif key == wx.WXK_DOWN:
-                    step = 10 if event.ControlDown() else 1
-                    self._set(self._get() - step)
-                    self._preview_metronome()
-                elif key == wx.WXK_SPACE:
-                    self._tap_tempo()
-                elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
-                    self._preview_metronome()
-                    event.Skip()
-                else:
-                    event.Skip()
-
-            def _preview_metronome(self) -> None:
-                if self._preview_stop is not None:
-                    self._preview_stop.set()
-                bpm = self._get()
-                stop_ev = threading.Event()
-                self._preview_stop = stop_ev
-                interval = 60.0 / bpm
-                total_beats = 4 * _BPM_PREVIEW_BARS
-
-                def _run() -> None:
-                    try:
-                        from sound import make_beep, play_sound
-                        tick = make_beep(1200, 30)
-                        tock = make_beep(800, 25)
-                    except Exception:
-                        return
-                    for i in range(total_beats):
-                        if stop_ev.is_set():
-                            break
-                        play_sound(tick if i % 4 == 0 else tock)
-                        time.sleep(interval)
-
-                threading.Thread(target=_run, daemon=True).start()
-
-            def _tap_tempo(self) -> None:
-                now = time.monotonic()
-                if self._tap_times and (now - self._tap_times[-1]) > 3.0:
-                    self._tap_times.clear()
-                self._tap_times.append(now)
-                if len(self._tap_times) > 10:
-                    self._tap_times = self._tap_times[-10:]
-                if len(self._tap_times) >= 2:
-                    intervals = [
-                        self._tap_times[i + 1] - self._tap_times[i]
-                        for i in range(len(self._tap_times) - 1)
-                    ]
-                    avg = sum(intervals) / len(intervals)
-                    self._set(round(60.0 / avg))
-                    self._preview_metronome()
-
-            def get_value(self) -> int:
-                return self._get()
-
-        dlg = _BpmDlg(parent)
-        result = dlg.get_value() if dlg.ShowModal() == wx.ID_OK else None
-        dlg.Destroy()
-        return result
-    except Exception:
-        return None
-
-
 def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
     """
     Show a chord-entry dialog that lets the user type a chord name directly
@@ -664,7 +538,7 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
 
         class _InsertChordDlg(wx.Dialog):
             def __init__(self, parent_wnd):
-                super().__init__(parent_wnd, title="Insert Chord",
+                super().__init__(parent_wnd, title=_("Insert Chord"),
                                  style=wx.DEFAULT_DIALOG_STYLE)
                 self._chord_name = default
 
@@ -672,7 +546,7 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
 
                 # Row 1: chord name text entry
                 row1 = wx.BoxSizer(wx.HORIZONTAL)
-                row1.Add(wx.StaticText(self, label="Chord:"),
+                row1.Add(wx.StaticText(self, label=_("Chord:")),
                          flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
                 self._entry = wx.TextCtrl(self, value=default, size=(160, -1))
                 row1.Add(self._entry, proportion=1)
@@ -680,19 +554,19 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
 
                 # Row 2: root + quality selectors
                 row2 = wx.BoxSizer(wx.HORIZONTAL)
-                row2.Add(wx.StaticText(self, label="Root:"),
+                row2.Add(wx.StaticText(self, label=_("Root:")),
                          flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=4)
                 self._root = wx.Choice(self, choices=ROOTS)
                 self._root.SetSelection(0)
                 row2.Add(self._root, flag=wx.RIGHT, border=10)
-                row2.Add(wx.StaticText(self, label="Quality:"),
+                row2.Add(wx.StaticText(self, label=_("Quality:")),
                          flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=4)
                 self._quality = wx.Choice(self, choices=QUALITIES)
                 self._quality.SetSelection(0)
                 row2.Add(self._quality)
                 sizer.Add(row2, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
 
-                help_lbl = wx.StaticText(self, label="Type a chord name directly, or choose root/quality above.")
+                help_lbl = wx.StaticText(self, label=_("Type a chord name directly, or choose root/quality above."))
                 help_lbl.SetForegroundColour(wx.Colour(100, 100, 100))
                 sizer.Add(help_lbl, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
 
