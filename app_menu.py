@@ -258,6 +258,7 @@ class MenuMixin:
     def _open_metronome_settings(self) -> None:
         """Open the centralized Metronome Settings dialog."""
         from dialogs import prompt_metronome_settings
+        from sound import play_sound
 
         def _preview(note: int, velocity: int, channel: int, duration_ms: int) -> None:
             """Play a single note through the MIDI output so the user can hear it."""
@@ -268,6 +269,13 @@ class MenuMixin:
                     duration=duration_ms / 1000.0,
                     channel=channel,
                 )
+            except Exception:
+                pass
+
+        def _audio_preview() -> None:
+            """Play a single audio tick so it can be compared with the MIDI click."""
+            try:
+                play_sound(self._recorder.tick_sound)
             except Exception:
                 pass
 
@@ -283,6 +291,7 @@ class MenuMixin:
             duration_ms=self.midi_metro_duration_ms,
             midi_compensation_ms=self.midi_compensation_ms,
             preview_fn=_preview if self._midi.midi_output is not None else None,
+            audio_preview_fn=_audio_preview,
         )
         if result is not None:
             self.audio_compensation_ms  = result['audio_compensation_ms']

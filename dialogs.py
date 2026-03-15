@@ -830,6 +830,7 @@ def prompt_metronome_settings(
     duration_ms: int = 100,
     midi_compensation_ms: int = 0,
     preview_fn=None,
+    audio_preview_fn=None,
 ) -> "dict | None":
     """Show the centralized Metronome Settings dialog.
 
@@ -838,6 +839,12 @@ def prompt_metronome_settings(
     preview_fn:
         Optional callable ``(note, velocity, channel, duration_ms) -> None``
         for live MIDI preview when any MIDI field changes.
+    audio_preview_fn:
+        Optional callable ``() -> None`` that plays one audio tick so the
+        user can compare it against the simultaneous MIDI preview and judge
+        whether the audio compensation value is correct.  Called together
+        with *preview_fn* (downbeat note) whenever the audio compensation
+        spinner changes.
 
     Returns a dict with keys::
 
@@ -1012,6 +1019,26 @@ def prompt_metronome_settings(
                     self._velocity.Bind(wx.EVT_SPINCTRL, _on_any_spin)
                     self._channel.Bind(wx.EVT_SPINCTRL,  _on_any_spin)
                     self._duration.Bind(wx.EVT_SPINCTRL, _on_any_spin)
+
+                # Audio compensation preview: fires audio tick + MIDI downbeat
+                # together so the user can hear whether they land in sync.
+                def _on_audio_comp_spin(evt):
+                    evt.Skip()
+                    try:
+                        if audio_preview_fn is not None:
+                            audio_preview_fn()
+                    except Exception:
+                        pass
+                    try:
+                        if preview_fn is not None:
+                            note = self._on_note.GetValue()
+                            vel  = self._velocity.GetValue()
+                            ch   = self._channel.GetValue()
+                            dur  = self._duration.GetValue()
+                            preview_fn(note, vel, ch, dur)
+                    except Exception:
+                        pass
+                self._audio_comp.Bind(wx.EVT_SPINCTRL, _on_audio_comp_spin)
 
                 # ----- reset button -----
                 self._reset_btn.Bind(wx.EVT_BUTTON, self._on_reset)
