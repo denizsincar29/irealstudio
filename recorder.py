@@ -29,11 +29,31 @@ class Recorder:
         tick_sound: np.ndarray,
         tock_sound: np.ndarray,
         on_playback_chord: Callable[[str], None] | None = None,
+        on_beat: Callable[[bool], None] | None = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        speak:
+            Callable used to announce messages to the user.
+        tick_sound:
+            Audio sample for beat 1 (downbeat) used when no MIDI metronome is
+            configured (i.e. *on_beat* is ``None``).
+        tock_sound:
+            Audio sample for beats 2-N (upbeats) used without MIDI metronome.
+        on_playback_chord:
+            Optional callback called with the chord name on every playback beat.
+        on_beat:
+            Optional callback called on every metronome beat with a boolean
+            ``is_downbeat`` flag (``True`` = beat 1, ``False`` = other beats).
+            When provided it is called *instead of* the built-in audio beep,
+            allowing the caller to drive a MIDI metronome.
+        """
         self._speak = speak
         self._tick = tick_sound
         self._tock = tock_sound
         self._on_playback_chord = on_playback_chord
+        self._on_beat = on_beat
 
         self.state: str = AppState.IDLE
         self.recording_start_time: float = 0.0
@@ -49,6 +69,31 @@ class Recorder:
         # Beat-timing debug: updated each beat (monotonic time) so the UI can
         # query the offset since the last beat fired.
         self._last_beat_time: float | None = None
+
+    def _click(self, is_downbeat: bool) -> None:
+        """Fire a metronome click for one beat.
+
+        If an *on_beat* callback was provided at construction time it is called
+        instead of the built-in audio beep so the caller can drive a MIDI
+        metronome.  Otherwise the appropriate audio sample is played.
+        """
+        if self._on_beat is not None:
+            try:
+                self._on_beat(is_downbeat)
+            except Exception:
+                _logger.error("on_beat callback raised", exc_info=True)
+        else:
+            play_sound(self._tick if is_downbeat else self._tock)
+
+    @property
+    def tick_sound(self) -> "np.ndarray":
+        """Audio sample used for the downbeat click."""
+        return self._tick
+
+    @property
+    def tock_sound(self) -> "np.ndarray":
+        """Audio sample used for non-downbeat clicks."""
+        return self._tock
 
     # ------------------------------------------------------------------
     # Recording
@@ -109,7 +154,7 @@ class Recorder:
             self._last_beat_time = time.monotonic()
             # Play the click first so the sound lands precisely on the beat;
             # speech follows asynchronously and is heard just after the click.
-            play_sound(self._tick if b == 0 else self._tock)
+            self._click(b == 0)
 
             if jazz_mode and measure_idx == 0:
                 # First 4/4 precount measure: speak "one" on beat 1 and
@@ -184,9 +229,9 @@ class Recorder:
                         ):
                             self._speak("Ending 2")
                             _announced_ending2.add(logical_measure)
-                play_sound(self._tick)
+                self._click(True)
             else:
-                play_sound(self._tock)
+                self._click(False)
 
             beat_count += 1
             # Use absolute timing so the recording metronome stays locked to
@@ -264,7 +309,7 @@ class Recorder:
                     except Exception:
                         _logger.error("on_playback_chord callback raised", exc_info=True)
 
-            play_sound(self._tick if cur.beat == 1 else self._tock)
+            self._click(cur.beat == 1)
 
             self.playback_stopped_at = Position(
                 cur.measure, cur.beat, progression.time_signature

@@ -1310,6 +1310,87 @@ class TestVoiceChordMidi(unittest.TestCase):
         self.assertNotIn(7, pcs)   # no perfect G
         self.assertIn(6, pcs)      # Gb/F# (b5)
 
+    # ------------------------------------------------------------------
+    # Range tests: root E1–Bb2 (28–46), core Eb3–Ab4 (51–68)
+    # ------------------------------------------------------------------
+
+    def test_root_range(self):
+        """Root note must be in the range E1–Bb2 (MIDI 28–46)."""
+        for name in ('C', 'Cm7', 'Cmaj7', 'C7', 'C7sus4', 'Csus4'):
+            notes, root_midi = voice_chord_midi(name)
+            self.assertGreaterEqual(root_midi, 28,
+                f"{name}: root {root_midi} below E1 (28)")
+            self.assertLessEqual(root_midi, 46,
+                f"{name}: root {root_midi} above Bb2 (46)")
+
+    def test_core_range(self):
+        """Core tones (all notes except root) must be in Eb3–Ab4 (MIDI 51–68)."""
+        for name in ('C', 'Cm7', 'Cmaj7', 'C7'):
+            notes, root_midi = voice_chord_midi(name)
+            core_notes = [n for n in notes if n != root_midi]
+            for n in core_notes:
+                self.assertGreaterEqual(n, 51,
+                    f"{name}: core note {n} below Eb3 (51)")
+                self.assertLessEqual(n, 68,
+                    f"{name}: core note {n} above Ab4 (68)")
+
+    # ------------------------------------------------------------------
+    # Jazz shell voicing: for dom7 family, b7 must be lower than maj3
+    # ------------------------------------------------------------------
+
+    def test_dom7_seventh_below_third(self):
+        """In dom7 jazz shell voicing the b7 should be lower than the maj3."""
+        notes, root = voice_chord_midi('C7')
+        # Filter out root
+        core = [n for n in notes if n != root]
+        # Find Bb (pc=10) and E (pc=4) among core tones
+        bb = next((n for n in core if n % 12 == 10), None)
+        e  = next((n for n in core if n % 12 == 4), None)
+        self.assertIsNotNone(bb, "C7 voicing should contain Bb")
+        self.assertIsNotNone(e,  "C7 voicing should contain E")
+        self.assertLess(bb, e, "b7 (Bb) should be lower than maj3 (E) in dom7 voicing")
+
+    def test_dom9_seventh_below_third(self):
+        """Dom9 chord: b7 must be lower than maj3 (same jazz shell rule)."""
+        notes, root = voice_chord_midi('C9')
+        core_ext = [n for n in notes if n != root]
+        bb = next((n for n in core_ext if n % 12 == 10), None)
+        e  = next((n for n in core_ext if n % 12 == 4), None)
+        if bb is not None and e is not None:
+            self.assertLess(bb, e, "b7 (Bb) should be lower than maj3 (E) in dom9")
+
+    # ------------------------------------------------------------------
+    # Sus chord voicing: root + (b7) + 9 + 11, no maj3, no perfect 5th
+    # ------------------------------------------------------------------
+
+    def test_7sus4_no_third(self):
+        """7sus4 voicing must not include a major or minor third."""
+        notes, root = voice_chord_midi('C7sus4')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(4, pcs)  # no major 3rd (E)
+        self.assertNotIn(3, pcs)  # no minor 3rd (Eb)
+
+    def test_7sus4_no_fifth(self):
+        """7sus4 voicing must not include the perfect fifth."""
+        notes, root = voice_chord_midi('C7sus4')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)  # no G (perfect 5th)
+
+    def test_7sus4_has_ninth_and_eleventh(self):
+        """7sus4 voicing includes b7, 9th, and 11th stacked above root."""
+        notes, root = voice_chord_midi('C7sus4')
+        pcs = self._pc_set(notes)
+        self.assertIn(10, pcs)  # Bb (b7)
+        self.assertIn(2, pcs)   # D (9th)
+        self.assertIn(5, pcs)   # F (11th / sus4 tone)
+
+    def test_sus4_no_third_no_fifth(self):
+        """Plain sus4 voicing drops 3rd and 5th in favour of 9th + 11th."""
+        notes, root = voice_chord_midi('Csus4')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(4, pcs)  # no major 3rd
+        self.assertNotIn(7, pcs)  # no perfect 5th
+
 
 if __name__ == '__main__':
     unittest.main()

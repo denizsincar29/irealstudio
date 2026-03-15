@@ -485,9 +485,9 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
 def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
     """
     Show a chord-entry dialog that lets the user type a chord name directly
-    or build one from root + quality selectors.
+    or build one from root + quality + alteration selectors.
 
-    Returns the chord name string on OK (e.g. ``'Cmaj7'``, ``'Am7'``),
+    Returns the chord name string on OK (e.g. ``'Cmaj7'``, ``'Am7'``, ``'C7(b9#11)'``),
     or ``None`` if cancelled or invalid.
     """
     ROOTS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F',
@@ -514,7 +514,35 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
         'm9',     # minor 9
         '11',     # dominant 11
         '13',     # dominant 13
+        'aug7',   # augmented dominant 7
     ]
+
+    # Extensions available for each base quality (empty = no extension checkboxes shown)
+    _QUALITY_EXTENSIONS: dict[str, list[str]] = {
+        '':      [],
+        'm':     [],
+        '7':     ['b9', '9', '#9', 'b5', '#11', 'b13', '13'],
+        'maj7':  ['9', '#11', '13'],
+        'm7':    ['9', '#11', '13'],
+        'm7b5':  ['b9', '9'],
+        'dim':   [],
+        'dim7':  [],
+        'aug':   [],
+        'sus4':  [],
+        '7sus4': ['b9', '13'],
+        'mM7':   ['9'],
+        'add9':  [],
+        '6':     [],
+        '6/9':   [],
+        'm6':    [],
+        '9':     ['b9', '#9', '#11', '13'],
+        'maj9':  ['#11', '13'],
+        'm9':    ['#11'],
+        '11':    ['13'],
+        '13':    [],
+        'aug7':  [],
+    }
+    ALL_EXTS = ['b9', '9', '#9', 'b5', '#11', 'b13', '13']
 
     if not _IS_WINDOWS:
         print(f"Enter chord name [{default}]: ", end='', flush=True)
@@ -540,7 +568,7 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
             def __init__(self, parent_wnd):
                 super().__init__(parent_wnd, title=_("Insert Chord"),
                                  style=wx.DEFAULT_DIALOG_STYLE)
-                self._chord_name = default
+                self._updating = False  # guard against recursive updates
 
                 sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -566,7 +594,22 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
                 row2.Add(self._quality)
                 sizer.Add(row2, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
 
-                help_lbl = wx.StaticText(self, label=_("Type a chord name directly, or choose root/quality above."))
+                # Row 3: alteration checkboxes
+                ext_lbl = wx.StaticText(self, label=_("Alterations:"))
+                sizer.Add(ext_lbl, flag=wx.LEFT | wx.RIGHT, border=12)
+                ext_row = wx.BoxSizer(wx.HORIZONTAL)
+                self._ext_checks: dict[str, wx.CheckBox] = {}
+                for ext in ALL_EXTS:
+                    cb = wx.CheckBox(self, label=ext)
+                    self._ext_checks[ext] = cb
+                    ext_row.Add(cb, flag=wx.RIGHT, border=6)
+                    cb.Bind(wx.EVT_CHECKBOX, self._on_ext_changed)
+                sizer.Add(ext_row, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=12)
+
+                help_lbl = wx.StaticText(
+                    self,
+                    label=_("Type a chord name directly, or choose root/quality/alterations above.")
+                )
                 help_lbl.SetForegroundColour(wx.Colour(100, 100, 100))
                 sizer.Add(help_lbl, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
 
@@ -576,12 +619,47 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
 
                 self._root.Bind(wx.EVT_CHOICE, self._on_selector_changed)
                 self._quality.Bind(wx.EVT_CHOICE, self._on_selector_changed)
+                self._update_ext_state()
                 self._entry.SetFocus()
 
-            def _on_selector_changed(self, _event):
+            def _build_name(self) -> str:
+                """Build chord name from root + quality + selected extensions."""
                 root = self._root.GetString(self._root.GetSelection())
                 quality = self._quality.GetString(self._quality.GetSelection())
-                self._entry.SetValue(root + quality)
+                active = [ext for ext in ALL_EXTS
+                          if self._ext_checks[ext].IsEnabled()
+                          and self._ext_checks[ext].GetValue()]
+                if active:
+                    return root + quality + '(' + ''.join(active) + ')'
+                return root + quality
+
+            def _update_ext_state(self) -> None:
+                """Enable only the extensions that apply to the selected quality."""
+                quality = self._quality.GetString(self._quality.GetSelection())
+                allowed = _QUALITY_EXTENSIONS.get(quality, [])
+                for ext, cb in self._ext_checks.items():
+                    cb.Enable(ext in allowed)
+                    if ext not in allowed:
+                        cb.SetValue(False)
+
+            def _on_selector_changed(self, _event):
+                if self._updating:
+                    return
+                self._updating = True
+                try:
+                    self._update_ext_state()
+                    self._entry.SetValue(self._build_name())
+                finally:
+                    self._updating = False
+
+            def _on_ext_changed(self, _event):
+                if self._updating:
+                    return
+                self._updating = True
+                try:
+                    self._entry.SetValue(self._build_name())
+                finally:
+                    self._updating = False
 
             def get_chord_name(self) -> str:
                 return self._entry.GetValue().strip()
@@ -600,5 +678,80 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
             return name
         except Exception:
             return None
+    except Exception:
+        return None
+
+
+def prompt_midi_metro_settings(
+    parent=None,
+    on_note: int = 76,
+    off_note: int = 77,
+    velocity: int = 100,
+    channel: int = 9,
+) -> tuple[int, int, int, int] | None:
+    """Show a dialog for configuring the MIDI metronome note numbers and channel.
+
+    Returns ``(on_note, off_note, velocity, channel)`` on OK, or ``None`` if
+    the user cancelled.  All values are clamped to valid MIDI ranges.
+    """
+    if not _IS_WINDOWS:
+        print(_("MIDI Metronome Settings"))
+        try:
+            on_s  = input(f"  Downbeat MIDI note (0-127) [{on_note}]: ").strip()
+            off_s = input(f"  Upbeat MIDI note (0-127) [{off_note}]: ").strip()
+            vel_s = input(f"  Velocity (1-127) [{velocity}]: ").strip()
+            ch_s  = input(f"  Channel (0-15) [{channel}]: ").strip()
+            on_note  = max(0, min(127, int(on_s  or on_note)))
+            off_note = max(0, min(127, int(off_s or off_note)))
+            velocity = max(1, min(127, int(vel_s or velocity)))
+            channel  = max(0, min(15,  int(ch_s  or channel)))
+            return on_note, off_note, velocity, channel
+        except (KeyboardInterrupt, EOFError, ValueError):
+            return None
+
+    try:
+        import wx
+
+        class _MidiMetroDlg(wx.Dialog):
+            def __init__(self, parent_wnd):
+                super().__init__(parent_wnd, title=_("MIDI Metronome Settings"),
+                                 style=wx.DEFAULT_DIALOG_STYLE)
+                sizer = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
+                sizer.AddGrowableCol(1, 1)
+
+                def _row(label: str, ctrl: wx.Window) -> None:
+                    sizer.Add(wx.StaticText(self, label=label),
+                              flag=wx.ALIGN_CENTER_VERTICAL)
+                    sizer.Add(ctrl, flag=wx.EXPAND)
+
+                self._on_note  = wx.SpinCtrl(self, min=0, max=127, initial=on_note)
+                self._off_note = wx.SpinCtrl(self, min=0, max=127, initial=off_note)
+                self._velocity = wx.SpinCtrl(self, min=1, max=127, initial=velocity)
+                self._channel  = wx.SpinCtrl(self, min=0, max=15,  initial=channel)
+
+                _row(_("Downbeat MIDI note (0-127):"), self._on_note)
+                _row(_("Upbeat MIDI note (0-127):"),   self._off_note)
+                _row(_("Velocity (1-127):"),            self._velocity)
+                _row(_("Channel (0-15, 9=percussion):"), self._channel)
+
+                outer = wx.BoxSizer(wx.VERTICAL)
+                outer.Add(sizer, flag=wx.EXPAND | wx.ALL, border=14)
+                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=14)
+                self.SetSizerAndFit(outer)
+                self._on_note.SetFocus()
+
+            def get_values(self) -> tuple[int, int, int, int]:
+                return (
+                    self._on_note.GetValue(),
+                    self._off_note.GetValue(),
+                    self._velocity.GetValue(),
+                    self._channel.GetValue(),
+                )
+
+        dlg = _MidiMetroDlg(parent)
+        result = dlg.get_values() if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        return result
     except Exception:
         return None

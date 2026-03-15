@@ -1331,13 +1331,13 @@ class ChordProgression:
 # MIDI chord voicing
 # ---------------------------------------------------------------------------
 
-# MIDI note range for the root note (F1=29, C3=48)
-_VOICE_ROOT_LOW  = 29   # F1
-_VOICE_ROOT_HIGH = 48   # C3
+# MIDI note range for the root note (E1=28, Bb2=46)
+_VOICE_ROOT_LOW  = 28   # E1
+_VOICE_ROOT_HIGH = 46   # Bb2
 
-# MIDI note range for the core chord tones (C3=48, A4=69)
-_VOICE_CORE_LOW  = 48   # C3
-_VOICE_CORE_HIGH = 69   # A4
+# MIDI note range for the core chord tones (Eb3=51, Ab4=68)
+_VOICE_CORE_LOW  = 51   # Eb3
+_VOICE_CORE_HIGH = 68   # Ab4
 
 # Base chord quality → (core_semitone_intervals, extension_semitone_intervals)
 # core: non-root tones within an octave (3rd, 5th, 7th)
@@ -1488,10 +1488,14 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
 
     Implements the voicing rules from task.md:
 
-    * **Root** is placed in the range F1–C3 (MIDI 29–48) with voice leading
+    * **Root** is placed in the range E1–Bb2 (MIDI 28–46) with voice leading
       (smallest jump from *prev_root*).
-    * **Core tones** (3rd, 5th, 7th) are placed in C3–A4 (MIDI 48–69) in
-      ascending close-position order above the root, clamped to the range.
+    * **Core tones** (3rd, 5th, 7th) are placed in Eb3–Ab4 (MIDI 51–68) in
+      close-position order above the root, clamped to the range.
+    * For **dominant 7th** chords (maj3 + b7), the b7 is placed below the maj3
+      (jazz shell voicing: root, b7, maj3) so the third floats on top.
+    * For **sus chords**, the voicing is root + b7 (if any) + 9th + 11th
+      stacked in fourths with no 3rd or 5th (idiomatic jazz sus sound).
     * **Extensions** (9th, 11th, 13th and altered equivalents) are placed
       strictly above the highest core tone, starting at least one octave
       above the root (i.e. root_midi + 12 or core_top + 1, whichever is
@@ -1532,25 +1536,50 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
     root_pc = _NOTE_TO_PC.get(root_str, 0)
     core_ivals, ext_ivals = _quality_to_intervals(quality)
 
-    # Jazz voicing: omit the perfect fifth (7 semitones) when the chord has
-    # both a major third (4) and a flat/minor seventh (10) — i.e. dominant 7th
-    # and related extended dominant chords.  The fifth adds no harmonic colour
-    # in that context.  We keep it for major-7th chords (4 + 11), minor,
-    # diminished, augmented and sus chords where the fifth is structurally
-    # important.
-    if 4 in core_ivals and 10 in core_ivals:
-        try:
-            core_ivals.remove(7)
-        except ValueError:
-            pass   # chord already lacks a perfect fifth (e.g. aug7, 7(b5))
+    # Sus voicing: root + b7 (if present) + 9th + 11th + (13th if present).
+    # No 3rd, no 5th — the 4th (11th) is the characteristic sus tone and
+    # stacking 7–9–11 in fourths gives the idiomatic jazz sus sound.
+    has_sus = 5 in core_ivals  # perfect 4th (11th) marks a sus chord
+    if has_sus:
+        b7_present = 10 in core_ivals
+        # Core keeps only the b7 so it lands low in the core range.
+        core_ivals = [10] if b7_present else []
+        # Always stack 9th (14) and 11th (17) as extensions; keep 13th if present.
+        sus_ext: list[int] = [14, 17]
+        for x in ext_ivals:
+            if x not in sus_ext:
+                sus_ext.append(x)
+        ext_ivals = sus_ext
+    else:
+        # Jazz voicing: omit the perfect fifth (7 semitones) when the chord has
+        # both a major third (4) and a flat/minor seventh (10) — i.e. dominant 7th
+        # and related extended dominant chords.  The fifth adds no harmonic colour
+        # in that context.  We keep it for major-7th chords (4 + 11), minor,
+        # diminished, augmented and sus chords where the fifth is structurally
+        # important.
+        if 4 in core_ivals and 10 in core_ivals:
+            try:
+                core_ivals.remove(7)
+            except ValueError:
+                pass   # chord already lacks a perfect fifth (e.g. aug7, 7(b5))
 
     root_midi = _pick_root_midi(root_pc, prev_root)
 
     notes: list[int] = [root_midi]
 
+    # Determine the order in which to place core tones.
+    # For dominant 7th chords (maj3=4 + b7=10): place the b7 *before* the maj3
+    # so the 7th sits lower in the core range and the 3rd floats above — this
+    # is the standard jazz shell voicing (e.g. C7 → C2, Bb3, E4).
+    if not has_sus and 4 in core_ivals and 10 in core_ivals:
+        other = [i for i in set(core_ivals) if i not in (4, 10)]
+        core_order = [10, 4] + sorted(other)
+    else:
+        core_order = sorted(set(core_ivals))
+
     # Place core tones: ascending above root_midi, clamped to [CORE_LOW, CORE_HIGH]
     cursor = root_midi
-    for ival in sorted(set(core_ivals)):
+    for ival in core_order:
         note_pc = (root_pc + ival) % 12
         # Start from same octave as cursor
         n = (cursor // 12) * 12 + note_pc

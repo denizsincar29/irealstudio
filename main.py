@@ -40,6 +40,7 @@ from commands import (
 from app_settings import (
     DEFAULT_BPM, DEFAULT_TITLE, DEFAULT_KEY, DEFAULT_STYLE, DEFAULT_TIME_SIG, SAVE_FILE,
     _load_app_settings, _save_settings_file,
+    MIDI_METRO_ON_NOTE, MIDI_METRO_OFF_NOTE, MIDI_METRO_VELOCITY, MIDI_METRO_CHANNEL,
 )
 from app_menu import MenuMixin
 from app_keys import KeysMixin
@@ -74,6 +75,239 @@ _app_logger.addHandler(_file_handler)
 _ring_handler = _RingHandler()
 _ring_handler.setFormatter(logging.Formatter('%(levelname)-5s %(message)s'))
 _app_logger.addHandler(_ring_handler)
+
+
+# ---------------------------------------------------------------------------
+# Chord grid visualization panel
+# ---------------------------------------------------------------------------
+class ChordGridPanel(wx.Panel):
+    """Visual chord grid showing the progression on a 2-D grid of measures.
+
+    * Each row shows ``MEASURES_PER_ROW`` measures left-to-right.
+    * The cursor measure/beat is highlighted in blue.
+    * The current selection range is highlighted in teal.
+    * The playback position (during playback) is highlighted in red.
+    * Mouse left-click moves the cursor; click-and-drag extends the selection.
+    * Section markers (A, B, …) are drawn in amber on the measure where they start.
+    """
+
+    CELL_W: int = 140       # pixels wide per measure cell
+    CELL_H: int = 60        # pixels tall per measure cell
+    MEASURES_PER_ROW: int = 4
+
+    # ---- colour palette ---------------------------------------------------
+    _BG        = wx.Colour(30,  30,  30)
+    _GRID      = wx.Colour(60,  60,  60)
+    _TEXT      = wx.Colour(200, 200, 200)
+    _MNUM      = wx.Colour(90,  90,  90)    # measure number
+    _CURSOR    = wx.Colour(0,   80,  170)   # cursor cell bg
+    _SEL       = wx.Colour(0,   90,  80)    # selection bg
+    _PLAY      = wx.Colour(140, 0,   0)     # playback beat bg
+    _SECTION   = wx.Colour(255, 200, 0)     # section marker text
+    _NC        = wx.Colour(120, 120, 120)   # N.C. text
+    _BEAT_LINE = wx.Colour(65,  65,  65)    # vertical beat separator
+
+    def __init__(self, parent: wx.Window, app) -> None:
+        super().__init__(parent, style=0)
+        self._app = app
+        self._mouse_drag = False
+        self.SetBackgroundColour(self._BG)
+        self.SetMinSize((-1, self.CELL_H * 4))
+        self.Bind(wx.EVT_PAINT,       self._on_paint)
+        self.Bind(wx.EVT_LEFT_DOWN,   self._on_mouse_down)
+        self.Bind(wx.EVT_MOTION,      self._on_mouse_move)
+        self.Bind(wx.EVT_LEFT_UP,     self._on_mouse_up)
+        self.Bind(wx.EVT_SIZE,        lambda _e: self.Refresh())
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _total_measures(self) -> int:
+        prog = self._app.progression
+        return max(prog.last_measure(), prog.total_measures, 1)
+
+    def _pos_from_xy(self, mx: int, my: int):
+        """Return a ``Position`` from pixel coords, or ``None`` if out of range."""
+        from chords import Position as _Pos
+        ts = self._app.progression.time_signature
+        beats = ts.numerator
+        col  = mx // self.CELL_W
+        row  = my // self.CELL_H
+        if col >= self.MEASURES_PER_ROW or col < 0 or row < 0:
+            return None
+        measure = row * self.MEASURES_PER_ROW + col + 1
+        if measure > self._total_measures():
+            return None
+        beat_w = self.CELL_W / beats
+        beat = max(1, min(beats, int((mx % self.CELL_W) / beat_w) + 1))
+        return _Pos(measure, beat, ts)
+
+    def _cell_rect(self, measure: int) -> tuple[int, int, int, int]:
+        """Return (x, y, w, h) pixel rect for a given 1-based measure number."""
+        idx = measure - 1
+        col = idx % self.MEASURES_PER_ROW
+        row = idx // self.MEASURES_PER_ROW
+        return (col * self.CELL_W, row * self.CELL_H, self.CELL_W, self.CELL_H)
+
+    # ------------------------------------------------------------------
+    # Paint
+    # ------------------------------------------------------------------
+
+    def _on_paint(self, _event) -> None:
+        dc = wx.PaintDC(self)
+        dc.SetBackground(wx.Brush(self._BG))
+        dc.Clear()
+
+        app    = self._app
+        prog   = app.progression
+        cursor = app.cursor
+        beats  = prog.time_signature.numerator
+        total  = self._total_measures()
+
+        # Build fast-lookup: measure → list of (beat, chord_name) or None for N.C.
+        by_measure: dict[int, list[tuple[int, str | None]]] = {}
+        for item in prog.items:
+            m = item.position.measure
+            name = None if getattr(item.chord, 'is_no_chord', False) else item.chord.name
+            by_measure.setdefault(m, []).append((item.position.beat, name))
+
+        # Selection range
+        sel_range = app._selected_range()
+
+        # Playback / recording beat
+        play_pos = app._recorder.playback_stopped_at if app._recorder.state == 'playing' else None
+
+        # Font for chord names
+        font_chord = wx.Font(11, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
+        font_small = wx.Font(8, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        font_sec   = wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
+
+        # Collect section marks
+        section_marks: dict[int, str] = {}
+        for sm in prog.section_marks:
+            section_marks[sm.measure] = sm.name
+
+        for m in range(1, total + 1):
+            x, y, w, h = self._cell_rect(m)
+
+            # --- background colour ---
+            if play_pos and play_pos.measure == m:
+                dc.SetBrush(wx.Brush(self._PLAY))
+                dc.SetPen(wx.Pen(self._PLAY))
+            elif cursor.measure == m:
+                dc.SetBrush(wx.Brush(self._CURSOR))
+                dc.SetPen(wx.Pen(self._CURSOR))
+            elif sel_range and sel_range[0].measure <= m <= sel_range[1].measure:
+                dc.SetBrush(wx.Brush(self._SEL))
+                dc.SetPen(wx.Pen(self._SEL))
+            else:
+                dc.SetBrush(wx.Brush(self._BG))
+                dc.SetPen(wx.Pen(self._BG))
+            dc.DrawRectangle(x, y, w, h)
+
+            # --- playback beat strip ---
+            if play_pos and play_pos.measure == m:
+                beat_w_px = w / beats
+                bx = x + int((play_pos.beat - 1) * beat_w_px)
+                dc.SetBrush(wx.Brush(wx.Colour(200, 30, 30)))
+                dc.SetPen(wx.Pen(wx.Colour(200, 30, 30)))
+                dc.DrawRectangle(bx, y, max(2, int(beat_w_px)), h)
+
+            # --- cursor beat strip ---
+            if cursor.measure == m:
+                beat_w_px = w / beats
+                bx = x + int((cursor.beat - 1) * beat_w_px)
+                dc.SetBrush(wx.Brush(wx.Colour(80, 150, 255)))
+                dc.SetPen(wx.Pen(wx.Colour(80, 150, 255)))
+                dc.DrawRectangle(bx, y, max(2, int(beat_w_px)), h)
+
+            # --- beat separator lines ---
+            dc.SetPen(wx.Pen(self._BEAT_LINE))
+            beat_w_px = w / beats
+            for b in range(1, beats):
+                bx = x + int(b * beat_w_px)
+                dc.DrawLine(bx, y, bx, y + h)
+
+            # --- grid border ---
+            dc.SetPen(wx.Pen(self._GRID))
+            dc.SetBrush(wx.TRANSPARENT_BRUSH)
+            dc.DrawRectangle(x, y, w, h)
+
+            # --- measure number (dim, top-right) ---
+            dc.SetFont(font_small)
+            dc.SetTextForeground(self._MNUM)
+            mnum_str = str(m)
+            tw, th = dc.GetTextExtent(mnum_str)
+            dc.DrawText(mnum_str, x + w - tw - 3, y + 2)
+
+            # --- section marker (amber, top-left) ---
+            if m in section_marks:
+                dc.SetFont(font_sec)
+                dc.SetTextForeground(self._SECTION)
+                dc.DrawText(section_marks[m], x + 3, y + 2)
+
+            # --- chord names ---
+            dc.SetFont(font_chord)
+            chords_in_m = by_measure.get(m, [])
+            if chords_in_m:
+                beat_w_px = w / beats
+                for beat, name in sorted(chords_in_m):
+                    bx = x + int((beat - 1) * beat_w_px) + 4
+                    if name is None:
+                        dc.SetTextForeground(self._NC)
+                        dc.DrawText("N.C.", bx, y + h // 2 - 8)
+                    else:
+                        dc.SetTextForeground(self._TEXT)
+                        dc.DrawText(name, bx, y + h // 2 - 8)
+
+        # Required virtual size so scroll bars appear if the grid is tall
+        rows = max(1, (total + self.MEASURES_PER_ROW - 1) // self.MEASURES_PER_ROW)
+        self.SetVirtualSize(self.MEASURES_PER_ROW * self.CELL_W, rows * self.CELL_H)
+
+    # ------------------------------------------------------------------
+    # Mouse events → cursor / selection
+    # ------------------------------------------------------------------
+
+    def _on_mouse_down(self, event: wx.MouseEvent) -> None:
+        pos = self._pos_from_xy(event.GetX(), event.GetY())
+        if pos is None:
+            return
+        self._mouse_drag = True
+        self.CaptureMouse()
+        self._app._clear_selection()
+        self._app.cursor = pos
+        self.Refresh()
+        # Give keyboard focus back to the main input panel so key events still work.
+        # Search the frame's direct children for a plain wx.Panel that is not this grid.
+        if self._app._frame is not None:
+            focused = False
+            for child in self._app._frame.GetChildren():
+                if isinstance(child, wx.Panel) and child is not self:
+                    child.SetFocus()
+                    focused = True
+                    break
+            if not focused:
+                # Fallback: focus the frame itself so key events are not lost.
+                self._app._frame.SetFocus()
+
+    def _on_mouse_move(self, event: wx.MouseEvent) -> None:
+        if not self._mouse_drag or not event.LeftIsDown():
+            return
+        pos = self._pos_from_xy(event.GetX(), event.GetY())
+        if pos is None:
+            return
+        if self._app._sel_anchor is None:
+            self._app._sel_anchor = self._app.cursor
+        self._app._sel_active = pos
+        self._app.cursor = pos
+        self.Refresh()
+
+    def _on_mouse_up(self, _event: wx.MouseEvent) -> None:
+        if self._mouse_drag:
+            self._mouse_drag = False
+            if self.HasCapture():
+                self.ReleaseMouse()
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +358,13 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # 'off' | 'navigation' | 'playback' | 'both'
         self.chord_play_mode: str = 'off'
 
+        # MIDI metronome settings
+        self.midi_metro_enabled: bool = False
+        self.midi_metro_on_note: int = MIDI_METRO_ON_NOTE
+        self.midi_metro_off_note: int = MIDI_METRO_OFF_NOTE
+        self.midi_metro_velocity: int = MIDI_METRO_VELOCITY
+        self.midi_metro_channel: int = MIDI_METRO_CHANNEL
+
         # Unsaved-changes tracking
         self._is_dirty: bool = False
 
@@ -136,15 +377,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._overwrite_whole_item = None
         self._chord_play_items: list = []  # radio items for chord playback mode
 
-        # Recorder owns metronome/recording/playback state
-        self._recorder = Recorder(
-            speak=self.speak,
-            tick_sound=make_beep(1200, 10),
-            tock_sound=make_beep(800,   8),
-            on_playback_chord=self._on_playback_chord_midi,
-        )
-
-        # MIDI handler owns port management and chord detection
+        # MIDI handler owns port management and chord detection (must be created
+        # before Recorder so that _midi is available in _make_beat_callback).
         self._midi = MidiHandler(
             speak=self.speak,
             on_chord_released=self._on_chord_released,
@@ -152,6 +386,16 @@ class App(MenuMixin, KeysMixin, IOMixin):
             on_chord_preview=self._on_chord_preview,
             on_nc_pedal=self._on_nc_pedal,
         )
+
+        # Recorder owns metronome/recording/playback state
+        self._recorder = Recorder(
+            speak=self.speak,
+            tick_sound=make_beep(1200, 10),
+            tock_sound=make_beep(800,   8),
+            on_playback_chord=self._on_playback_chord_midi,
+            on_beat=self._midi_metro_beat,
+        )
+
         self._midi.init()
         self._apply_saved_settings()
 
@@ -161,6 +405,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._midi_menu = None
         self._midi_out_menu = None
         self._sound_out_menu = None
+        self._midi_metro_toggle_item = None
+        self._chord_grid: ChordGridPanel | None = None
 
         # Current open file path (None = unsaved / new project)
         self._current_file: Path | None = None
@@ -255,6 +501,46 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if self._recorder.state != AppState.IDLE:
             return
         self.toggle_no_chord()
+
+    def _midi_metro_beat(self, is_downbeat: bool) -> None:
+        """MIDI metronome callback — fires on every beat from Recorder.
+
+        When ``midi_metro_enabled`` is ``True`` and a MIDI output port is open,
+        sends a short note-on/note-off pair on the configured percussion channel
+        so external MIDI devices or a DAW can play the metronome sound.
+        When disabled, falls back to the built-in audio beep by returning
+        without doing anything (the Recorder will then call play_sound itself
+        because *on_beat* is set; so we must pass through to audio when MIDI is
+        not active).
+        """
+        if not self.midi_metro_enabled or self._midi.midi_output is None:
+            # Fall back to audio click
+            from sound import play_sound
+            play_sound(self._recorder.tick_sound if is_downbeat else self._recorder.tock_sound)
+            return
+        note = self.midi_metro_on_note if is_downbeat else self.midi_metro_off_note
+        try:
+            import mido
+            ch = max(0, min(15, self.midi_metro_channel))
+            vel = max(1, min(127, self.midi_metro_velocity))
+            self._midi.midi_output.send(mido.Message(
+                'note_on', note=note, velocity=vel, channel=ch,
+            ))
+            # Schedule note-off after 50 ms so the note does not sustain.
+            # Use a daemon timer so it does not block process shutdown.
+            import threading
+            def _note_off():
+                try:
+                    self._midi.midi_output.send(mido.Message(
+                        'note_off', note=note, velocity=0, channel=ch,
+                    ))
+                except Exception:
+                    pass
+            t = threading.Timer(0.05, _note_off)
+            t.daemon = True
+            t.start()
+        except Exception:
+            _app_logger.debug("MIDI metro beat failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Undo / redo
@@ -443,6 +729,18 @@ class App(MenuMixin, KeysMixin, IOMixin):
         elif settings.get('play_chord_on_nav', False):
             self.chord_play_mode = 'navigation'
 
+        # MIDI metronome settings
+        if 'midi_metro_enabled' in settings:
+            self.midi_metro_enabled = bool(settings['midi_metro_enabled'])
+        if 'midi_metro_on_note' in settings:
+            self.midi_metro_on_note = int(settings['midi_metro_on_note'])
+        if 'midi_metro_off_note' in settings:
+            self.midi_metro_off_note = int(settings['midi_metro_off_note'])
+        if 'midi_metro_velocity' in settings:
+            self.midi_metro_velocity = int(settings['midi_metro_velocity'])
+        if 'midi_metro_channel' in settings:
+            self.midi_metro_channel = int(settings['midi_metro_channel'])
+
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
         current_out = get_current_output_device()
@@ -458,6 +756,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_output_device': self._midi.midi_output_name,
             'audio_output_device_name': audio_name,
             'chord_play_mode': self.chord_play_mode,
+            'midi_metro_enabled': self.midi_metro_enabled,
+            'midi_metro_on_note': self.midi_metro_on_note,
+            'midi_metro_off_note': self.midi_metro_off_note,
+            'midi_metro_velocity': self.midi_metro_velocity,
+            'midi_metro_channel': self.midi_metro_channel,
         }
         _save_settings_file(settings)
 
@@ -923,7 +1226,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         else:
             self.speak(_('IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file.'))
 
-        self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
+        self._frame = wx.Frame(None, title="IReal Studio", size=(580, 420))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
         # style=0 removes wx.TAB_TRAVERSAL so navigation keys reach _on_keydown
         panel = wx.Panel(self._frame, style=0)
@@ -942,6 +1245,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
         log_lbl.SetForegroundColour(wx.Colour(136, 136, 136))
         sizer.Add(log_lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
         self._status_labels.append(log_lbl)
+
+        # Chord grid visual panel
+        self._chord_grid = ChordGridPanel(panel, self)
+        sizer.Add(self._chord_grid, 1, wx.EXPAND | wx.TOP, 4)
 
         panel.SetSizer(sizer)
 
@@ -1053,6 +1360,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
             lines[3] += "  [" + _('SEL:') + " " + ngettext('{n} chord', '{n} chords', n).format(n=n) + "]"
         for lbl, text in zip(self._status_labels, lines):
             lbl.SetLabel(text)
+        # Refresh the chord grid whenever any state changes
+        if self._chord_grid is not None:
+            self._chord_grid.Refresh()
         wx.CallLater(50, self._schedule_display_update)
 
 
