@@ -19,15 +19,15 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "nuitka>=4.0.5",
+    "nuitka[onefile]>=4.0.5",
 ]
 
 [tool.nuitka]
 # Entry point
 script-name = "main.py"
 
-# Output a self-contained single-file executable
-onefile = true
+# Output a self-contained single-file executable using onefile mode
+mode = "onefile"
 output-dir = "dist"
 
 # Disable the Windows console window (GUI application)

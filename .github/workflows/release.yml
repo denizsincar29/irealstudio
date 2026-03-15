@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -80,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           uv run nuitka `
-            --onefile `
+            --mode=onefile `
             --output-filename=irealstudio.exe `
             --output-dir=dist `
             --windows-console-mode=disable `
@@ -93,7 +94,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           uv run nuitka \
-            --onefile \
+            --mode=onefile \
             --output-filename=irealstudio.bin \
             --output-dir=dist \
             --assume-yes-for-downloads \
@@ -120,6 +121,7 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
 
     steps:
       - name: Checkout
