@@ -81,7 +81,7 @@ def _callback(outdata: np.ndarray, frames: int, time_info, status) -> None:
     at sample 0 of the current buffer (best-effort recovery).
     """
     outdata[:] = 0.0
-    dac_time: float = time_info.output_buffer_dac_time  # stream time of buffer[0]
+    dac_time: float = time_info.outputBufferDacTime  # stream time of buffer[0]
     with _lock:
         still_playing: list[tuple[np.ndarray, int, float | None]] = []
         for buf, pos, target_dac in _pending:
