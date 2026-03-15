@@ -160,6 +160,9 @@ msgstr "Журнал пуст"
 msgid "IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."
 msgstr "IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла."
 
+msgid "IReal Studio ready. {title}. Press R to record."
+msgstr "IReal Studio готов. {title}. Нажмите R для записи."
+
 # --- language dialog ---
 msgid "Select language:"
 msgstr "Выберите язык:"
