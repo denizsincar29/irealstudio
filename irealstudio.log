@@ -1185,3 +1185,60 @@
 00:35:00 INFO  Opened Denizian blues
 00:37:23 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
 00:37:23 DEBUG MIDI reader thread stopped
+00:40:17 INFO  MIDI: 2 devices found
+00:40:17 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+00:40:17 INFO  MIDI connected: MOTU M Series MIDI In 0
+00:40:17 DEBUG MIDI reader thread stopped
+00:40:17 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+00:40:17 INFO  MIDI connected: Nord Piano 6 MIDI 1
+00:40:17 INFO  MIDI out: Nord Piano 6 MIDI 2
+00:40:18 INFO  IReal Studio ready. My Progression. Press R to record.
+00:40:19 DEBUG Update check failed: HTTP Error 404: Not Found
+00:40:21 INFO  Opened Denizian blues
+00:42:37 INFO  Остановлено
+00:42:49 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+00:42:49 DEBUG MIDI reader thread stopped
+10:28:07 INFO  MIDI: 2 devices found
+10:28:07 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:28:07 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:28:07 DEBUG MIDI reader thread stopped
+10:28:07 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+10:28:07 INFO  MIDI connected: Nord Piano 6 MIDI 1
+10:28:07 INFO  MIDI out: Nord Piano 6 MIDI 2
+10:28:28 INFO  MIDI: 2 devices found
+10:28:28 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:28:28 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:28:28 DEBUG MIDI reader thread stopped
+10:28:29 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+10:28:29 INFO  MIDI connected: Nord Piano 6 MIDI 1
+10:28:29 INFO  MIDI out: Nord Piano 6 MIDI 2
+10:28:53 INFO  MIDI: 2 devices found
+10:28:53 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:28:53 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:28:53 DEBUG MIDI reader thread stopped
+10:28:54 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+10:28:54 INFO  MIDI connected: Nord Piano 6 MIDI 1
+10:28:54 INFO  MIDI out: Nord Piano 6 MIDI 2
+10:28:59 INFO  MIDI: 2 devices found
+10:28:59 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:28:59 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:28:59 DEBUG MIDI reader thread stopped
+10:28:59 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+10:28:59 INFO  MIDI connected: Nord Piano 6 MIDI 1
+10:28:59 INFO  MIDI out: Nord Piano 6 MIDI 2
+10:30:27 INFO  MIDI: 2 devices found
+10:30:27 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:30:27 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:30:27 DEBUG MIDI reader thread stopped
+10:30:27 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+10:30:27 INFO  MIDI connected: Nord Piano 6 MIDI 1
+10:30:27 INFO  MIDI out: Nord Piano 6 MIDI 2
+10:34:56 INFO  MIDI: 2 devices found
+10:34:56 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:34:56 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:55:05 INFO  MIDI: 2 devices found
+10:55:05 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:55:05 INFO  MIDI connected: MOTU M Series MIDI In 0
+10:57:07 INFO  MIDI: 2 devices found
+10:57:07 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+10:57:07 INFO  MIDI connected: MOTU M Series MIDI In 0
