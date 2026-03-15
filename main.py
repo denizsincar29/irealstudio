@@ -1449,7 +1449,7 @@ Other
 
         # Remove all device items (keep the trailing separator + "Refresh" = 2 items).
         count = self._sound_out_menu.GetMenuItemCount()
-        for _ in range(max(0, count - 2)):
+        for _i in range(max(0, count - 2)):
             item = self._sound_out_menu.FindItemByPosition(0)
             self._sound_out_menu.Remove(item)
 
