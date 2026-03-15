@@ -20,20 +20,18 @@ import time
 import logging
 import collections
 import wx
-import wx.adv
 from pathlib import Path
 
 from accessible_output3.outputs.auto import Auto
 
 from chords import (
-    ChordProgression, TimeSignature, Position, Chord,
+    ChordProgression, Position, Chord,
     SECTION_KEYS, NOTE_NAMES, get_note_names_for_key,
     chord_name_to_spoken,
 )
 from sound import make_beep, get_output_devices, set_output_device, get_current_output_device
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
-from dialogs import BPM_MIN, BPM_MAX
 from i18n import _, set_language, get_language, ngettext
 
 from commands import (
@@ -55,7 +53,7 @@ LOG_FILE = "irealstudio.log"
 LOG_RING_SIZE = 100       # entries kept in the in-memory ring buffer
 LOG_SPEAK_RECENT = 5      # entries spoken by Ctrl+L
 
-_log_ring: collections.deque = collections.deque(maxlen=LOG_RING_SIZE)
+_log_ring: collections.deque[str] = collections.deque(maxlen=LOG_RING_SIZE)
 
 
 class _RingHandler(logging.Handler):
@@ -106,11 +104,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self.recording_mode: str = RECORDING_MODE_OVERDUB
         self.overwrite_whole_measure: bool = False
         self._overwrite_start: Position | None = None
-        self._overwrite_recorded: set = set()  # set of (measure, beat) pairs
+        self._overwrite_recorded: set[tuple[int, int]] = set()  # set of (measure, beat) pairs
 
         # Undo / redo stacks (JSON snapshots of the progression)
-        self._undo_stack: list = []
-        self._redo_stack: list = []
+        self._undo_stack: list[str] = []
+        self._redo_stack: list[str] = []
 
         # Clipboard (chord name string for cut/copy/paste)
         self._clipboard: str | None = None
@@ -204,7 +202,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
     # MIDI chord callbacks
     # ------------------------------------------------------------------
 
-    def _on_chord_released(self, notes: list, first_note_time: float) -> None:
+    def _on_chord_released(self, notes: list[int], first_note_time: float) -> None:
         """Commit a detected chord to the progression during recording."""
         # Deduplicate pitch classes, preserving lowest-first order.
         note_names = list(dict.fromkeys(
@@ -234,7 +232,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._mark_dirty()
         self.speak(chord_name_to_spoken(chord.name))
 
-    def _on_chord_preview(self, notes: list) -> None:
+    def _on_chord_preview(self, notes: list[int]) -> None:
         """Speak the recognized chord name when played outside recording."""
         note_names = list(dict.fromkeys(
             get_note_names_for_key(self.progression.key)[n % 12] for n in notes
@@ -742,10 +740,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
         """Delete section marks, repeat brackets, and N.C. at the current measure.
 
         Unlike delete_at_cursor, ignores any chord so structural marks can be
-        removed even when a chord occupies the same beat. Bound to Ctrl+Delete.
+        removed even when a chord occupies the same beat. Bound to Ctrl+Delete / Ctrl+Backspace.
         """
         m = self.cursor.measure
-        deleted: list = []
+        deleted: list[str] = []
         if self.progression.get_section_mark(m):
             self._push_undo()
             self.progression.remove_section_mark(m)

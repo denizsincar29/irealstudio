@@ -11,7 +11,6 @@ import wx
 import wx.adv
 
 from chords import ChordProgression, TimeSignature, Position
-from commands import RECORDING_MODE_OVERDUB, RECORDING_MODE_OVERWRITE
 from dialogs import (
     new_project_dialog, project_settings_dialog, insert_chord_dialog, prompt_input,
     BPM_MIN, BPM_MAX,
