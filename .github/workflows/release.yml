@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           uv run nuitka `
-            --onefile `
+            --mode=app `
             --output-filename=irealstudio.exe `
             --output-dir=dist `
             --windows-console-mode=disable `
@@ -93,7 +93,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           uv run nuitka \
-            --onefile \
+            --mode=app \
             --output-filename=irealstudio.bin \
             --output-dir=dist \
             --assume-yes-for-downloads \
