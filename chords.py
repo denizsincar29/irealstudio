@@ -257,12 +257,46 @@ class Chord:
             self._root_pc = -1
             self._ivals = frozenset()
 
+        # Always compute root_pc from the name when it wasn't set from notes.
+        # This ensures the property is O(1) and safe to call during playback.
+        if self._root_pc < 0:
+            for r in _ALL_ROOTS:
+                if name.startswith(r):
+                    self._root_pc = _NOTE_TO_PC[r]
+                    break
+
+        # Cache whether the chord is suspended (quality contains 'sus').
+        # Determined once from the name; property access is then O(1).
+        _root_str = ''
+        for r in _ALL_ROOTS:
+            if name.startswith(r):
+                _root_str = r
+                break
+        self._is_sus: bool = 'sus' in name[len(_root_str):]
+
     # ------------------------------------------------------------------
 
     @property
     def name(self) -> str:
         """The canonical chord name, e.g. 'Cmaj7', 'Am7'."""
         return self._name
+
+    @property
+    def root_pc(self) -> int:
+        """Pitch class of the root note (0=C … 11=B), or -1 if unknown.
+
+        Parsed once from the chord name at construction time; O(1) access.
+        Examples: 'Cmaj7' → 0, 'F#m' → 6, 'Bb7' → 10.
+        """
+        return self._root_pc
+
+    @property
+    def is_sus(self) -> bool:
+        """True when the chord quality contains 'sus' (suspended chord).
+
+        Computed once from the chord name at construction time; O(1) access.
+        """
+        return self._is_sus
 
     def __str__(self) -> str:
         return self._name

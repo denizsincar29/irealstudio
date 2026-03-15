@@ -41,7 +41,7 @@ from app_settings import (
     DEFAULT_BPM, DEFAULT_TITLE, DEFAULT_KEY, DEFAULT_STYLE, DEFAULT_TIME_SIG, SAVE_FILE,
     _load_app_settings, _save_settings_file,
     MIDI_METRO_ON_NOTE, MIDI_METRO_OFF_NOTE, MIDI_METRO_VELOCITY, MIDI_METRO_CHANNEL,
-    MIDI_METRO_DURATION_MS,
+    MIDI_METRO_DURATION_MS, MIDI_METRO_SMART,
 )
 from app_menu import MenuMixin
 from app_keys import KeysMixin
@@ -388,6 +388,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self.midi_metro_velocity: int = MIDI_METRO_VELOCITY
         self.midi_metro_channel: int = MIDI_METRO_CHANNEL
         self.midi_metro_duration_ms: int = MIDI_METRO_DURATION_MS
+        # Chord-aware smart metronome: fifth/fourth on downbeat, root on upbeat
+        self.midi_metro_smart: bool = MIDI_METRO_SMART
 
         # Unsaved-changes tracking
         self._is_dirty: bool = False
@@ -430,6 +432,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._midi_out_menu = None
         self._sound_out_menu = None
         self._midi_metro_toggle_item = None
+        self._midi_metro_smart_item = None
         self._chord_grid: ChordGridPanel | None = None
         # Cached state tuple used to detect changes before refreshing the chord grid.
         # Compared in _schedule_display_update; Refresh() is called only on change.
@@ -529,7 +532,55 @@ class App(MenuMixin, KeysMixin, IOMixin):
             return
         self.toggle_no_chord()
 
-    def _midi_metro_beat(self, is_downbeat: bool) -> None:
+    # ------------------------------------------------------------------
+    # Smart-metronome note helper
+    # ------------------------------------------------------------------
+
+    # MIDI note range for the smart metronome: C6 (84) to G7 (103).
+    _SMART_METRO_MIN: int = 84   # C6
+    _SMART_METRO_MAX: int = 103  # G7
+
+    @staticmethod
+    def _smart_metro_note(chord: Chord, is_downbeat: bool, note_min: int, note_max: int) -> int | None:
+        """Select a chord-aware metronome note.
+
+        Parameters
+        ----------
+        chord:
+            A ``Chord`` instance from the current ``ProgressionItem``.
+        is_downbeat:
+            When *True*, returns the perfect fifth of the root (or the
+            perfect fourth for suspended chords).  When *False*, returns the
+            root note.
+        note_min, note_max:
+            Inclusive MIDI note range to constrain the result to.
+
+        Returns
+        -------
+        int or None
+            MIDI note number in ``[note_min, note_max]``, or ``None`` when the
+            chord has no parseable root (should be rare in practice).
+        """
+        root_pc = chord.root_pc
+        if root_pc < 0:
+            return None
+        if is_downbeat:
+            # Suspended chord → perfect fourth (5 semitones above root).
+            # All other chords → perfect fifth (7 semitones above root).
+            interval = 5 if chord.is_sus else 7
+            target_pc = (root_pc + interval) % 12
+        else:
+            target_pc = root_pc
+        # Find the nearest MIDI note with *target_pc* in [note_min, note_max].
+        # Start at the lowest octave ≥ note_min.
+        note = note_min - ((note_min - target_pc) % 12)
+        if note < note_min:
+            note += 12
+        if note > note_max:
+            return None
+        return note
+
+    def _midi_metro_beat(self, is_downbeat: bool, chords: "list | None" = None) -> None:
         """MIDI metronome callback — fires on every beat from Recorder.
 
         This method is passed as the *on_beat* callback to the Recorder, which
@@ -541,6 +592,12 @@ class App(MenuMixin, KeysMixin, IOMixin):
         When ``midi_metro_enabled`` is ``True`` and a MIDI output port is open,
         sends a short note-on/note-off pair on the configured percussion channel
         so external MIDI devices or a DAW can play the metronome sound.
+
+        When ``midi_metro_smart`` is also ``True`` *and* chord data is available
+        (i.e. during playback), note selection is chord-aware: the perfect fifth
+        of the current chord root (or fourth for sus chords) on the downbeat, and
+        the root note on upbeats, constrained to C6–G7 (MIDI 84–103).
+
         Otherwise (MIDI disabled, no output port, or any send error) the method
         plays the built-in audio tick/tock so timing feedback is never silent.
         """
@@ -549,7 +606,15 @@ class App(MenuMixin, KeysMixin, IOMixin):
             from sound import play_sound
             play_sound(self._recorder.tick_sound if is_downbeat else self._recorder.tock_sound)
             return
-        note = self.midi_metro_on_note if is_downbeat else self.midi_metro_off_note
+        # Determine which note to play.
+        note: int | None = None
+        if self.midi_metro_smart and chords:
+            note = self._smart_metro_note(
+                chords[0].chord, is_downbeat,
+                self._SMART_METRO_MIN, self._SMART_METRO_MAX,
+            )
+        if note is None:
+            note = self.midi_metro_on_note if is_downbeat else self.midi_metro_off_note
         try:
             import mido
             ch = max(0, min(15, self.midi_metro_channel))
@@ -777,6 +842,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.midi_metro_channel = int(settings['midi_metro_channel'])
         if 'midi_metro_duration_ms' in settings:
             self.midi_metro_duration_ms = max(10, min(2000, int(settings['midi_metro_duration_ms'])))
+        if 'midi_metro_smart' in settings:
+            self.midi_metro_smart = bool(settings['midi_metro_smart'])
 
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
@@ -799,6 +866,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_metro_velocity': self.midi_metro_velocity,
             'midi_metro_channel': self.midi_metro_channel,
             'midi_metro_duration_ms': self.midi_metro_duration_ms,
+            'midi_metro_smart': self.midi_metro_smart,
         }
         _save_settings_file(settings)
 

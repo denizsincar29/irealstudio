@@ -35,6 +35,7 @@ MIDI_METRO_OFF_NOTE: int = 84   # C6 — upbeat
 MIDI_METRO_VELOCITY: int = 48
 MIDI_METRO_CHANNEL: int = 0     # channel 1 (0-indexed) — melodic (not percussion)
 MIDI_METRO_DURATION_MS: int = 100  # note-on duration in milliseconds
+MIDI_METRO_SMART: bool = True   # chord-aware smart metronome mode enabled by default
 
 
 def _get_settings_path() -> Path:

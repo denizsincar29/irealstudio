@@ -29,7 +29,7 @@ class Recorder:
         tick_sound: np.ndarray,
         tock_sound: np.ndarray,
         on_playback_chord: Callable[[str], None] | None = None,
-        on_beat: Callable[[bool], None] | None = None,
+        on_beat: "Callable[[bool, list | None], None] | None" = None,
     ) -> None:
         """
         Parameters
@@ -70,16 +70,24 @@ class Recorder:
         # query the offset since the last beat fired.
         self._last_beat_time: float | None = None
 
-    def _click(self, is_downbeat: bool) -> None:
+    def _click(self, is_downbeat: bool, chords: "list | None" = None) -> None:
         """Fire a metronome click for one beat.
 
         If an *on_beat* callback was provided at construction time it is called
         instead of the built-in audio beep so the caller can drive a MIDI
         metronome.  Otherwise the appropriate audio sample is played.
+
+        Parameters
+        ----------
+        is_downbeat:
+            True when this beat is beat 1 (downbeat), False otherwise.
+        chords:
+            List of ``ProgressionItem`` objects at the current position, or
+            ``None`` when no chord data is available (precount / recording).
         """
         if self._on_beat is not None:
             try:
-                self._on_beat(is_downbeat)
+                self._on_beat(is_downbeat, chords)
                 return
             except Exception:
                 _logger.error("on_beat callback raised — falling back to audio", exc_info=True)
@@ -309,7 +317,9 @@ class Recorder:
                     except Exception:
                         _logger.error("on_playback_chord callback raised", exc_info=True)
 
-            self._click(cur.beat == 1)
+            # Pass current chord list so the on_beat callback can apply
+            # chord-aware note selection (smart metronome mode).
+            self._click(cur.beat == 1, chords_here if chords_here else None)
 
             self.playback_stopped_at = Position(
                 cur.measure, cur.beat, progression.time_signature
