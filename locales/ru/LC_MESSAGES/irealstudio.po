@@ -7,7 +7,20 @@ msgstr ""
 "Language: ru\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-# --- startup / status ---
+# --- startup ---
+msgid "Loaded {title}"
+msgstr "Загружено: {title}"
+
+msgid "Could not load {name}: {e}"
+msgstr "Не удалось загрузить {name}: {e}"
+
+msgid "IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."
+msgstr "IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла."
+
+msgid "IReal Studio ready. {title}. Press R to record."
+msgstr "IReal Studio готов. {title}. Нажмите R для записи."
+
+# --- QR code ---
 msgid "QR code export requires the qrcode package (uv add qrcode)"
 msgstr "Для экспорта QR-кода требуется пакет qrcode (uv add qrcode)"
 
@@ -17,9 +30,100 @@ msgstr "Ошибка генерации QR-кода: {e}"
 msgid "QR code ready but no window to display it"
 msgstr "QR-код готов, но нет окна для отображения"
 
+msgid "QR Code – {title}"
+msgstr "QR-код – {title}"
+
 # --- keyboard shortcuts dialog ---
 msgid "Keyboard Shortcuts – IReal Studio"
 msgstr "Горячие клавиши – IReal Studio"
+
+msgid ""
+"Keyboard Shortcuts – IReal Studio\n"
+"==================================\n"
+"\n"
+"Navigation\n"
+"  Left / Right          Move cursor one chord\n"
+"  Alt+Left / Alt+Right  Move cursor one beat\n"
+"  Ctrl+Left / Ctrl+Right  Move cursor one measure\n"
+"  Ctrl+Home / Ctrl+End  Go to beginning / end\n"
+"  Shift+Left / Right    Extend selection\n"
+"\n"
+"Playback & Recording\n"
+"  R                     Start / stop recording\n"
+"  Space                 Play / stop\n"
+"  Ctrl+Space            Stop and jump to last position\n"
+"  Escape                Stop recording or playback\n"
+"\n"
+"Editing\n"
+"  Delete / Backspace          Delete chord at cursor\n"
+"  Ctrl+Delete / Ctrl+Backspace  Delete structural mark at cursor\n"
+"                               (section mark, repeat bracket, N.C.)\n"
+"  Ctrl+Z / Ctrl+Y       Undo / Redo\n"
+"  Ctrl+X / Ctrl+C / Ctrl+V  Cut / Copy / Paste chord\n"
+"  Ctrl+Return           Insert chord (dialog)\n"
+"  N                     Toggle No Chord (N.C.)\n"
+"\n"
+"Section Marks (Ctrl+Shift+letter)\n"
+"  Ctrl+Shift+A/B/C/D    Section A / B / C / D\n"
+"  Ctrl+Shift+V          Verse\n"
+"  Ctrl+Shift+I          Intro\n"
+"\n"
+"Other\n"
+"  V                     Add volta / ending bracket\n"
+"  / + (A–G)             Add bass note (slash chord)\n"
+"  P                     Speak full position\n"
+"  D                     Beat offset (debug)\n"
+"  Ctrl+N                New project\n"
+"  Ctrl+O                Open file\n"
+"  Ctrl+S                Save\n"
+"  Ctrl+E                Export to iReal Pro\n"
+"  Ctrl+Shift+E          Show QR code\n"
+"  Ctrl+L                Speak recent log entries\n"
+"  F1                    Keyboard shortcuts\n"
+"  Ctrl+Q                Quit\n"
+msgstr ""
+"Горячие клавиши – IReal Studio\n"
+"================================\n"
+"\n"
+"Навигация\n"
+"  Left / Right              Перемещение на один аккорд\n"
+"  Alt+Left / Alt+Right      Перемещение на одну долю\n"
+"  Ctrl+Left / Ctrl+Right    Перемещение на один такт\n"
+"  Ctrl+Home / Ctrl+End      В начало / в конец\n"
+"  Shift+Left / Right        Расширить выделение\n"
+"\n"
+"Воспроизведение и запись\n"
+"  R                         Начать / остановить запись\n"
+"  Space                     Воспроизвести / остановить\n"
+"  Ctrl+Space                Стоп и перейти к последней позиции\n"
+"  Escape                    Остановить запись или воспроизведение\n"
+"\n"
+"Редактирование\n"
+"  Delete / Backspace              Удалить аккорд под курсором\n"
+"  Ctrl+Delete / Ctrl+Backspace    Удалить структурную метку (раздел, повтор, N.C.)\n"
+"  Ctrl+Z / Ctrl+Y           Отменить / Повторить\n"
+"  Ctrl+X / Ctrl+C / Ctrl+V  Вырезать / Скопировать / Вставить аккорд\n"
+"  Ctrl+Return               Вставить аккорд (диалог)\n"
+"  N                         Переключить N.C. (нет аккорда)\n"
+"\n"
+"Метки разделов (Ctrl+Shift+буква)\n"
+"  Ctrl+Shift+A/B/C/D        Раздел A / B / C / D\n"
+"  Ctrl+Shift+V              Куплет\n"
+"  Ctrl+Shift+I              Вступление\n"
+"\n"
+"Прочее\n"
+"  V                         Добавить вольту / окончание\n"
+"  / + (A–G)                 Добавить бас-ноту (слэш-аккорд)\n"
+"  P                         Озвучить полную позицию\n"
+"  D                         Смещение по доле (отладка)\n"
+"  Ctrl+N                    Новый проект\n"
+"  Ctrl+O                    Открыть файл\n"
+"  Ctrl+S                    Сохранить\n"
+"  Ctrl+E                    Экспорт в iReal Pro\n"
+"  Ctrl+Shift+E              Показать QR-код\n"
+"  Ctrl+L                    Прочитать последние записи журнала\n"
+"  F1                        Горячие клавиши\n"
+"  Ctrl+Q                    Выход\n"
 
 msgid "Keyboard shortcuts dialog opened. Press OK to close."
 msgstr "Диалог горячих клавиш открыт. Нажмите OK для закрытия."
@@ -48,6 +152,15 @@ msgstr "Повторено"
 msgid "No chord at cursor"
 msgstr "Нет аккорда под курсором"
 
+msgid "Copied {name}"
+msgstr "Скопировано: {name}"
+
+msgid "Cut {name}"
+msgstr "Вырезано: {name}"
+
+msgid "Pasted {name}"
+msgstr "Вставлено: {name}"
+
 msgid "Clipboard is empty"
 msgstr "Буфер обмена пуст"
 
@@ -69,6 +182,52 @@ msgstr "Удалено: {items} в такте {m}"
 
 msgid "Nothing to delete at measure {m} beat {b}"
 msgstr "Нечего удалять в такте {m} доле {b}"
+
+msgid "N.C. removed at measure {m}"
+msgstr "N.C. убрано в такте {m}"
+
+msgid "N.C. at measure {m}"
+msgstr "N.C. в такте {m}"
+
+# --- selection ---
+msgid "{n} chord selected"
+msgid_plural "{n} chords selected"
+msgstr[0] "Выделен {n} аккорд"
+msgstr[1] "Выделено {n} аккорда"
+msgstr[2] "Выделено {n} аккордов"
+
+msgid "No chords to select"
+msgstr "Нет аккордов для выделения"
+
+msgid "All {n} chord selected"
+msgid_plural "All {n} chords selected"
+msgstr[0] "Выделен всего {n} аккорд"
+msgstr[1] "Выделено всего {n} аккорда"
+msgstr[2] "Выделено всего {n} аккордов"
+
+msgid "No chords selected"
+msgstr "Нет выделенных аккордов"
+
+msgid "No chords in selection"
+msgstr "В выделении нет аккордов"
+
+msgid "Cut {n} chord"
+msgid_plural "Cut {n} chords"
+msgstr[0] "Вырезан {n} аккорд"
+msgstr[1] "Вырезано {n} аккорда"
+msgstr[2] "Вырезано {n} аккордов"
+
+msgid "Deleted {n} chord"
+msgid_plural "Deleted {n} chords"
+msgstr[0] "Удалён {n} аккорд"
+msgstr[1] "Удалено {n} аккорда"
+msgstr[2] "Удалено {n} аккордов"
+
+msgid "{n} chord"
+msgid_plural "{n} chords"
+msgstr[0] "{n} аккорд"
+msgstr[1] "{n} аккорда"
+msgstr[2] "{n} аккордов"
 
 # --- section marks ---
 msgid "Section A"
@@ -93,6 +252,12 @@ msgid "{section} at measure {m}"
 msgstr "{section} в такте {m}"
 
 # --- bass note ---
+msgid "Bass Note"
+msgstr "Бас-нота"
+
+msgid "Enter bass note (e.g. E, Bb):"
+msgstr "Введите бас-ноту (напр. E, Bb):"
+
 msgid "Invalid note"
 msgstr "Неверная нота"
 
@@ -113,18 +278,70 @@ msgstr[2] " (удалено {n} скрытых аккордов)"
 msgid "Stopped"
 msgstr "Остановлено"
 
+msgid "Already active"
+msgstr "Уже активно"
+
 msgid "Beat offset {offset:.0f} milliseconds"
 msgstr "Смещение по доле: {offset:.0f} мс"
 
+msgid "Recording mode: {mode}"
+msgstr "Режим записи: {mode}"
+
+msgid "overdub"
+msgstr "наложение"
+
+msgid "overwrite"
+msgstr "перезапись"
+
+msgid "whole measure"
+msgstr "весь такт"
+
+msgid "stop at last chord"
+msgstr "до последнего аккорда"
+
+msgid "Overwrite: {label}"
+msgstr "Перезапись: {label}"
+
 # --- file operations ---
+msgid "Save progression"
+msgstr "Сохранить прогрессию"
+
+msgid "IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*"
+msgstr "Файлы IReal Studio (*.ips)|*.ips|Все файлы (*.*)|*.*"
+
+msgid "Save failed: {e}"
+msgstr "Ошибка сохранения: {e}"
+
+msgid "Saved to {name}"
+msgstr "Сохранено в {name}"
+
+msgid "Open progression"
+msgstr "Открыть прогрессию"
+
+msgid "Opened {title}"
+msgstr "Открыто: {title}"
+
+msgid "Open failed: {e}"
+msgstr "Ошибка открытия: {e}"
+
 msgid "Export failed: {e}"
 msgstr "Ошибка экспорта: {e}"
 
-msgid "Saved to {path}"
-msgstr "Сохранено в {path}"
+msgid "Export iReal Pro HTML"
+msgstr "Экспорт в HTML для iReal Pro"
 
-msgid "Open"
-msgstr "Открыть"
+msgid "HTML files (*.html)|*.html|All files (*.*)|*.*"
+msgstr "HTML-файлы (*.html)|*.html|Все файлы (*.*)|*.*"
+
+msgid "Exported to {name}"
+msgstr "Экспортировано в {name}"
+
+# --- updates ---
+msgid "A new version of IReal Studio is available: {tag}\n\nOpen the download page?"
+msgstr "Доступна новая версия IReal Studio: {tag}\n\nОткрыть страницу загрузки?"
+
+msgid "Update Available"
+msgstr "Доступно обновление"
 
 # --- devices ---
 msgid "MIDI devices refreshed"
@@ -136,11 +353,38 @@ msgstr "MIDI-вход: {name}"
 msgid "No MIDI input device"
 msgstr "Нет MIDI-устройства ввода"
 
+msgid "No MIDI devices found"
+msgstr "MIDI-устройства не найдены"
+
 msgid "MIDI output: {name}"
 msgstr "MIDI-выход: {name}"
 
 msgid "No MIDI output device"
 msgstr "Нет MIDI-устройства вывода"
+
+msgid "No MIDI output devices found"
+msgstr "MIDI-устройства вывода не найдены"
+
+msgid "MIDI output devices refreshed"
+msgstr "MIDI-устройства вывода обновлены"
+
+msgid "No audio output devices found"
+msgstr "Аудиоустройства вывода не найдены"
+
+msgid "Sound output devices refreshed"
+msgstr "Аудиоустройства вывода обновлены"
+
+msgid "System default"
+msgstr "Системное по умолчанию"
+
+msgid "Sound output: system default"
+msgstr "Аудиовыход: системное по умолчанию"
+
+msgid "Sound output: {name}"
+msgstr "Аудиовыход: {name}"
+
+msgid "Could not open: {name}"
+msgstr "Не удалось открыть: {name}"
 
 # --- positions ---
 msgid "bar {m} beat {b}"
@@ -156,29 +400,255 @@ msgstr "окончание 2"
 msgid "Log is empty"
 msgstr "Журнал пуст"
 
-# --- startup ---
-msgid "IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."
-msgstr "IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла."
+# --- project ---
+msgid "Settings updated: {title}"
+msgstr "Настройки обновлены: {title}"
 
-msgid "IReal Studio ready. {title}. Press R to record."
-msgstr "IReal Studio готов. {title}. Нажмите R для записи."
+msgid "Inserted {name}"
+msgstr "Вставлен аккорд: {name}"
 
-# --- language dialog ---
-msgid "Select language:"
-msgstr "Выберите язык:"
-
-msgid "Language"
-msgstr "Язык"
-
-msgid "Language changed. Please restart IReal Studio for full effect."
-msgstr "Язык изменён. Перезапустите IReal Studio для полного применения."
-
-# --- new project ---
+# --- new / close project ---
 msgid "'{title}' has unsaved changes.\n\nSave before creating a new project?"
 msgstr "'{title}' содержит несохранённые изменения.\n\nСохранить перед созданием нового проекта?"
+
+msgid "'{title}' has unsaved changes.\n\nSave before closing?"
+msgstr "'{title}' содержит несохранённые изменения.\n\nСохранить перед закрытием?"
 
 msgid "Unsaved Changes"
 msgstr "Несохранённые изменения"
 
+msgid "Error"
+msgstr "Ошибка"
+
 msgid "New project: {title}"
 msgstr "Новый проект: {title}"
+
+# --- status display labels ---
+msgid "Title"
+msgstr "Название"
+
+msgid "Key"
+msgstr "Тональность"
+
+msgid "Rec BPM"
+msgstr "BPM записи"
+
+msgid "[unsaved]"
+msgstr "[не сохранено]"
+
+msgid "Cursor"
+msgstr "Курсор"
+
+msgid "Measure"
+msgstr "Такт"
+
+msgid "Beat"
+msgstr "Доля"
+
+msgid "State"
+msgstr "Состояние"
+
+msgid "Chords"
+msgstr "Аккорды"
+
+msgid "Measures"
+msgstr "Тактов"
+
+msgid "Here"
+msgstr "Здесь"
+
+msgid "idle"
+msgstr "ожидание"
+
+msgid "precount"
+msgstr "предотсчёт"
+
+msgid "recording"
+msgstr "запись"
+
+msgid "playing"
+msgstr "воспроизведение"
+
+msgid "whole"
+msgstr "весь"
+
+# --- language ---
+msgid "Language changed. Please restart IReal Studio for full effect."
+msgstr "Язык изменён. Перезапустите IReal Studio для полного применения."
+
+msgid "&Language"
+msgstr "&Язык"
+
+# --- UI labels (OK button) ---
+msgid "OK"
+msgstr "ОК"
+
+# --- dialogs ---
+msgid "New Project"
+msgstr "Новый проект"
+
+msgid "Project Settings"
+msgstr "Настройки проекта"
+
+msgid "Insert Chord"
+msgstr "Вставить аккорд"
+
+msgid "Title:"
+msgstr "Название:"
+
+msgid "Composer:"
+msgstr "Композитор:"
+
+msgid "BPM:"
+msgstr "BPM:"
+
+msgid "Recording BPM:"
+msgstr "BPM записи:"
+
+msgid "Time Signature:"
+msgstr "Размер:"
+
+msgid "Key:"
+msgstr "Тональность:"
+
+msgid "Style:"
+msgstr "Стиль:"
+
+msgid "Chord:"
+msgstr "Аккорд:"
+
+msgid "Root:"
+msgstr "Основа:"
+
+msgid "Quality:"
+msgstr "Тип:"
+
+msgid "Type a chord name directly, or choose root/quality above."
+msgstr "Введите название аккорда или выберите основу и тип выше."
+
+# --- menu items ---
+msgid "&New Project"
+msgstr "&Новый проект"
+
+msgid "&Open..."
+msgstr "&Открыть..."
+
+msgid "&Save"
+msgstr "&Сохранить"
+
+msgid "Save &As..."
+msgstr "Сохранить &как..."
+
+msgid "&Export to iReal Pro"
+msgstr "&Экспорт в iReal Pro"
+
+msgid "Export &QR Code"
+msgstr "Экспорт &QR-кода"
+
+msgid "&Quit"
+msgstr "В&ыход"
+
+msgid "&File"
+msgstr "&Файл"
+
+msgid "&Undo"
+msgstr "&Отменить"
+
+msgid "&Redo"
+msgstr "&Повторить"
+
+msgid "Cu&t"
+msgstr "Выр&езать"
+
+msgid "&Copy"
+msgstr "&Копировать"
+
+msgid "&Paste"
+msgstr "&Вставить"
+
+msgid "&Edit"
+msgstr "&Правка"
+
+msgid "&Add Chord..."
+msgstr "&Добавить аккорд..."
+
+msgid "&Section Mark"
+msgstr "&Метка раздела"
+
+msgid "&A (Section A)"
+msgstr "&A (Раздел A)"
+
+msgid "&B (Section B)"
+msgstr "&B (Раздел B)"
+
+msgid "&C (Section C)"
+msgstr "&C (Раздел C)"
+
+msgid "&D (Section D)"
+msgstr "&D (Раздел D)"
+
+msgid "&Verse"
+msgstr "&Куплет"
+
+msgid "&Intro"
+msgstr "&Вступление"
+
+msgid "&Volta / Ending"
+msgstr "&Вольта / Окончание"
+
+msgid "&No Chord (N.C.)"
+msgstr "&Нет аккорда (N.C.)"
+
+msgid "&Bass Note..."
+msgstr "&Бас-нота..."
+
+msgid "&Insert"
+msgstr "&Вставка"
+
+msgid "&Record"
+msgstr "&Запись"
+
+msgid "&Play"
+msgstr "&Воспроизведение"
+
+msgid "&Stop"
+msgstr "&Стоп"
+
+msgid "&Overdub mode"
+msgstr "&Режим наложения"
+
+msgid "O&verwrite mode"
+msgstr "Режим &перезаписи"
+
+msgid "Overwrite: &Whole measure"
+msgstr "Перезапись: &Весь такт"
+
+msgid "&Project Settings..."
+msgstr "&Настройки проекта..."
+
+msgid "MIDI &Input Device"
+msgstr "MIDI &Вход"
+
+msgid "MIDI &Output Device"
+msgstr "MIDI &Выход"
+
+msgid "&Sound Output"
+msgstr "&Аудиовыход"
+
+msgid "&Refresh devices"
+msgstr "&Обновить устройства"
+
+msgid "Check for &Updates..."
+msgstr "Проверить &обновления..."
+
+msgid "&Settings"
+msgstr "&Настройки"
+
+msgid "&Keyboard Shortcuts"
+msgstr "&Горячие клавиши"
+
+msgid "&About IReal Studio"
+msgstr "&О программе IReal Studio"
+
+msgid "&Help"
+msgstr "&Справка"

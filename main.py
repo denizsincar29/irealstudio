@@ -65,10 +65,10 @@ from sound import make_beep, get_output_devices, set_output_device, get_current_
 from midi_handler import MidiHandler
 from recorder import Recorder, AppState
 from dialogs import (
-    prompt_input, prompt_bpm, new_project_dialog, project_settings_dialog,
+    prompt_input, new_project_dialog, project_settings_dialog,
     insert_chord_dialog, BPM_MIN, BPM_MAX,
 )
-from i18n import _, set_language, get_language
+from i18n import _, set_language, get_language, ngettext
 
 # ---------------------------------------------------------------------------
 # Menu command IDs (used as wx.MenuItem IDs for direct EVT_MENU dispatch)
@@ -89,7 +89,8 @@ _CMD_SOUND_OUT_NONE     = 2006
 _CMD_SOUND_OUT_DEFAULT  = 2007  # "System default" audio device
 _CMD_SETTINGS_PROJECT   = 3008  # "Project Settings…" (all-in-one dialog)
 _CMD_SETTINGS_UPDATE    = 3009  # "Check for Updates…"
-_CMD_SETTINGS_LANGUAGE  = 3010  # "Language…"
+_LANG_BASE              = 3100  # IDs 3100..3199 → language indices 0..99
+_LANGUAGES              = [('en', 'English'), ('ru', 'Русский')]
 _CMD_EDIT_UNDO          = 4001
 _CMD_EDIT_REDO          = 4002
 _CMD_EDIT_CUT           = 4003
@@ -310,9 +311,9 @@ class App:
                         self.progression = ChordProgression.from_json(f.read())
                     self._apply_loaded_progression(cli_path)
                     self._loaded_at_startup = True
-                    self.speak(f"Loaded {self.progression.title}")
+                    self.speak(_("Loaded {title}").format(title=self.progression.title))
                 except Exception as e:
-                    self.speak(f"Could not load {cli_path.name}: {e}")
+                    self.speak(_("Could not load {name}: {e}").format(name=cli_path.name, e=e))
         # Auto-load the last saved project file so the user's work is restored.
         elif Path(SAVE_FILE).exists():
             try:
@@ -320,9 +321,9 @@ class App:
                     self.progression = ChordProgression.from_json(f.read())
                 self._apply_loaded_progression(Path(SAVE_FILE))
                 self._loaded_at_startup = True
-                self.speak(f"Loaded {self.progression.title}")
+                self.speak(_("Loaded {title}").format(title=self.progression.title))
             except Exception as e:
-                self.speak(f"Could not load {SAVE_FILE}: {e}")
+                self.speak(_("Could not load {name}: {e}").format(name=SAVE_FILE, e=e))
 
     # ------------------------------------------------------------------
     # Progression loading helpers
@@ -448,7 +449,7 @@ class App:
         chords = self.progression.find_chords_at_position(self.cursor)
         if chords:
             self._clipboard = chords[0].chord.name
-            self.speak(f"Copied {chords[0].chord.name}")
+            self.speak(_("Copied {name}").format(name=chords[0].chord.name))
         else:
             self.speak(_("No chord at cursor"))
 
@@ -459,7 +460,7 @@ class App:
             self._push_undo()
             self.progression.delete_chord_at(self.cursor)
             self._mark_dirty()
-            self.speak(f"Cut {self._clipboard}")
+            self.speak(_("Cut {name}").format(name=self._clipboard))
         else:
             self.speak(_("No chord at cursor"))
 
@@ -473,7 +474,7 @@ class App:
             self.cursor.measure, self.cursor.beat,
         )
         self._mark_dirty()
-        self.speak(f"Pasted {self._clipboard}")
+        self.speak(_("Pasted {name}").format(name=self._clipboard))
 
     # ------------------------------------------------------------------
     # No-chord insertion
@@ -486,12 +487,12 @@ class App:
             self._push_undo()
             self.progression.remove_no_chord(m)
             self._mark_dirty()
-            self.speak(f"N.C. removed at measure {m}")
+            self.speak(_("N.C. removed at measure {m}").format(m=m))
         else:
             self._push_undo()
             self.progression.add_no_chord(m)
             self._mark_dirty()
-            self.speak(f"N.C. at measure {m}")
+            self.speak(_("N.C. at measure {m}").format(m=m))
 
     # ------------------------------------------------------------------
     # Overwrite mode helpers
@@ -578,7 +579,7 @@ class App:
                     item.Check(True)
         else:
             placeholder = wx.MenuItem(self._midi_menu, _CMD_MIDI_NONE,
-                                      "No MIDI devices found")
+                                      _("No MIDI devices found"))
             self._midi_menu.Insert(0, placeholder)
             placeholder.Enable(False)
 
@@ -668,12 +669,12 @@ class App:
     def _notify_update_available(self, tag: str, url: str) -> None:
         """Show a non-blocking update notification in the wx main thread."""
         import webbrowser as _wb
-        msg = (
-            f"A new version of IReal Studio is available: {tag}\n\n"
+        msg = _(
+            "A new version of IReal Studio is available: {tag}\n\n"
             "Open the download page?"
-        )
+        ).format(tag=tag)
         dlg = wx.MessageDialog(
-            self._frame, msg, "Update Available",
+            self._frame, msg, _("Update Available"),
             wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION,
         )
         if dlg.ShowModal() == wx.ID_YES:
@@ -711,7 +712,7 @@ class App:
         chords_here = self.progression.find_chords_at_position(self.cursor)
         chord_part = chords_here[0].chord_name_spoken() if chords_here else ""
         n = len(chords_sel)
-        count_part = f"{n} chord{'s' if n != 1 else ''} selected"
+        count_part = ngettext("{n} chord selected", "{n} chords selected", n).format(n=n)
         self.speak(f"{chord_part} {count_part}".strip())
 
     def _selected_range(self) -> tuple[Position, Position] | None:
@@ -735,28 +736,28 @@ class App:
         """Select all chords in the progression."""
         items = self.progression.items
         if not items:
-            self.speak("No chords to select")
+            self.speak(_("No chords to select"))
             return
         self._sel_anchor = items[0].position
         self._sel_active = items[-1].position
         self.cursor = self._sel_active
         n = len(items)
-        self.speak(f"All {n} chord{'s' if n != 1 else ''} selected")
+        self.speak(ngettext("All {n} chord selected", "All {n} chords selected", n).format(n=n))
 
     def _copy_selection(self) -> None:
         """Copy the first chord of the selection to the clipboard."""
         chords = self._chords_in_selection()
         if not chords:
-            self.speak("No chords selected")
+            self.speak(_("No chords selected"))
             return
         self._clipboard = chords[0].chord.name
-        self.speak(f"Copied {chords[0].chord_name_spoken()}")
+        self.speak(_("Copied {name}").format(name=chords[0].chord_name_spoken()))
 
     def _cut_selection(self) -> None:
         """Cut all selected chords."""
         chords = self._chords_in_selection()
         if not chords:
-            self.speak("No chords selected")
+            self.speak(_("No chords selected"))
             return
         self._clipboard = chords[0].chord.name
         self._push_undo()
@@ -765,14 +766,14 @@ class App:
         self._mark_dirty()
         self._clear_selection()
         n = len(chords)
-        self.speak(f"Cut {n} chord{'s' if n != 1 else ''}")
+        self.speak(ngettext("Cut {n} chord", "Cut {n} chords", n).format(n=n))
 
     def _delete_selection(self) -> None:
         """Delete all chords in the current selection."""
         chords = self._chords_in_selection()
         if not chords:
             self._clear_selection()
-            self.speak("No chords in selection")
+            self.speak(_("No chords in selection"))
             return
         # Land on the chord just before the selection start
         anchor = self._sel_anchor
@@ -791,7 +792,7 @@ class App:
         else:
             self.cursor = Position(1, 1, self.progression.time_signature)
         n = len(chords)
-        self.speak(f"Deleted {n} chord{'s' if n != 1 else ''}")
+        self.speak(ngettext("Deleted {n} chord", "Deleted {n} chords", n).format(n=n))
         self._announce_position()
 
     def navigate(self, direction: str, by_measure: bool = False, by_beat: bool = False) -> None:
@@ -861,10 +862,14 @@ class App:
         )
         self._announce_position(announce_section=True)
 
-    _SECTION_MARK_NAMES: dict[str, str] = {
-        '*A': 'Section A', '*B': 'Section B', '*C': 'Section C',
-        '*D': 'Section D', '*V': 'Verse', '*i': 'Intro',
-    }
+
+    def _section_name(self, mark: str) -> str:
+        """Return the translated display name for a section mark."""
+        names: dict[str, str] = {
+            '*A': _('Section A'), '*B': _('Section B'), '*C': _('Section C'),
+            '*D': _('Section D'), '*V': _('Verse'), '*i': _('Intro'),
+        }
+        return names.get(mark, mark)
 
     def _announce_position(self, announce_section: bool = False) -> None:
         """Speak a brief position: optional section name, chord (if any), 'bar N beat M'."""
@@ -872,11 +877,11 @@ class App:
         if announce_section:
             sm = self.progression.get_section_at_measure(self.cursor.measure)
             if sm:
-                parts.append(self._SECTION_MARK_NAMES.get(sm, sm))
+                parts.append(self._section_name(sm))
         chords_here = self.progression.find_chords_at_position(self.cursor)
         if chords_here:
             parts.append(chords_here[0].chord_name_spoken())
-        parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
+        parts.append(_("bar {m} beat {b}").format(m=self.cursor.measure, b=self.cursor.beat))
         self.speak(" ".join(parts))
 
     def _announce_position_verbose(self) -> None:
@@ -884,16 +889,16 @@ class App:
         parts: list[str] = []
         sm = self.progression.get_section_mark(self.cursor.measure)
         if sm:
-            parts.append(self._SECTION_MARK_NAMES.get(sm, sm))
+            parts.append(self._section_name(sm))
         for vb in self.progression.volta_brackets:
             if self.cursor.measure == vb.ending1_start:
-                parts.append("ending 1")
+                parts.append(_("ending 1"))
             elif vb.is_complete() and self.cursor.measure == vb.ending2_start:
-                parts.append("ending 2")
+                parts.append(_("ending 2"))
         chords_here = self.progression.find_chords_at_position(self.cursor)
         if chords_here:
             parts.append(chords_here[0].chord_name_spoken())
-        parts.append(f"bar {self.cursor.measure} beat {self.cursor.beat}")
+        parts.append(_("bar {m} beat {b}").format(m=self.cursor.measure, b=self.cursor.beat))
         self.speak(" ".join(parts))
 
     # ------------------------------------------------------------------
@@ -906,12 +911,8 @@ class App:
             self._push_undo()
             self.progression.add_section_mark(self.cursor.measure, mark)
             self._mark_dirty()
-            names = {
-                '*A': _('Section A'), '*B': _('Section B'), '*C': _('Section C'),
-                '*D': _('Section D'), '*V': _('Verse'), '*i': _('Intro'),
-            }
             self.speak(_("{section} at measure {m}").format(
-                section=names.get(mark, mark), m=self.cursor.measure))
+                section=self._section_name(mark), m=self.cursor.measure))
 
     def add_bass_note(self, letter: str) -> None:
         note = letter.upper()
@@ -1050,9 +1051,9 @@ class App:
         if self._current_file is not None:
             try:
                 self._save_to_path(self._current_file)
-                self.speak(f"Saved to {self._current_file.name}")
+                self.speak(_("Saved to {name}").format(name=self._current_file.name))
             except Exception as e:
-                self.speak(f"Save failed: {e}")
+                self.speak(_("Save failed: {e}").format(e=e))
         else:
             self.save_as()
 
@@ -1064,9 +1065,9 @@ class App:
             )
             dlg = wx.FileDialog(
                 self._frame,
-                message="Save progression",
+                message=_("Save progression"),
                 defaultFile=default_name,
-                wildcard="IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*",
+                wildcard=_("IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*"),
                 style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
             )
             if dlg.ShowModal() == wx.ID_OK:
@@ -1074,18 +1075,18 @@ class App:
                 dlg.Destroy()
                 try:
                     self._save_to_path(path)
-                    self.speak(f"Saved to {path.name}")
+                    self.speak(_("Saved to {name}").format(name=path.name))
                 except Exception as e:
-                    self.speak(f"Save failed: {e}")
+                    self.speak(_("Save failed: {e}").format(e=e))
             else:
                 dlg.Destroy()
         else:
             # Fallback (no GUI)
             try:
                 self._save_to_path(Path(SAVE_FILE))
-                self.speak(f"Saved to {SAVE_FILE}")
+                self.speak(_("Saved to {name}").format(name=SAVE_FILE))
             except Exception as e:
-                self.speak(f"Save failed: {e}")
+                self.speak(_("Save failed: {e}").format(e=e))
 
     def open_file(self) -> None:
         """Show an Open dialog and load the selected .ips file."""
@@ -1093,8 +1094,8 @@ class App:
             return
         dlg = wx.FileDialog(
             self._frame,
-            message="Open progression",
-            wildcard="IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*",
+            message=_("Open progression"),
+            wildcard=_("IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*"),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         )
         if dlg.ShowModal() == wx.ID_OK:
@@ -1104,9 +1105,9 @@ class App:
                 with open(path, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
                 self._apply_loaded_progression(path)
-                self.speak(f"Opened {self.progression.title}")
+                self.speak(_("Opened {title}").format(title=self.progression.title))
             except Exception as e:
-                self.speak(f"Open failed: {e}")
+                self.speak(_("Open failed: {e}").format(e=e))
         else:
             dlg.Destroy()
 
@@ -1177,40 +1178,22 @@ class App:
         self._clear_selection()
         self.speak(_("New project: {title}").format(title=self.progression.title))
 
-    def _on_change_language(self) -> None:
-        """Show a language-selection dialog and save the chosen language to settings."""
-        # Build language list: code → display name
-        _LANGUAGES = [
-            ('en', 'English'),
-            ('ru', 'Русский'),
-        ]
-        codes   = [c for c, _ in _LANGUAGES]
-        names   = [n for _, n in _LANGUAGES]
-        current = get_language()
-        sel_idx = codes.index(current) if current in codes else 0
-
-        dlg = wx.SingleChoiceDialog(
-            self._frame, _("Select language:"), _("Language"),
-            names,
-        )
-        dlg.SetSelection(sel_idx)
-        if dlg.ShowModal() == wx.ID_OK:
-            chosen_idx  = dlg.GetSelection()
-            chosen_code = codes[chosen_idx]
-            dlg.Destroy()
+    def _on_menu_language(self, event: wx.CommandEvent) -> None:
+        """Handle a language radio-menu item click."""
+        idx = event.GetId() - _LANG_BASE
+        if 0 <= idx < len(_LANGUAGES):
+            chosen_code = _LANGUAGES[idx][0]
             set_language(chosen_code)
             self._save_app_settings()
             self.speak(
                 _("Language changed. Please restart IReal Studio for full effect.")
             )
-        else:
-            dlg.Destroy()
 
     def export_ireal(self) -> None:
         try:
             url = self.progression.to_ireal_url()
         except Exception as e:
-            self.speak(f"Export failed: {e}")
+            self.speak(_("Export failed: {e}").format(e=e))
             return
         html = (
             "<!DOCTYPE html>\n<html>\n<head><title>"
@@ -1229,10 +1212,10 @@ class App:
         if self._frame is not None:
             dlg = wx.FileDialog(
                 self._frame,
-                message="Export iReal Pro HTML",
+                message=_("Export iReal Pro HTML"),
                 defaultDir=default_dir,
                 defaultFile=default_name,
-                wildcard="HTML files (*.html)|*.html|All files (*.*)|*.*",
+                wildcard=_("HTML files (*.html)|*.html|All files (*.*)|*.*"),
                 style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
             )
             if dlg.ShowModal() != wx.ID_OK:
@@ -1245,9 +1228,9 @@ class App:
         try:
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(html)
-            self.speak(f"Exported to {Path(html_file).name}")
+            self.speak(_("Exported to {name}").format(name=Path(html_file).name))
         except Exception as e:
-            self.speak(f"Export failed: {e}")
+            self.speak(_("Export failed: {e}").format(e=e))
 
     def export_qr_code(self) -> None:
         """Generate a QR code for the iReal Pro URL and show it in a popup dialog."""
@@ -1284,14 +1267,14 @@ class App:
         except Exception as exc:
             _app_logger.warning("QR image render failed: %s", exc)
 
-        dlg = wx.Dialog(self._frame, title=f"QR Code – {self.progression.title}")
+        dlg = wx.Dialog(self._frame, title=_("QR Code – {title}").format(title=self.progression.title))
         sizer = wx.BoxSizer(wx.VERTICAL)
         if bmp is not None:
             sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
         url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
         url_label.SetMaxSize(wx.Size(320, -1))
         sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
-        ok_btn = wx.Button(dlg, wx.ID_OK, "OK")
+        ok_btn = wx.Button(dlg, wx.ID_OK, _("OK"))
         ok_btn.SetDefault()
         sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 10)
         dlg.SetSizerAndFit(sizer)
@@ -1346,21 +1329,22 @@ Other
 
     def _show_keyboard_shortcuts(self) -> None:
         """Show keyboard shortcuts in an accessible dialog."""
+        text = _(self._KEYBOARD_SHORTCUTS_TEXT)
         if self._frame is None:
-            self.speak(self._KEYBOARD_SHORTCUTS_TEXT)
+            self.speak(text)
             return
         dlg = wx.Dialog(self._frame, title=_("Keyboard Shortcuts – IReal Studio"),
                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         sizer = wx.BoxSizer(wx.VERTICAL)
         text_ctrl = wx.TextCtrl(
-            dlg, value=self._KEYBOARD_SHORTCUTS_TEXT,
+            dlg, value=text,
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
             size=wx.Size(520, 400),
         )
         text_ctrl.SetFont(wx.Font(10, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
                                   wx.FONTWEIGHT_NORMAL))
         sizer.Add(text_ctrl, 1, wx.EXPAND | wx.ALL, 8)
-        ok_btn = wx.Button(dlg, wx.ID_OK, "OK")
+        ok_btn = wx.Button(dlg, wx.ID_OK, _("OK"))
         ok_btn.SetDefault()
         sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 8)
         dlg.SetSizer(sizer)
@@ -1440,13 +1424,13 @@ Other
                     item.Check(True)
         else:
             placeholder = wx.MenuItem(self._midi_out_menu, _CMD_MIDI_OUT_NONE,
-                                      "No MIDI output devices found")
+                                      _("No MIDI output devices found"))
             self._midi_out_menu.Insert(0, placeholder)
             placeholder.Enable(False)
 
     def _on_menu_midi_out_refresh(self, _event: wx.CommandEvent) -> None:
         self._refresh_midi_out_devices()
-        self.speak("MIDI output devices refreshed")
+        self.speak(_("MIDI output devices refreshed"))
 
     def _on_menu_midi_out_device(self, event: wx.CommandEvent) -> None:
         idx = event.GetId() - _MIDI_OUT_DEVICE_BASE
@@ -1474,7 +1458,7 @@ Other
         # Always offer a "System default" option at the top.
         default_item = wx.MenuItem(
             self._sound_out_menu, _CMD_SOUND_OUT_DEFAULT,
-            "System default", kind=wx.ITEM_CHECK,
+            _("System default"), kind=wx.ITEM_CHECK,
         )
         self._sound_out_menu.Insert(insert_pos, default_item)
         if current_out is None:
@@ -1493,17 +1477,17 @@ Other
                 insert_pos += 1
         else:
             placeholder = wx.MenuItem(self._sound_out_menu, _CMD_SOUND_OUT_NONE,
-                                      "No audio output devices found")
+                                      _("No audio output devices found"))
             self._sound_out_menu.Insert(insert_pos, placeholder)
             placeholder.Enable(False)
 
     def _on_menu_sound_out_refresh(self, _event: wx.CommandEvent) -> None:
         self._refresh_sound_out_devices()
-        self.speak("Sound output devices refreshed")
+        self.speak(_("Sound output devices refreshed"))
 
     def _on_menu_sound_out_default(self, _event: wx.CommandEvent) -> None:
         set_output_device(None)
-        self.speak("Sound output: system default")
+        self.speak(_("Sound output: system default"))
         self._refresh_sound_out_devices()
         self._save_app_settings()
 
@@ -1513,93 +1497,11 @@ Other
         if 0 <= list_idx < len(devices):
             dev_id, dev_name = devices[list_idx]
             if set_output_device(dev_id):
-                self.speak(f"Sound output: {dev_name}")
+                self.speak(_("Sound output: {name}").format(name=dev_name))
             else:
-                self.speak(f"Could not open: {dev_name}")
+                self.speak(_("Could not open: {name}").format(name=dev_name))
             self._refresh_sound_out_devices()
             self._save_app_settings()
-
-    def _menu_change_bpm(self) -> None:
-        bpm = prompt_bpm("BPM", f"Enter new BPM ({BPM_MIN}–{BPM_MAX}):",
-                         self.progression.bpm, parent=self._frame)
-        if bpm is not None:
-            self.progression.bpm = bpm
-            self.speak(f"BPM set to {bpm}")
-
-    def _menu_change_recording_bpm(self) -> None:
-        bpm = prompt_bpm("Recording BPM",
-                         f"Enter recording BPM ({BPM_MIN}–{BPM_MAX})\n"
-                         "Record at a slower pace; playback uses the song BPM:",
-                         self.recording_bpm, parent=self._frame)
-        if bpm is not None:
-            self.recording_bpm = bpm
-            self.speak(f"Recording BPM set to {bpm}")
-
-    def _menu_change_title(self) -> None:
-        val = prompt_input("Title", "Enter song title:",
-                           self.progression.title, parent=self._frame)
-        if val is not None:
-            self.progression.title = val.strip() or self.progression.title
-            self.speak(f"Title set to {self.progression.title}")
-
-    def _menu_change_composer(self) -> None:
-        val = prompt_input("Composer", "Enter composer name:",
-                           self.progression.composer, parent=self._frame)
-        if val is not None:
-            self.progression.composer = val.strip() or self.progression.composer
-            self.speak(f"Composer set to {self.progression.composer}")
-
-    def _menu_change_time_signature(self) -> None:
-        val = prompt_input("Time Signature",
-                           "Enter time signature (e.g. 4/4, 3/4, 6/8):",
-                           str(self.progression.time_signature),
-                           parent=self._frame)
-        if val is not None:
-            val = val.strip()
-            try:
-                ts = TimeSignature.from_string(val)
-                if ts.numerator < 1 or ts.denominator < 1:
-                    raise ValueError("numerator and denominator must be positive")
-                self.progression.time_signature = ts
-                # Update cursor to the same measure but clamp beat to valid range
-                self.cursor = Position(
-                    self.cursor.measure,
-                    min(self.cursor.beat, ts.numerator),
-                    ts,
-                )
-                self.speak(f"Time signature set to {ts}")
-            except (ValueError, AttributeError):
-                self.speak(f"Invalid time signature: {val}. Use format N/D (e.g. 4/4)")
-
-    def _menu_change_key(self) -> None:
-        from pyrealpro import KEY_SIGNATURES
-        current = self.progression.key
-        sel_idx = KEY_SIGNATURES.index(current) if current in KEY_SIGNATURES else 0
-        dlg = wx.SingleChoiceDialog(
-            self._frame, "Select key signature:", "Key",
-            KEY_SIGNATURES,
-        )
-        dlg.SetSelection(sel_idx)
-        if dlg.ShowModal() == wx.ID_OK:
-            key = dlg.GetStringSelection()
-            self.progression.key = key
-            self.speak(f"Key set to {key}")
-        dlg.Destroy()
-
-    def _menu_change_style(self) -> None:
-        from pyrealpro import STYLES_ALL
-        current = self.progression.style
-        sel_idx = STYLES_ALL.index(current) if current in STYLES_ALL else 0
-        dlg = wx.SingleChoiceDialog(
-            self._frame, "Select a style:", "Style",
-            STYLES_ALL,
-        )
-        dlg.SetSelection(sel_idx)
-        if dlg.ShowModal() == wx.ID_OK:
-            style = dlg.GetStringSelection()
-            self.progression.style = style
-            self.speak(f"Style set to {style}")
-        dlg.Destroy()
 
     def _open_project_settings(self) -> None:
         """Open the all-in-one Project Settings dialog."""
@@ -1677,7 +1579,7 @@ Other
             except (ValueError, AttributeError):
                 pass
         self._mark_dirty()
-        self.speak(f"Settings updated: {self.progression.title}")
+        self.speak(_("Settings updated: {title}").format(title=self.progression.title))
 
     def _insert_chord_from_menu(self) -> None:
         """Show Insert Chord dialog and add the chord at the cursor."""
@@ -1688,11 +1590,11 @@ Other
             self._push_undo()
             self.progression.add_chord_by_name(name, self.cursor.measure, self.cursor.beat)
             self._mark_dirty()
-            self.speak(f"Inserted {name}")
+            self.speak(_("Inserted {name}").format(name=name))
 
     def _insert_bass_from_menu(self) -> None:
         """Show a prompt to enter a bass note for the chord at the cursor."""
-        val = prompt_input("Bass Note", "Enter bass note (e.g. E, Bb):", "",
+        val = prompt_input(_("Bass Note"), _("Enter bass note (e.g. E, Bb):"), "",
                            parent=self._frame)
         if val is not None:
             self.add_bass_note(val.strip())
@@ -1705,14 +1607,19 @@ Other
             self._overwrite_item.Check(mode == RECORDING_MODE_OVERWRITE)
         if self._overwrite_whole_item:
             self._overwrite_whole_item.Enable(mode == RECORDING_MODE_OVERWRITE)
-        self.speak(f"Recording mode: {mode}")
+        _MODE_LABELS = {
+            RECORDING_MODE_OVERDUB:    _('overdub'),
+            RECORDING_MODE_OVERWRITE:  _('overwrite'),
+        }
+        self.speak(_("Recording mode: {mode}").format(
+            mode=_MODE_LABELS.get(mode, mode)))
 
     def _toggle_overwrite_whole(self) -> None:
         self.overwrite_whole_measure = not self.overwrite_whole_measure
         if self._overwrite_whole_item:
             self._overwrite_whole_item.Check(self.overwrite_whole_measure)
-        label = "whole measure" if self.overwrite_whole_measure else "stop at last chord"
-        self.speak(f"Overwrite: {label}")
+        label = _("whole measure") if self.overwrite_whole_measure else _("stop at last chord")
+        self.speak(_("Overwrite: {label}").format(label=label))
 
     # ------------------------------------------------------------------
     # Main loop (wxPython)
@@ -1773,105 +1680,114 @@ Other
 
     def _build_menu_bar(self) -> None:
         """Create a wx.MenuBar and attach it to the frame with EVT_MENU bindings."""
+        current_lang = get_language()
         menu_bar = wx.MenuBar()
 
         # --- File ---
         file_menu = wx.Menu()
-        file_menu.Append(_CMD_FILE_NEW,    "&New Project\tCtrl+N")
-        file_menu.Append(_CMD_FILE_OPEN,   "&Open...\tCtrl+O")
-        file_menu.Append(_CMD_FILE_SAVE,   "&Save\tCtrl+S")
-        file_menu.Append(_CMD_FILE_SAVE_AS, "Save &As...")
+        file_menu.Append(_CMD_FILE_NEW,    _("&New Project") + "\tCtrl+N")
+        file_menu.Append(_CMD_FILE_OPEN,   _("&Open...") + "\tCtrl+O")
+        file_menu.Append(_CMD_FILE_SAVE,   _("&Save") + "\tCtrl+S")
+        file_menu.Append(_CMD_FILE_SAVE_AS, _("Save &As..."))
         file_menu.AppendSeparator()
-        file_menu.Append(_CMD_FILE_EXPORT, "&Export to iReal Pro\tCtrl+E")
-        file_menu.Append(_CMD_FILE_QR,     "Export &QR Code\tCtrl+Shift+E")
+        file_menu.Append(_CMD_FILE_EXPORT, _("&Export to iReal Pro") + "\tCtrl+E")
+        file_menu.Append(_CMD_FILE_QR,     _("Export &QR Code") + "\tCtrl+Shift+E")
         file_menu.AppendSeparator()
-        file_menu.Append(_CMD_FILE_QUIT,   "&Quit\tCtrl+Q")
-        menu_bar.Append(file_menu, "&File")
+        file_menu.Append(_CMD_FILE_QUIT,   _("&Quit") + "\tCtrl+Q")
+        menu_bar.Append(file_menu, _("&File"))
 
         # --- Edit ---
         edit_menu = wx.Menu()
-        edit_menu.Append(_CMD_EDIT_UNDO,  "&Undo\tCtrl+Z")
-        edit_menu.Append(_CMD_EDIT_REDO,  "&Redo\tCtrl+Y")
+        edit_menu.Append(_CMD_EDIT_UNDO,  _("&Undo") + "\tCtrl+Z")
+        edit_menu.Append(_CMD_EDIT_REDO,  _("&Redo") + "\tCtrl+Y")
         edit_menu.AppendSeparator()
-        edit_menu.Append(_CMD_EDIT_CUT,   "Cu&t\tCtrl+X")
-        edit_menu.Append(_CMD_EDIT_COPY,  "&Copy\tCtrl+C")
-        edit_menu.Append(_CMD_EDIT_PASTE, "&Paste\tCtrl+V")
-        menu_bar.Append(edit_menu, "&Edit")
+        edit_menu.Append(_CMD_EDIT_CUT,   _("Cu&t") + "\tCtrl+X")
+        edit_menu.Append(_CMD_EDIT_COPY,  _("&Copy") + "\tCtrl+C")
+        edit_menu.Append(_CMD_EDIT_PASTE, _("&Paste") + "\tCtrl+V")
+        menu_bar.Append(edit_menu, _("&Edit"))
 
         # --- Insert ---
         insert_menu = wx.Menu()
-        insert_menu.Append(_CMD_INSERT_CHORD, "&Add Chord...\tCtrl+Return")
+        insert_menu.Append(_CMD_INSERT_CHORD, _("&Add Chord...") + "\tCtrl+Return")
         insert_menu.AppendSeparator()
 
         # Section marks sub-menu — Ctrl+Shift+letter shortcuts
         sm_menu = wx.Menu()
-        sm_menu.Append(_CMD_INSERT_SM_A, "&A (Section A)\tCtrl+Shift+A")
-        sm_menu.Append(_CMD_INSERT_SM_B, "&B (Section B)\tCtrl+Shift+B")
-        sm_menu.Append(_CMD_INSERT_SM_C, "&C (Section C)\tCtrl+Shift+C")
-        sm_menu.Append(_CMD_INSERT_SM_D, "&D (Section D)\tCtrl+Shift+D")
-        sm_menu.Append(_CMD_INSERT_SM_V, "&Verse\tCtrl+Shift+V")
-        sm_menu.Append(_CMD_INSERT_SM_I, "&Intro\tCtrl+Shift+I")
-        insert_menu.AppendSubMenu(sm_menu, "&Section Mark")
+        sm_menu.Append(_CMD_INSERT_SM_A, _("&A (Section A)") + "\tCtrl+Shift+A")
+        sm_menu.Append(_CMD_INSERT_SM_B, _("&B (Section B)") + "\tCtrl+Shift+B")
+        sm_menu.Append(_CMD_INSERT_SM_C, _("&C (Section C)") + "\tCtrl+Shift+C")
+        sm_menu.Append(_CMD_INSERT_SM_D, _("&D (Section D)") + "\tCtrl+Shift+D")
+        sm_menu.Append(_CMD_INSERT_SM_V, _("&Verse") + "\tCtrl+Shift+V")
+        sm_menu.Append(_CMD_INSERT_SM_I, _("&Intro") + "\tCtrl+Shift+I")
+        insert_menu.AppendSubMenu(sm_menu, _("&Section Mark"))
 
-        insert_menu.Append(_CMD_INSERT_VOLTA, "&Volta / Ending\tV")
+        insert_menu.Append(_CMD_INSERT_VOLTA, _("&Volta / Ending") + "\tV")
         insert_menu.AppendSeparator()
-        insert_menu.Append(_CMD_INSERT_NC,     "&No Chord (N.C.)")
-        insert_menu.Append(_CMD_INSERT_BASS,   "&Bass Note...\t/")
-        menu_bar.Append(insert_menu, "&Insert")
+        insert_menu.Append(_CMD_INSERT_NC,     _("&No Chord (N.C.)"))
+        insert_menu.Append(_CMD_INSERT_BASS,   _("&Bass Note...") + "\t/")
+        menu_bar.Append(insert_menu, _("&Insert"))
 
         # --- Record & Playback ---
         rec_menu = wx.Menu()
-        rec_menu.Append(_CMD_RECORD_START, "&Record\tR")
-        rec_menu.Append(_CMD_RECORD_PLAY,  "&Play\tSpace")
-        rec_menu.Append(_CMD_RECORD_STOP,  "&Stop\tEsc")
+        rec_menu.Append(_CMD_RECORD_START, _("&Record") + "\tR")
+        rec_menu.Append(_CMD_RECORD_PLAY,  _("&Play") + "\tSpace")
+        rec_menu.Append(_CMD_RECORD_STOP,  _("&Stop") + "\tEsc")
         rec_menu.AppendSeparator()
         self._overdub_item = rec_menu.AppendCheckItem(
-            _CMD_RECORD_MODE_OVERDUB, "&Overdub mode")
+            _CMD_RECORD_MODE_OVERDUB, _("&Overdub mode"))
         self._overdub_item.Check(self.recording_mode == RECORDING_MODE_OVERDUB)
         self._overwrite_item = rec_menu.AppendCheckItem(
-            _CMD_RECORD_MODE_OVERWRITE, "O&verwrite mode")
+            _CMD_RECORD_MODE_OVERWRITE, _("O&verwrite mode"))
         self._overwrite_item.Check(self.recording_mode == RECORDING_MODE_OVERWRITE)
         rec_menu.AppendSeparator()
         self._overwrite_whole_item = rec_menu.AppendCheckItem(
-            _CMD_RECORD_OVERWRITE_WHOLE, "Overwrite: &Whole measure")
+            _CMD_RECORD_OVERWRITE_WHOLE, _("Overwrite: &Whole measure"))
         self._overwrite_whole_item.Check(self.overwrite_whole_measure)
         self._overwrite_whole_item.Enable(
             self.recording_mode == RECORDING_MODE_OVERWRITE)
-        menu_bar.Append(rec_menu, "&Record")
+        menu_bar.Append(rec_menu, _("&Record"))
 
         # --- Settings ---
         settings_menu = wx.Menu()
-        settings_menu.Append(_CMD_SETTINGS_PROJECT, "&Project Settings...\tCtrl+P")
+        settings_menu.Append(_CMD_SETTINGS_PROJECT, _("&Project Settings...") + "\tCtrl+P")
 
         # Device sub-menus under Settings
         settings_menu.AppendSeparator()
         self._midi_menu = wx.Menu()
         self._midi_menu.AppendSeparator()
-        self._midi_menu.Append(_CMD_MIDI_REFRESH, "&Refresh devices")
-        settings_menu.AppendSubMenu(self._midi_menu, "MIDI &Input Device")
+        self._midi_menu.Append(_CMD_MIDI_REFRESH, _("&Refresh devices"))
+        settings_menu.AppendSubMenu(self._midi_menu, _("MIDI &Input Device"))
 
         self._midi_out_menu = wx.Menu()
         self._midi_out_menu.AppendSeparator()
-        self._midi_out_menu.Append(_CMD_MIDI_OUT_REFRESH, "&Refresh devices")
-        settings_menu.AppendSubMenu(self._midi_out_menu, "MIDI &Output Device")
+        self._midi_out_menu.Append(_CMD_MIDI_OUT_REFRESH, _("&Refresh devices"))
+        settings_menu.AppendSubMenu(self._midi_out_menu, _("MIDI &Output Device"))
 
         self._sound_out_menu = wx.Menu()
         self._sound_out_menu.AppendSeparator()
-        self._sound_out_menu.Append(_CMD_SOUND_OUT_REFRESH, "&Refresh devices")
-        settings_menu.AppendSubMenu(self._sound_out_menu, "&Sound Output")
+        self._sound_out_menu.Append(_CMD_SOUND_OUT_REFRESH, _("&Refresh devices"))
+        settings_menu.AppendSubMenu(self._sound_out_menu, _("&Sound Output"))
 
         settings_menu.AppendSeparator()
-        settings_menu.Append(_CMD_SETTINGS_UPDATE, "Check for &Updates...")
-        settings_menu.Append(_CMD_SETTINGS_LANGUAGE, "&Language...")
+        settings_menu.Append(_CMD_SETTINGS_UPDATE, _("Check for &Updates..."))
 
-        menu_bar.Append(settings_menu, "&Settings")
+        # Language sub-menu (radio items, one per supported language)
+        lang_menu = wx.Menu()
+        for idx, (code, name) in enumerate(_LANGUAGES):
+            item = wx.MenuItem(lang_menu, _LANG_BASE + idx, name, kind=wx.ITEM_RADIO)
+            lang_menu.Append(item)
+            if code == current_lang:
+                item.Check(True)
+        settings_menu.AppendSubMenu(lang_menu, _("&Language"))
+
+        menu_bar.Append(settings_menu, _("&Settings"))
 
         # --- Help ---
         help_menu = wx.Menu()
-        help_menu.Append(_CMD_HELP_SHORTCUTS, "&Keyboard Shortcuts\tF1")
+        help_menu.Append(_CMD_HELP_SHORTCUTS, _("&Keyboard Shortcuts") + "\tF1")
         help_menu.AppendSeparator()
-        help_menu.Append(_CMD_HELP_ABOUT, "&About IReal Studio")
-        menu_bar.Append(help_menu, "&Help")
+        help_menu.Append(_CMD_HELP_ABOUT, _("&About IReal Studio"))
+        menu_bar.Append(help_menu, _("&Help"))
 
         self._frame.SetMenuBar(menu_bar)
 
@@ -1942,8 +1858,8 @@ Other
                          id=_CMD_SETTINGS_PROJECT)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
                          id=_CMD_SETTINGS_UPDATE)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._on_change_language(),
-                         id=_CMD_SETTINGS_LANGUAGE)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_language,
+                         id=_LANG_BASE, id2=_LANG_BASE + len(_LANGUAGES) - 1)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_refresh,
                          id=_CMD_MIDI_REFRESH)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_midi_out_refresh,
@@ -1974,7 +1890,7 @@ Other
                 recording_bpm=self.recording_bpm,
             )
         else:
-            self.speak("Already active")
+            self.speak(_("Already active"))
 
     def _menu_play(self) -> None:
         if self._recorder.state == AppState.IDLE:
@@ -1994,8 +1910,10 @@ Other
         if self._is_dirty:
             dlg = wx.MessageDialog(
                 self._frame,
-                f"'{self.progression.title}' has unsaved changes.\n\nSave before closing?",
-                "Unsaved Changes",
+                _("'{title}' has unsaved changes.\n\nSave before closing?").format(
+                    title=self.progression.title
+                ),
+                _("Unsaved Changes"),
                 wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT | wx.ICON_WARNING,
             )
             result = dlg.ShowModal()
@@ -2008,7 +1926,7 @@ Other
                     try:
                         self._save_to_path(self._current_file)
                     except Exception as e:
-                        wx.MessageBox(f"Save failed: {e}", "Error",
+                        wx.MessageBox(_("Save failed: {e}").format(e=e), _("Error"),
                                       wx.OK | wx.ICON_ERROR, self._frame)
                         event.Veto()
                         return
@@ -2016,7 +1934,7 @@ Other
                     try:
                         self.save_as()
                     except Exception as e:
-                        wx.MessageBox(f"Save failed: {e}", "Error",
+                        wx.MessageBox(_("Save failed: {e}").format(e=e), _("Error"),
                                       wx.OK | wx.ICON_ERROR, self._frame)
                         event.Veto()
                         return
@@ -2227,7 +2145,7 @@ Other
         elif key == 'd' and not ctrl and not shift:
             if self._recorder.state != AppState.IDLE:
                 offset = self._recorder.beat_offset_ms()
-                self.speak(f"Beat offset {offset:.0f} milliseconds")
+                self.speak(_("Beat offset {offset:.0f} milliseconds").format(offset=offset))
 
         # Letter keys for slash-chord bass note (plain alpha only)
         elif len(key) == 1 and key.isalpha() and not ctrl and not shift:
@@ -2257,30 +2175,42 @@ Other
             return
         bpm_info = f"BPM: {self.progression.bpm}"
         if self.recording_bpm != self.progression.bpm:
-            bpm_info += f"  Rec BPM: {self.recording_bpm}"
+            bpm_info += f"  {_('Rec BPM')}: {self.recording_bpm}"
         dirty_marker = "*" if self._is_dirty else ""
-        file_name = (self._current_file.name if self._current_file else "[unsaved]") + dirty_marker
+        file_name = (self._current_file.name if self._current_file else _("[unsaved]")) + dirty_marker
+        _state_labels = {
+            AppState.IDLE:      _("idle"),
+            AppState.PRE_COUNT: _("precount"),
+            AppState.RECORDING: _("recording"),
+            AppState.PLAYING:   _("playing"),
+        }
+        state_label = _state_labels.get(self._recorder.state, self._recorder.state)
+        _MODE_LABELS = {
+            RECORDING_MODE_OVERDUB:    _('overdub'),
+            RECORDING_MODE_OVERWRITE:  _('overwrite'),
+        }
+        rec_mode_label = _MODE_LABELS.get(self.recording_mode, self.recording_mode)
         rec_mode_info = (
-            f" [{self.recording_mode}"
-            + (" whole" if self.overwrite_whole_measure and self.recording_mode == RECORDING_MODE_OVERWRITE else "")
+            f" [{rec_mode_label}"
+            + (" " + _("whole") if self.overwrite_whole_measure and self.recording_mode == RECORDING_MODE_OVERWRITE else "")
             + "]"
         )
         lines = [
-            f"Title: {self.progression.title}  Key: {self.progression.key}  {bpm_info}  [{file_name}]",
-            f"Cursor: Measure {self.cursor.measure}, Beat {self.cursor.beat}   State: {self._recorder.state}{rec_mode_info}",
-            f"Chords: {len(self.progression)}  Measures: {self.progression.total_measures}",
+            f"{_('Title')}: {self.progression.title}  {_('Key')}: {self.progression.key}  {bpm_info}  [{file_name}]",
+            f"{_('Cursor')}: {_('Measure')} {self.cursor.measure}, {_('Beat')} {self.cursor.beat}   {_('State')}: {state_label}{rec_mode_info}",
+            f"{_('Chords')}: {len(self.progression)}  {_('Measures')}: {self.progression.total_measures}",
             "",
             _log_ring[-1] if _log_ring else "",
         ]
         chords_here = self.progression.find_chords_at_position(self.cursor)
         if chords_here:
-            lines[3] = f"Here: {chords_here[0].chord_name()}"
+            lines[3] = f"{_('Here')}: {chords_here[0].chord_name()}"
         elif self.progression.is_no_chord(self.cursor.measure):
-            lines[3] = "Here: N.C."
+            lines[3] = f"{_('Here')}: N.C."
         # Show selection info if active
         if self._sel_anchor is not None and self._sel_active is not None:
             n = len(self._chords_in_selection())
-            lines[3] += f"  [SEL: {n} chord{'s' if n != 1 else ''}]"
+            lines[3] += "  [SEL: " + ngettext("{n} chord", "{n} chords", n).format(n=n) + "]"
         for lbl, text in zip(self._status_labels, lines):
             lbl.SetLabel(text)
         wx.CallLater(50, self._schedule_display_update)
