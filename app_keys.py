@@ -247,6 +247,11 @@ class KeysMixin:
         elif kc == wx.WXK_F1 and not ctrl and not shift:
             self._show_keyboard_shortcuts()
 
+        # F2 – edit chord in place
+        elif kc == wx.WXK_F2 and not ctrl and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self._edit_chord_in_place()
+
         event.Skip()
 
     def _on_keyup(self, event: wx.KeyEvent) -> None:

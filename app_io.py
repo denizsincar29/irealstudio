@@ -53,6 +53,7 @@ Editing
   Ctrl+Z / Ctrl+Y       Undo / Redo
   Ctrl+X / Ctrl+C / Ctrl+V  Cut / Copy / Paste chord
   Ctrl+Return           Insert chord (dialog)
+  F2                    Edit chord in place (dialog pre-filled with current chord)
   N                     Toggle No Chord (N.C.)
 
 Section Marks (Ctrl+Shift+letter)
@@ -453,6 +454,24 @@ class IOMixin:
             self._mark_dirty()
             self.speak(_("Inserted {name}").format(name=name))
 
+    def _edit_chord_in_place(self) -> None:
+        """Edit the chord at the cursor in place (F2).
+
+        Opens the chord-entry dialog pre-filled with the current chord name.
+        Does nothing (speaks an error) when no chord is present at the cursor.
+        """
+        chords_here = self.progression.find_chords_at_position(self.cursor)
+        if not chords_here:
+            self.speak(_("No chord to edit"))
+            return
+        item = chords_here[0]
+        name = insert_chord_dialog(parent=self._frame, default=item.chord.name)
+        if name and name != item.chord.name:
+            self._push_undo()
+            self.progression.add_chord_by_name(name, self.cursor.measure, self.cursor.beat)
+            self._mark_dirty()
+            self.speak(_("Edited {name}").format(name=name))
+
     def _insert_bass_from_menu(self) -> None:
         """Show a prompt to enter a bass note for the chord at the cursor."""
         val = prompt_input(_("Bass Note"), _("Enter bass note (e.g. E, Bb):"), "",
@@ -479,7 +498,15 @@ class IOMixin:
         check_for_updates_async(on_update_found=_on_found)
 
     def _notify_update_available(self, tag: str, url: str) -> None:
-        """Show a non-blocking update notification in the wx main thread."""
+        """Show a non-blocking update notification in the wx main thread.
+
+        When running from source (not compiled), logs a debug message via
+        speech instead of showing a dialog, to avoid interrupting development.
+        """
+        from updater import _IS_COMPILED
+        if not _IS_COMPILED:
+            self.speak(_("Debug: new update available: {tag}").format(tag=tag))
+            return
         import webbrowser as _wb
         msg = _(
             "A new version of IReal Studio is available: {tag}\n\n"

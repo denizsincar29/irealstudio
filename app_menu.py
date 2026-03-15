@@ -10,7 +10,8 @@ from commands import (
     _CMD_FILE_NEW, _CMD_FILE_OPEN, _CMD_FILE_SAVE, _CMD_FILE_SAVE_AS,
     _CMD_FILE_EXPORT, _CMD_FILE_QR, _CMD_FILE_QUIT,
     _CMD_EDIT_UNDO, _CMD_EDIT_REDO, _CMD_EDIT_CUT, _CMD_EDIT_COPY, _CMD_EDIT_PASTE,
-    _CMD_INSERT_CHORD, _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
+    _CMD_INSERT_CHORD, _CMD_EDIT_CHORD,
+    _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
     _CMD_INSERT_SM_D, _CMD_INSERT_SM_V, _CMD_INSERT_SM_I,
     _CMD_INSERT_SM_S, _CMD_INSERT_SM_Q, _CMD_INSERT_SM_F,
     _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS,
@@ -343,6 +344,7 @@ class MenuMixin:
         # --- Insert ---
         insert_menu = wx.Menu()
         insert_menu.Append(_CMD_INSERT_CHORD, _("&Add Chord...") + "\tCtrl+Return")
+        insert_menu.Append(_CMD_EDIT_CHORD,   _("&Edit Chord...") + "\tF2")
         insert_menu.AppendSeparator()
 
         # Section marks sub-menu — Ctrl+Shift+letter shortcuts
@@ -481,6 +483,8 @@ class MenuMixin:
         # Insert
         self._frame.Bind(wx.EVT_MENU, lambda e: self._insert_chord_from_menu(),
                          id=_CMD_INSERT_CHORD)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._edit_chord_in_place(),
+                         id=_CMD_EDIT_CHORD)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('a'),
                          id=_CMD_INSERT_SM_A)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('b'),
