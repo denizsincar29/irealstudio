@@ -263,19 +263,35 @@ class MenuMixin:
     def _open_midi_metro_setup(self) -> None:
         """Open the MIDI metronome configuration dialog."""
         from dialogs import prompt_midi_metro_settings
+
+        def _preview(note: int, velocity: int, channel: int, duration_ms: int) -> None:
+            """Play a single note through the MIDI output so the user can hear it."""
+            try:
+                self._midi.send_chord(
+                    [note],
+                    velocity=velocity,
+                    duration=duration_ms / 1000.0,
+                    channel=channel,
+                )
+            except Exception:
+                pass
+
         result = prompt_midi_metro_settings(
             parent=self._frame,
             on_note=self.midi_metro_on_note,
             off_note=self.midi_metro_off_note,
             velocity=self.midi_metro_velocity,
             channel=self.midi_metro_channel,
+            duration_ms=self.midi_metro_duration_ms,
+            preview_fn=_preview if self._midi.midi_output is not None else None,
         )
         if result is not None:
-            on_note, off_note, velocity, channel = result
+            on_note, off_note, velocity, channel, duration_ms = result
             self.midi_metro_on_note = on_note
             self.midi_metro_off_note = off_note
             self.midi_metro_velocity = velocity
             self.midi_metro_channel = channel
+            self.midi_metro_duration_ms = duration_ms
             self._save_app_settings()
             self.speak(_("MIDI metronome settings saved"))
 

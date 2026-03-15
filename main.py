@@ -41,6 +41,7 @@ from app_settings import (
     DEFAULT_BPM, DEFAULT_TITLE, DEFAULT_KEY, DEFAULT_STYLE, DEFAULT_TIME_SIG, SAVE_FILE,
     _load_app_settings, _save_settings_file,
     MIDI_METRO_ON_NOTE, MIDI_METRO_OFF_NOTE, MIDI_METRO_VELOCITY, MIDI_METRO_CHANNEL,
+    MIDI_METRO_DURATION_MS,
 )
 from app_menu import MenuMixin
 from app_keys import KeysMixin
@@ -386,6 +387,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self.midi_metro_off_note: int = MIDI_METRO_OFF_NOTE
         self.midi_metro_velocity: int = MIDI_METRO_VELOCITY
         self.midi_metro_channel: int = MIDI_METRO_CHANNEL
+        self.midi_metro_duration_ms: int = MIDI_METRO_DURATION_MS
 
         # Unsaved-changes tracking
         self._is_dirty: bool = False
@@ -555,9 +557,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self._midi.midi_output.send(mido.Message(
                 'note_on', note=note, velocity=vel, channel=ch,
             ))
-            # Schedule note-off after 50 ms so the note does not sustain.
-            # Use a daemon timer so it does not block process shutdown.
+            # Schedule note-off after the configured duration so the note does
+            # not sustain.  Use a daemon timer so it does not block shutdown.
             import threading
+            dur = max(0.01, self.midi_metro_duration_ms / 1000.0)
             def _note_off():
                 try:
                     self._midi.midi_output.send(mido.Message(
@@ -565,7 +568,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
                     ))
                 except Exception:
                     pass
-            t = threading.Timer(0.05, _note_off)
+            t = threading.Timer(dur, _note_off)
             t.daemon = True
             t.start()
         except Exception:
@@ -772,6 +775,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.midi_metro_velocity = int(settings['midi_metro_velocity'])
         if 'midi_metro_channel' in settings:
             self.midi_metro_channel = int(settings['midi_metro_channel'])
+        if 'midi_metro_duration_ms' in settings:
+            self.midi_metro_duration_ms = max(10, min(2000, int(settings['midi_metro_duration_ms'])))
 
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
@@ -793,6 +798,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_metro_off_note': self.midi_metro_off_note,
             'midi_metro_velocity': self.midi_metro_velocity,
             'midi_metro_channel': self.midi_metro_channel,
+            'midi_metro_duration_ms': self.midi_metro_duration_ms,
         }
         _save_settings_file(settings)
 
