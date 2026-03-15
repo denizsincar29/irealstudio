@@ -120,8 +120,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # MIDI chord voicing: last root MIDI note played (for voice leading)
         self._last_chord_root_midi: int | None = None
 
-        # Whether to automatically play the chord on the MIDI output when navigating
-        self.play_chord_on_nav: bool = False
+        # When to automatically play the chord on the MIDI output:
+        # 'off' | 'navigation' | 'playback' | 'both'
+        self.chord_play_mode: str = 'off'
 
         # Unsaved-changes tracking
         self._is_dirty: bool = False
@@ -133,13 +134,14 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._overdub_item = None
         self._overwrite_item = None
         self._overwrite_whole_item = None
-        self._play_on_nav_item = None
+        self._chord_play_items: list = []  # radio items for chord playback mode
 
         # Recorder owns metronome/recording/playback state
         self._recorder = Recorder(
             speak=self.speak,
             tick_sound=make_beep(1200, 10),
             tock_sound=make_beep(800,   8),
+            on_playback_chord=self._on_playback_chord_midi,
         )
 
         # MIDI handler owns port management and chord detection
@@ -432,7 +434,14 @@ class App(MenuMixin, KeysMixin, IOMixin):
             else:
                 _app_logger.warning("Saved audio output '%s' not found", audio_name)
 
-        self.play_chord_on_nav = bool(settings.get('play_chord_on_nav', False))
+        # Chord playback mode: support old 'play_chord_on_nav' bool for back-compat.
+        # Old format: play_chord_on_nav=True → treated as chord_play_mode='navigation'.
+        if 'chord_play_mode' in settings:
+            mode = settings['chord_play_mode']
+            if mode in ('off', 'navigation', 'playback', 'both'):
+                self.chord_play_mode = mode
+        elif settings.get('play_chord_on_nav', False):
+            self.chord_play_mode = 'navigation'
 
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
@@ -448,7 +457,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_input_device': self._midi.midi_input_name,
             'midi_output_device': self._midi.midi_output_name,
             'audio_output_device_name': audio_name,
-            'play_chord_on_nav': self.play_chord_on_nav,
+            'chord_play_mode': self.chord_play_mode,
         }
         _save_settings_file(settings)
 
@@ -662,9 +671,20 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._maybe_play_chord_on_nav()
 
     def _maybe_play_chord_on_nav(self) -> None:
-        """Play the chord at the cursor on MIDI output if the setting is enabled."""
-        if self.play_chord_on_nav and self._midi.midi_output is not None:
+        """Play the chord at the cursor on MIDI output when navigation mode is active."""
+        if self.chord_play_mode in ('navigation', 'both') and self._midi.midi_output is not None:
             self.play_current_chord_midi()
+
+    def _on_playback_chord_midi(self, chord_name: str) -> None:
+        """Callback invoked by Recorder each beat to play a chord during playback."""
+        if self.chord_play_mode not in ('playback', 'both'):
+            return
+        if self._midi.midi_output is None:
+            return
+        notes, root_midi = voice_chord_midi(chord_name, self._last_chord_root_midi)
+        if notes:
+            self._last_chord_root_midi = root_midi
+            self._midi.send_chord(notes)
 
     def play_current_chord_midi(self) -> None:
         """Play the chord at the current cursor position on the MIDI output.

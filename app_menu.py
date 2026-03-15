@@ -16,7 +16,8 @@ from commands import (
     _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS,
     _CMD_RECORD_START, _CMD_RECORD_PLAY, _CMD_RECORD_STOP,
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
-    _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE, _CMD_SETTINGS_PLAY_ON_NAV,
+    _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE,
+    _CMD_CHORD_PLAY_OFF, _CMD_CHORD_PLAY_NAV, _CMD_CHORD_PLAY_PB, _CMD_CHORD_PLAY_BOTH,
     _CMD_MIDI_REFRESH, _CMD_MIDI_NONE, _CMD_MIDI_OUT_REFRESH, _CMD_MIDI_OUT_NONE,
     _CMD_SOUND_OUT_REFRESH, _CMD_SOUND_OUT_NONE, _CMD_SOUND_OUT_DEFAULT,
     _CMD_HELP_SHORTCUTS, _CMD_HELP_ABOUT,
@@ -231,16 +232,21 @@ class MenuMixin:
                 _("Language changed. Please restart IReal Studio for full effect.")
             )
 
-    def _toggle_play_on_nav(self) -> None:
-        """Toggle the 'play chord when navigating' setting and persist it."""
-        self.play_chord_on_nav = not self.play_chord_on_nav
-        if self._play_on_nav_item is not None:
-            self._play_on_nav_item.Check(self.play_chord_on_nav)
+    def _set_chord_play_mode(self, mode: str) -> None:
+        """Set the chord playback mode and persist it."""
+        self.chord_play_mode = mode
+        # Update the radio item check state
+        modes = ('off', 'navigation', 'playback', 'both')
+        for item, m in zip(self._chord_play_items, modes):
+            item.Check(m == mode)
         self._save_app_settings()
-        if self.play_chord_on_nav:
-            self.speak(_("Play chord on navigation: on"))
-        else:
-            self.speak(_("Play chord on navigation: off"))
+        labels = {
+            'off':        _("Chord playback: off"),
+            'navigation': _("Chord playback: during navigation"),
+            'playback':   _("Chord playback: during playback"),
+            'both':       _("Chord playback: both"),
+        }
+        self.speak(labels.get(mode, mode))
 
     # ------------------------------------------------------------------
     # Menu building
@@ -322,11 +328,25 @@ class MenuMixin:
         settings_menu = wx.Menu()
         settings_menu.Append(_CMD_SETTINGS_PROJECT, _("&Project Settings...") + "\tCtrl+P")
 
-        # Play chord on navigation toggle
+        # Chord Playback mode sub-menu (radio items)
         settings_menu.AppendSeparator()
-        self._play_on_nav_item = settings_menu.AppendCheckItem(
-            _CMD_SETTINGS_PLAY_ON_NAV, _("&Play chord when navigating"))
-        self._play_on_nav_item.Check(self.play_chord_on_nav)
+        chord_play_menu = wx.Menu()
+        _chord_play_defs = [
+            (_CMD_CHORD_PLAY_OFF,  _("&Off")),
+            (_CMD_CHORD_PLAY_NAV,  _("During &Navigation")),
+            (_CMD_CHORD_PLAY_PB,   _("During &Playback")),
+            (_CMD_CHORD_PLAY_BOTH, _("&Both")),
+        ]
+        self._chord_play_items = []
+        for cmd_id, label in _chord_play_defs:
+            item = wx.MenuItem(chord_play_menu, cmd_id, label, kind=wx.ITEM_RADIO)
+            chord_play_menu.Append(item)
+            self._chord_play_items.append(item)
+        # Set the currently-selected mode
+        _mode_to_idx = {'off': 0, 'navigation': 1, 'playback': 2, 'both': 3}
+        idx = _mode_to_idx.get(self.chord_play_mode, 0)
+        self._chord_play_items[idx].Check(True)
+        settings_menu.AppendSubMenu(chord_play_menu, _("Chord &Playback"))
 
         # Device sub-menus under Settings
         settings_menu.AppendSeparator()
@@ -439,8 +459,14 @@ class MenuMixin:
         # Settings
         self._frame.Bind(wx.EVT_MENU, lambda e: self._open_project_settings(),
                          id=_CMD_SETTINGS_PROJECT)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self._toggle_play_on_nav(),
-                         id=_CMD_SETTINGS_PLAY_ON_NAV)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._set_chord_play_mode('off'),
+                         id=_CMD_CHORD_PLAY_OFF)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._set_chord_play_mode('navigation'),
+                         id=_CMD_CHORD_PLAY_NAV)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._set_chord_play_mode('playback'),
+                         id=_CMD_CHORD_PLAY_PB)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._set_chord_play_mode('both'),
+                         id=_CMD_CHORD_PLAY_BOTH)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
                          id=_CMD_SETTINGS_UPDATE)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_language,

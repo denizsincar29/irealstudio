@@ -695,7 +695,8 @@ def _spoken_quality_fallback(quality: str) -> str:
         matched = False
         for token, spoken in _EXT_SPOKEN:
             if remainder[pos:].startswith(token):
-                ext_parts.append(_(spoken))
+                # Pure digit extension tokens are not translated (digit stays digit).
+                ext_parts.append(spoken if spoken.replace(' ', '').isdigit() else _(spoken))
                 pos += len(token)
                 matched = True
                 break
@@ -764,7 +765,9 @@ def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
     quality_spoken = ''
     for src, dst in _SPOKEN_QUALITY_MAP:
         if quality_and_ext == src:
-            quality_spoken = _(dst)
+            # Pure digit strings (e.g. '7', '9', '13', '6 9') are not translated
+            # so they remain digit notation in every language.
+            quality_spoken = dst if dst.replace(' ', '').isdigit() else _(dst)
             break
     # Unrecognized non-empty quality: try longest-prefix match + spoken extension
     if not quality_spoken and quality_and_ext:
@@ -1489,8 +1492,10 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
       (smallest jump from *prev_root*).
     * **Core tones** (3rd, 5th, 7th) are placed in C3–A4 (MIDI 48–69) in
       ascending close-position order above the root, clamped to the range.
-    * **Extensions** (9th, 11th, 13th and altered equivalents) are placed in
-      the octave starting one octave above the root (i.e. root_midi + 12).
+    * **Extensions** (9th, 11th, 13th and altered equivalents) are placed
+      strictly above the highest core tone, starting at least one octave
+      above the root (i.e. root_midi + 12 or core_top + 1, whichever is
+      higher).  Multiple extensions are stacked in ascending order.
 
     Parameters
     ----------
@@ -1527,11 +1532,13 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
     root_pc = _NOTE_TO_PC.get(root_str, 0)
     core_ivals, ext_ivals = _quality_to_intervals(quality)
 
-    # Jazz voicing: omit the perfect fifth (7 semitones) from non-minor 7th /
-    # extended chords (dominant, major-7th, maj9, maj13, 9, 11, 13, etc.).
-    # The fifth adds no harmonic colour to these chords.  Keep it for minor,
-    # diminished, augmented and sus chords where it matters.
-    if 4 in core_ivals and (10 in core_ivals or 11 in core_ivals):
+    # Jazz voicing: omit the perfect fifth (7 semitones) when the chord has
+    # both a major third (4) and a flat/minor seventh (10) — i.e. dominant 7th
+    # and related extended dominant chords.  The fifth adds no harmonic colour
+    # in that context.  We keep it for major-7th chords (4 + 11), minor,
+    # diminished, augmented and sus chords where the fifth is structurally
+    # important.
+    if 4 in core_ivals and 10 in core_ivals:
         try:
             core_ivals.remove(7)
         except ValueError:
@@ -1559,8 +1566,9 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
             notes.append(n)
             cursor = n
 
-    # Place extension tones starting from root_midi + 12 upward
-    ext_base = root_midi + 12
+    # Place extension tones strictly above the highest core tone placed so far,
+    # but never below root_midi + 12 (i.e. at least one octave above the root).
+    ext_base = max(root_midi + 12, cursor + 1)
     for ival in sorted(set(ext_ivals)):
         note_pc = (root_pc + ival) % 12
         n = (ext_base // 12) * 12 + note_pc
@@ -1568,5 +1576,6 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
             n += 12
         if n not in notes:
             notes.append(n)
+            ext_base = n + 1  # each subsequent extension must be above the previous
 
     return sorted(notes), root_midi

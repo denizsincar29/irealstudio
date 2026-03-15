@@ -28,10 +28,12 @@ class Recorder:
         speak: Callable[[str], None],
         tick_sound: np.ndarray,
         tock_sound: np.ndarray,
+        on_playback_chord: Callable[[str], None] | None = None,
     ) -> None:
         self._speak = speak
         self._tick = tick_sound
         self._tock = tock_sound
+        self._on_playback_chord = on_playback_chord
 
         self.state: str = AppState.IDLE
         self.recording_start_time: float = 0.0
@@ -256,6 +258,11 @@ class Recorder:
             chords_here = progression.find_chords_at_position(cur)
             if chords_here:
                 self._speak(chords_here[0].chord_name_spoken())
+                if self._on_playback_chord is not None:
+                    try:
+                        self._on_playback_chord(chords_here[0].chord.name)
+                    except Exception:
+                        _logger.error("on_playback_chord callback raised", exc_info=True)
 
             play_sound(self._tick if cur.beat == 1 else self._tock)
 

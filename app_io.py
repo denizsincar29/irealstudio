@@ -306,9 +306,14 @@ class IOMixin:
         sizer = wx.BoxSizer(wx.VERTICAL)
         if bmp is not None:
             sizer.Add(wx.StaticBitmap(dlg, bitmap=bmp), 0, wx.ALL | wx.ALIGN_CENTER, 10)
-        url_label = wx.StaticText(dlg, label=url, style=wx.ALIGN_CENTER | wx.ST_ELLIPSIZE_END)
-        url_label.SetMaxSize(wx.Size(320, -1))
-        sizer.Add(url_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
+        hint_label = wx.StaticText(
+            dlg,
+            label=_("Scan this QR code with iReal Pro to import the chord chart."),
+            style=wx.ALIGN_CENTER,
+        )
+        hint_label.SetMaxSize(wx.Size(320, -1))
+        hint_label.Wrap(320)
+        sizer.Add(hint_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER, 10)
         ok_btn = wx.Button(dlg, wx.ID_OK, _("OK"))
         ok_btn.SetDefault()
         sizer.Add(ok_btn, 0, wx.BOTTOM | wx.ALIGN_CENTER, 10)

@@ -40,6 +40,9 @@ msgstr "QR-код готов, но нет окна для отображения
 msgid "QR Code – {title}"
 msgstr "QR-код – {title}"
 
+msgid "Scan this QR code with iReal Pro to import the chord chart."
+msgstr "Отсканируйте этот QR-код в iReal Pro, чтобы импортировать цифровку."
+
 # --- keyboard shortcuts dialog ---
 msgid "Keyboard Shortcuts – IReal Studio"
 msgstr "Горячие клавиши – IReal Studio"
@@ -766,155 +769,183 @@ msgstr "над"
 
 # --- chord quality spoken names ---
 msgid "minor major 7"
-msgstr "минорный мажорный септаккорд"
+msgstr "большой минорный 7"
 
 msgid "minor major 9"
-msgstr "минорный мажорный нонаккорд"
+msgstr "большой минорный 9"
 
 msgid "half diminished"
 msgstr "полуменьшённый"
 
 msgid "half diminished flat 9"
-msgstr "полуменьшённый бемоль девять"
+msgstr "полуменьшённый бемоль 9"
 
 msgid "half diminished 9"
-msgstr "полуменьшённый девять"
+msgstr "полуменьшённый 9"
 
 msgid "minor 9"
-msgstr "минорный нонаккорд"
+msgstr "минор 9"
 
 msgid "minor 7 sharp 11"
-msgstr "минорный септаккорд диез одиннадцать"
+msgstr "минор 7 диез 11"
 
 msgid "minor 13"
-msgstr "минорный тринадцатый"
+msgstr "минор 13"
 
 msgid "minor 7"
-msgstr "минорный септаккорд"
+msgstr "минор 7"
 
 msgid "minor 6 9"
-msgstr "минорный шесть девять"
+msgstr "минор 6 9"
 
 msgid "minor 6"
-msgstr "минорный секстаккорд"
+msgstr "минор 6"
 
 msgid "minor 11"
-msgstr "минорный ундецимаккорд"
+msgstr "минор 11"
 
 msgid "minor sharp 5"
-msgstr "минорный диез пять"
+msgstr "минор диез 5"
 
 msgid "minor"
 msgstr "минор"
 
 msgid "major 13"
-msgstr "мажорный тринадцатый"
+msgstr "мэйдж 13"
 
 msgid "major 9"
-msgstr "мажорный нонаккорд"
+msgstr "мэйдж 9"
 
 msgid "major 9 sharp 11"
-msgstr "мажорный нонаккорд диез одиннадцать"
+msgstr "мэйдж 9 диез 11"
 
 msgid "major 7 sharp 11"
-msgstr "мажорный септаккорд диез одиннадцать"
+msgstr "мэйдж 7 диез 11"
 
 msgid "major 7"
-msgstr "мажорный септаккорд"
+msgstr "мэйдж 7"
 
 msgid "7 flat 9 sharp 11"
-msgstr "доминантовый бемоль девять диез одиннадцать"
+msgstr "7 бемоль 9 диез 11"
 
 msgid "7 sharp 9 sharp 11"
-msgstr "доминантовый диез девять диез одиннадцать"
+msgstr "7 диез 9 диез 11"
 
 msgid "7 flat 9 flat 5"
-msgstr "доминантовый бемоль девять бемоль пять"
+msgstr "7 бемоль 9 бемоль 5"
 
 msgid "7 sharp 9 flat 5"
-msgstr "доминантовый диез девять бемоль пять"
+msgstr "7 диез 9 бемоль 5"
 
 msgid "9 flat 5"
-msgstr "нонаккорд бемоль пять"
+msgstr "9 бемоль 5"
 
 msgid "7 flat 5"
-msgstr "доминантовый бемоль пять"
+msgstr "7 бемоль 5"
 
 msgid "7 sharp 9 sharp 5"
-msgstr "доминантовый диез девять диез пять"
+msgstr "7 диез 9 диез 5"
 
 msgid "7 flat 9 sharp 5"
-msgstr "доминантовый бемоль девять диез пять"
+msgstr "7 бемоль 9 диез 5"
 
 msgid "7 flat 9"
-msgstr "доминантовый бемоль девять"
+msgstr "7 бемоль 9"
 
 msgid "7 sharp 9"
-msgstr "доминантовый диез девять"
+msgstr "7 диез 9"
 
 msgid "9"
-msgstr "нонаккорд"
+msgstr "9"
 
 msgid "7 sharp 11"
-msgstr "доминантовый диез одиннадцать"
+msgstr "7 диез 11"
 
 msgid "7 flat 13"
-msgstr "доминантовый бемоль тринадцать"
+msgstr "7 бемоль 13"
 
 msgid "13"
-msgstr "тринадцатый"
+msgstr "13"
 
 msgid "6 9"
-msgstr "шесть девять"
+msgstr "6 9"
 
 msgid "diminished 7"
-msgstr "уменьшённый септаккорд"
+msgstr "уменьшённый 7"
 
 msgid "diminished"
 msgstr "уменьшённый"
 
 msgid "augmented 7"
-msgstr "увеличенный септаккорд"
+msgstr "увеличенный 7"
 
 msgid "augmented major 7"
-msgstr "увеличенный мажорный септаккорд"
+msgstr "увеличенный мэйдж 7"
 
 msgid "augmented"
 msgstr "увеличенный"
 
 msgid "7 sus 4"
-msgstr "доминантовый квартовый"
+msgstr "7 sus 4"
 
 msgid "sus 4"
-msgstr "квартовый"
+msgstr "sus 4"
 
 msgid "add 9"
-msgstr "с добавленной ноной"
+msgstr "add 9"
 
 msgid "11"
-msgstr "ундецимаккорд"
+msgstr "11"
 
 msgid "7"
-msgstr "септаккорд"
+msgstr "7"
 
 msgid "6"
-msgstr "секстаккорд"
+msgstr "6"
 
 # --- extension token spoken forms (used by _spoken_quality_fallback) ---
 msgid "sharp 11"
-msgstr "диез одиннадцать"
+msgstr "диез 11"
 
 msgid "flat 13"
-msgstr "бемоль тринадцать"
+msgstr "бемоль 13"
 
 msgid "sharp 9"
-msgstr "диез девять"
+msgstr "диез 9"
 
 msgid "flat 9"
-msgstr "бемоль девять"
+msgstr "бемоль 9"
 
 msgid "sharp 5"
-msgstr "диез пять"
+msgstr "диез 5"
 
 msgid "flat 5"
-msgstr "бемоль пять"
+msgstr "бемоль 5"
+
+# --- chord playback mode menu ---
+msgid "Chord &Playback"
+msgstr "Воспроизведение &аккордов"
+
+msgid "&Off"
+msgstr "&Выкл"
+
+msgid "During &Navigation"
+msgstr "При &навигации"
+
+msgid "During &Playback"
+msgstr "При &воспроизведении"
+
+msgid "&Both"
+msgstr "&Оба режима"
+
+msgid "Chord playback: off"
+msgstr "Воспроизведение аккордов: выкл"
+
+msgid "Chord playback: during navigation"
+msgstr "Воспроизведение аккордов: при навигации"
+
+msgid "Chord playback: during playback"
+msgstr "Воспроизведение аккордов: при воспроизведении"
+
+msgid "Chord playback: both"
+msgstr "Воспроизведение аккордов: оба режима"
