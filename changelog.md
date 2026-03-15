@@ -1,4 +1,4 @@
-# v0.1.0 Release Notes
+# Changelog
 
 ## v0.1.0 - 2026-03-15
 
