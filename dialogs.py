@@ -1020,24 +1020,44 @@ def prompt_metronome_settings(
                     self._channel.Bind(wx.EVT_SPINCTRL,  _on_any_spin)
                     self._duration.Bind(wx.EVT_SPINCTRL, _on_any_spin)
 
-                # Audio compensation preview: fires audio tick + MIDI downbeat
-                # together so the user can hear whether they land in sync.
+                # Audio compensation preview: fire audio tick immediately, then
+                # delay the MIDI ding by comp_ms so the gap demonstrates what
+                # the compensation corrects.  The user adjusts comp_ms until
+                # the ding appears to land on the tick.
+                _midi_cancel: list[threading.Event] = [threading.Event()]
+
                 def _on_audio_comp_spin(evt):
                     evt.Skip()
+                    # Cancel any pending MIDI ding from a previous spin event.
+                    _midi_cancel[0].set()
+                    cancel = threading.Event()
+                    _midi_cancel[0] = cancel
+
+                    comp_ms = self._audio_comp.GetValue()
                     try:
                         if audio_preview_fn is not None:
                             audio_preview_fn()
                     except Exception:
                         pass
-                    try:
-                        if preview_fn is not None:
-                            note = self._on_note.GetValue()
-                            vel  = self._velocity.GetValue()
-                            ch   = self._channel.GetValue()
-                            dur  = self._duration.GetValue()
-                            preview_fn(note, vel, ch, dur)
-                    except Exception:
-                        pass
+                    if preview_fn is not None:
+                        note = self._on_note.GetValue()
+                        vel  = self._velocity.GetValue()
+                        ch   = self._channel.GetValue()
+                        dur  = self._duration.GetValue()
+
+                        def _fire_midi():
+                            # wait(0) returns True immediately if cancelled;
+                            # wait(t) returns True if cancelled within t seconds.
+                            # This ensures cancellation is always checked, even
+                            # when comp_ms is 0.
+                            if cancel.wait(comp_ms / 1000.0):
+                                return  # cancelled by a newer spin event
+                            try:
+                                preview_fn(note, vel, ch, dur)
+                            except Exception:
+                                pass
+
+                        threading.Thread(target=_fire_midi, daemon=True).start()
                 self._audio_comp.Bind(wx.EVT_SPINCTRL, _on_audio_comp_spin)
 
                 # ----- reset button -----

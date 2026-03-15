@@ -92,7 +92,12 @@ class Recorder:
         self._audio_compensation_ms: int = 60
         self._midi_compensation_ms: int = 0
 
-    def _click(self, is_downbeat: bool, chords: "list | None" = None) -> None:
+    def _click(
+        self,
+        is_downbeat: bool,
+        chords: "list | None" = None,
+        target_time: float | None = None,
+    ) -> None:
         """Fire a metronome click for one beat.
 
         If an *on_beat* callback was provided at construction time it is called
@@ -106,6 +111,12 @@ class Recorder:
         chords:
             List of ``ProgressionItem`` objects at the current position, or
             ``None`` when no chord data is available (precount / recording).
+        target_time:
+            Optional ``time.monotonic()`` value at which the *first* sample of
+            the click should be audible.  Passed through to
+            :func:`~sound.play_sound` for DAC-time scheduling when the audio
+            metronome is active.  Ignored when an *on_beat* callback handles
+            the click (MIDI metronome path).
         """
         if self._on_beat is not None:
             try:
@@ -113,7 +124,7 @@ class Recorder:
                 return
             except Exception:
                 _logger.error("on_beat callback raised — falling back to audio", exc_info=True)
-        play_sound(self._tick if is_downbeat else self._tock)
+        play_sound(self._tick if is_downbeat else self._tock, target_monotonic=target_time)
 
     @property
     def tick_sound(self) -> "np.ndarray":
@@ -201,7 +212,12 @@ class Recorder:
 
         # Use time.monotonic() throughout so beat scheduling is immune to
         # wall-clock adjustments (NTP, manual time changes, etc.).
-        t0 = time.monotonic()
+        #
+        # With audio metronome: set t0 comp_s into the future so that beat 1
+        # fires comp_s early (just like beats 2+) and its sound is heard at
+        # exactly t0.  With MIDI metronome comp_s is typically 0, so t0 equals
+        # the current time and the first beat fires immediately.
+        t0 = time.monotonic() + comp_s
         total_precount_beats = 2 * beats
 
         # Jazz 4/4 mode: first measure gives a sparse "one … two …" cue;
@@ -219,10 +235,14 @@ class Recorder:
             measure_idx = i // beats   # 0 = first precount measure, 1 = second
 
             # Record when this beat fires for debug offset queries.
-            self._last_beat_time = time.monotonic()
+            # Use the logical beat time (when the sound will be heard) so that
+            # beat_offset_ms() reports a meaningful phase value.
+            beat_logical = t0 + i * interval
+            self._last_beat_time = beat_logical
             # Play the click first so the sound lands precisely on the beat;
             # speech follows asynchronously and is heard just after the click.
-            self._click(b == 0)
+            # Pass beat_logical for DAC-time scheduling (audio path only).
+            self._click(b == 0, target_time=beat_logical)
 
             if jazz_mode and measure_idx == 0:
                 # First 4/4 precount measure: speak "one" on beat 1 and
@@ -280,8 +300,9 @@ class Recorder:
             logical_measure = abs_beat_0 // beats + 1
             logical_beat = abs_beat_0 % beats + 1
 
-            # Record when this beat fires for debug offset queries.
-            self._last_beat_time = time.monotonic()
+            # Logical time when this recording beat should be heard.
+            beat_logical = self.recording_start_time + beat_count * interval
+            self._last_beat_time = beat_logical
 
             if logical_beat == 1:
                 if progression.is_in_hidden_range(logical_measure):
@@ -298,9 +319,9 @@ class Recorder:
                         ):
                             self._speak("Ending 2")
                             _announced_ending2.add(logical_measure)
-                self._click(True)
+                self._click(True, target_time=beat_logical)
             else:
-                self._click(False)
+                self._click(False, target_time=beat_logical)
 
             beat_count += 1
             # Fire the click comp_s before the logical beat time so the sound
@@ -362,29 +383,57 @@ class Recorder:
 
         # Latency compensation (see _precount_and_record for rationale).
         comp_s = self._get_clamped_compensation(interval)
+        # True when audio (not MIDI) compensation is in use, meaning the click
+        # fires comp_s before the logical beat and the chord call must be
+        # delayed by the same amount so both are heard simultaneously.
+        use_audio_comp = not self._use_midi_compensation()
 
         # Anchor the beat grid to an absolute timeline so processing overhead
         # (chord lookup, speak, play_sound enqueue) does not accumulate and
         # drift the metronome — same pattern used in _precount_and_record.
-        t0 = time.monotonic()
+        #
+        # Setting t0 = now + comp_s makes the *logical* beat-1 time equal to
+        # t0 so that beat 1 fires comp_s early (same as beats 2+).
+        t0 = time.monotonic() + comp_s
         beat_count = 0
 
         while not self._playback_stop.is_set():
-            # Record when this beat fires for debug offset queries.
-            self._last_beat_time = time.monotonic()
+            # Logical time at which this beat is meant to be heard.
+            beat_logical = t0 + beat_count * interval
+
+            # Record the logical beat time for beat_offset_ms() queries.
+            self._last_beat_time = beat_logical
 
             chords_here = progression.find_chords_at_position(cur)
             if chords_here:
                 self._speak(chords_here[0].chord_name_spoken())
-                if self._on_playback_chord is not None:
-                    try:
-                        self._on_playback_chord(chords_here[0].chord.name)
-                    except Exception:
-                        _logger.error("on_playback_chord callback raised", exc_info=True)
 
-            # Pass current chord list so the on_beat callback can apply
-            # chord-aware note selection (smart metronome mode).
-            self._click(cur.beat == 1, chords_here if chords_here else None)
+            # Fire the click.  For the audio path, pass beat_logical so that
+            # DAC-time scheduling places the sample exactly at that moment —
+            # the click fires comp_s *before* beat_logical in code time but
+            # the sound arrives at beat_logical.  For the MIDI path target_time
+            # is ignored and the callback fires immediately (comp_s early in
+            # code time, heard ≈ beat_logical after MIDI driver latency).
+            self._click(cur.beat == 1, chords_here if chords_here else None,
+                        target_time=beat_logical)
+
+            # Fire the MIDI chord accompaniment at the logical beat time.
+            # When audio compensation is active the click was fired comp_s early
+            # (in code time) and the MIDI chord must be delayed by the same
+            # amount so both are heard simultaneously.
+            if chords_here and self._on_playback_chord is not None:
+                if use_audio_comp and comp_s > 0:
+                    # Wait until the logical beat time before sending the chord,
+                    # but wake immediately if playback is stopped.
+                    chord_wait = beat_logical - time.monotonic()
+                    if chord_wait > 0:
+                        self._playback_stop.wait(timeout=chord_wait)
+                    if self._playback_stop.is_set():
+                        break
+                try:
+                    self._on_playback_chord(chords_here[0].chord.name)
+                except Exception:
+                    _logger.error("on_playback_chord callback raised", exc_info=True)
 
             self.playback_stopped_at = Position(
                 cur.measure, cur.beat, progression.time_signature
@@ -432,7 +481,9 @@ class Recorder:
         """
         if self._last_beat_time is None:
             return 0.0
-        return (time.monotonic() - self._last_beat_time) * 1000.0
+        # _last_beat_time is the logical (future) beat time; clamp to 0 so
+        # callers never see a negative elapsed value during the lead-in window.
+        return max(0.0, (time.monotonic() - self._last_beat_time) * 1000.0)
 
     def stop_all(self) -> None:
         """Stop both the metronome/recording and playback threads."""
