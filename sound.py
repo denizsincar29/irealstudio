@@ -4,6 +4,14 @@ A persistent callback-based PortAudio output stream is kept open for the
 entire lifetime of the process.  play_sound() simply enqueues a buffer into
 a list that is mixed into the stream on every audio callback, eliminating
 the ~200 ms warm-up latency caused by repeatedly calling sd.play().
+
+Latency budget
+--------------
+* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~5.8 ms (256 frames)
+* Hardware output buffer: requested 5 ms via ``latency=0.005``;
+  PortAudio clamps to the device's achievable minimum on each platform
+  (Windows WASAPI ≈ 3 ms, Linux ALSA ≈ 1–3 ms, macOS CoreAudio ≈ 3 ms).
+Total round-trip from play_sound() call to audible output: typically < 15 ms.
 """
 
 import threading
@@ -17,7 +25,12 @@ except Exception:
 
 SAMPLE_RATE = 44100
 
-# Small block size keeps scheduling jitter low (~5.8 ms per block).
+# Block size: 256 frames → ~5.8 ms max callback scheduling jitter.
+# Smaller values (e.g. 128) reduce jitter by ~3 ms but cause xruns on many
+# systems because the OS must service the callback every 2.9 ms — too tight
+# for reliable WASAPI/ALSA scheduling — leading to audible crackles.
+# The dominant latency source is the hardware output buffer (latency=0.005),
+# so keeping a stable block size of 256 gives the best quality/latency trade-off.
 _BLOCK_SIZE = 256
 
 # Attack / release lengths in seconds for the metronome envelope.
@@ -73,7 +86,10 @@ def _open_stream(device: int | None = None) -> None:
             callback=_callback,
             blocksize=_BLOCK_SIZE,
             device=device,
-            latency='low',
+            # Request a 5 ms output buffer.  PortAudio uses the device's
+            # achievable minimum when the requested value is below it, so
+            # this is safe even on hardware that can't reach 5 ms.
+            latency=0.005,
         )
         _stream.start()
     except Exception:

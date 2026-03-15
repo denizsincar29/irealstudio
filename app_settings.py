@@ -24,12 +24,16 @@ SAVE_FILE = "progression.ips"
 # ---------------------------------------------------------------------------
 # MIDI metronome defaults
 # ---------------------------------------------------------------------------
-# General MIDI percussion note numbers for hi-hat / wood-block clicks.
-# 76 = High Wood Block (downbeat), 77 = Low Wood Block (upbeat).
-MIDI_METRO_ON_NOTE: int = 76    # hi wood block — beat 1
-MIDI_METRO_OFF_NOTE: int = 77   # low wood block — other beats
-MIDI_METRO_VELOCITY: int = 100
-MIDI_METRO_CHANNEL: int = 9     # channel 10 (0-indexed) — standard GM percussion
+# Default notes for non-percussion channel use (channel 1, 0-indexed as 0).
+# Notes 91 (B6) and 84 (C6) were chosen by the project author as a pleasant
+# two-tone melodic metronome pair with a clear pitch contrast between downbeat
+# and upbeat.  Velocity 48 gives a medium-soft click on most instruments.
+MIDI_METRO_ON_NOTE: int = 91    # B6 — downbeat
+MIDI_METRO_OFF_NOTE: int = 84   # C6 — upbeat
+MIDI_METRO_VELOCITY: int = 48
+MIDI_METRO_CHANNEL: int = 0     # channel 1 (0-indexed) — melodic (not percussion)
+MIDI_METRO_DURATION_MS: int = 100  # note-on duration in milliseconds
+MIDI_METRO_SMART: bool = True   # chord-aware smart metronome mode enabled by default
 
 
 def _get_settings_path() -> Path:

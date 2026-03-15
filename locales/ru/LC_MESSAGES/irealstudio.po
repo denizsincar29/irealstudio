@@ -401,6 +401,22 @@ msgstr "MIDI-устройства вывода не найдены"
 msgid "MIDI output devices refreshed"
 msgstr "MIDI-устройства вывода обновлены"
 
+# --- MIDI metronome status messages ---
+msgid "MIDI metronome enabled"
+msgstr "MIDI-метроном включён"
+
+msgid "MIDI metronome disabled (using audio beep)"
+msgstr "MIDI-метроном отключён (используется звуковой сигнал)"
+
+msgid "MIDI metronome settings saved"
+msgstr "Настройки MIDI-метронома сохранены"
+
+msgid "Smart metronome on: chord-aware notes during playback"
+msgstr "Умный метроном включён: ноты по аккордам при воспроизведении"
+
+msgid "Smart metronome off: fixed metronome notes"
+msgstr "Умный метроном отключён: фиксированные ноты метронома"
+
 msgid "No audio output devices found"
 msgstr "Аудиоустройства вывода не найдены"
 
@@ -703,6 +719,38 @@ msgstr "MIDI &Вход"
 
 msgid "MIDI &Output Device"
 msgstr "MIDI &Выход"
+
+# --- MIDI metronome menu ---
+msgid "MIDI &Metronome"
+msgstr "MIDI &Метроном"
+
+msgid "&Enable MIDI Metronome"
+msgstr "&Включить MIDI-метроном"
+
+msgid "&Smart Metronome (chord-aware)"
+msgstr "&Умный метроном (по аккордам)"
+
+msgid "&Configure MIDI Metronome..."
+msgstr "&Настроить MIDI-метроном..."
+
+# --- MIDI metronome settings dialog ---
+msgid "MIDI Metronome Settings"
+msgstr "Настройки MIDI-метронома"
+
+msgid "Downbeat MIDI note (0-127):"
+msgstr "MIDI-нота сильной доли (0–127):"
+
+msgid "Upbeat MIDI note (0-127):"
+msgstr "MIDI-нота слабой доли (0–127):"
+
+msgid "Velocity (1-127):"
+msgstr "Velocity (1–127):"
+
+msgid "Channel (0-15, 0=melodic):"
+msgstr "Канал (0–15, 0=мелодический):"
+
+msgid "Note length ms (10-2000):"
+msgstr "Длительность ноты мс (10–2000):"
 
 msgid "&Sound Output"
 msgstr "&Аудиовыход"

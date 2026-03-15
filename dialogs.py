@@ -686,28 +686,39 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
 
 def prompt_midi_metro_settings(
     parent=None,
-    on_note: int = 76,
-    off_note: int = 77,
-    velocity: int = 100,
-    channel: int = 9,
-) -> tuple[int, int, int, int] | None:
-    """Show a dialog for configuring the MIDI metronome note numbers and channel.
+    on_note: int = 91,
+    off_note: int = 84,
+    velocity: int = 48,
+    channel: int = 0,
+    duration_ms: int = 100,
+    preview_fn=None,
+) -> "tuple[int, int, int, int, int] | None":
+    """Show a dialog for configuring MIDI metronome note numbers, channel, and duration.
 
-    Returns ``(on_note, off_note, velocity, channel)`` on OK, or ``None`` if
-    the user cancelled.  All values are clamped to valid MIDI ranges.
+    Parameters
+    ----------
+    preview_fn:
+        Optional callable ``(note, velocity, channel, duration_ms) -> None``
+        called immediately when the user changes any field, so they can hear
+        the new value played on the connected MIDI output in real time.
+
+    Returns ``(on_note, off_note, velocity, channel, duration_ms)`` on OK, or
+    ``None`` if the user cancelled.  All values are clamped to valid ranges.
     """
     if not _IS_WINDOWS:
         print(_("MIDI Metronome Settings"))
         try:
-            on_s  = input(f"  Downbeat MIDI note (0-127) [{on_note}]: ").strip()
-            off_s = input(f"  Upbeat MIDI note (0-127) [{off_note}]: ").strip()
-            vel_s = input(f"  Velocity (1-127) [{velocity}]: ").strip()
-            ch_s  = input(f"  Channel (0-15) [{channel}]: ").strip()
-            on_note  = max(0, min(127, int(on_s  or on_note)))
-            off_note = max(0, min(127, int(off_s or off_note)))
-            velocity = max(1, min(127, int(vel_s or velocity)))
-            channel  = max(0, min(15,  int(ch_s  or channel)))
-            return on_note, off_note, velocity, channel
+            on_s   = input(f"  Downbeat MIDI note (0-127) [{on_note}]: ").strip()
+            off_s  = input(f"  Upbeat MIDI note (0-127) [{off_note}]: ").strip()
+            vel_s  = input(f"  Velocity (1-127) [{velocity}]: ").strip()
+            ch_s   = input(f"  Channel (0-15) [{channel}]: ").strip()
+            dur_s  = input(f"  Note length ms (10-2000) [{duration_ms}]: ").strip()
+            on_note    = max(0,  min(127,  int(on_s   or on_note)))
+            off_note   = max(0,  min(127,  int(off_s  or off_note)))
+            velocity   = max(1,  min(127,  int(vel_s  or velocity)))
+            channel    = max(0,  min(15,   int(ch_s   or channel)))
+            duration_ms = max(10, min(2000, int(dur_s  or duration_ms)))
+            return on_note, off_note, velocity, channel, duration_ms
         except (KeyboardInterrupt, EOFError, ValueError):
             return None
 
@@ -721,20 +732,59 @@ def prompt_midi_metro_settings(
                 sizer = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
                 sizer.AddGrowableCol(1, 1)
 
-                def _row(label: str, ctrl: wx.Window) -> None:
+                def _row(label: str, min_val: int, max_val: int, initial: int) -> wx.SpinCtrl:
+                    """Create a StaticText+SpinCtrl pair in that order.
+
+                    Creating the StaticText first (lower z-order/creation index) and the
+                    SpinCtrl immediately after is required for Windows UIA/MSAA to
+                    associate the label with the control — the foundation for NVDA/JAWS
+                    announcing the field name when the spinner receives focus.
+                    """
                     sizer.Add(wx.StaticText(self, label=label),
                               flag=wx.ALIGN_CENTER_VERTICAL)
+                    ctrl = wx.SpinCtrl(self, min=min_val, max=max_val, initial=initial)
                     sizer.Add(ctrl, flag=wx.EXPAND)
+                    return ctrl
 
-                self._on_note  = wx.SpinCtrl(self, min=0, max=127, initial=on_note)
-                self._off_note = wx.SpinCtrl(self, min=0, max=127, initial=off_note)
-                self._velocity = wx.SpinCtrl(self, min=1, max=127, initial=velocity)
-                self._channel  = wx.SpinCtrl(self, min=0, max=15,  initial=channel)
+                self._on_note  = _row(_("Downbeat MIDI note (0-127):"),  0,   127, on_note)
+                self._off_note = _row(_("Upbeat MIDI note (0-127):"),    0,   127, off_note)
+                self._velocity = _row(_("Velocity (1-127):"),            1,   127, velocity)
+                self._channel  = _row(_("Channel (0-15, 0=melodic):"),  0,    15, channel)
+                self._duration = _row(_("Note length ms (10-2000):"),   10, 2000, duration_ms)
 
-                _row(_("Downbeat MIDI note (0-127):"), self._on_note)
-                _row(_("Upbeat MIDI note (0-127):"),   self._off_note)
-                _row(_("Velocity (1-127):"),            self._velocity)
-                _row(_("Channel (0-15, 9=percussion):"), self._channel)
+                # Live-preview: play the note immediately whenever any spin
+                # value changes, so the user can hear the effect right away.
+                if preview_fn is not None:
+                    def _make_preview(note_ctrl):
+                        def _on_spin(evt):
+                            evt.Skip()
+                            try:
+                                note = note_ctrl.GetValue()
+                                vel  = self._velocity.GetValue()
+                                ch   = self._channel.GetValue()
+                                dur  = self._duration.GetValue()
+                                preview_fn(note, vel, ch, dur)
+                            except Exception:
+                                pass
+                        return _on_spin
+
+                    def _on_any_spin(evt):
+                        evt.Skip()
+                        try:
+                            # Preview downbeat note when a non-note field changes.
+                            note = self._on_note.GetValue()
+                            vel  = self._velocity.GetValue()
+                            ch   = self._channel.GetValue()
+                            dur  = self._duration.GetValue()
+                            preview_fn(note, vel, ch, dur)
+                        except Exception:
+                            pass
+
+                    self._on_note.Bind(wx.EVT_SPINCTRL, _make_preview(self._on_note))
+                    self._off_note.Bind(wx.EVT_SPINCTRL, _make_preview(self._off_note))
+                    self._velocity.Bind(wx.EVT_SPINCTRL, _on_any_spin)
+                    self._channel.Bind(wx.EVT_SPINCTRL,  _on_any_spin)
+                    self._duration.Bind(wx.EVT_SPINCTRL, _on_any_spin)
 
                 outer = wx.BoxSizer(wx.VERTICAL)
                 outer.Add(sizer, flag=wx.EXPAND | wx.ALL, border=14)
@@ -743,12 +793,13 @@ def prompt_midi_metro_settings(
                 self.SetSizerAndFit(outer)
                 self._on_note.SetFocus()
 
-            def get_values(self) -> tuple[int, int, int, int]:
+            def get_values(self) -> "tuple[int, int, int, int, int]":
                 return (
                     self._on_note.GetValue(),
                     self._off_note.GetValue(),
                     self._velocity.GetValue(),
                     self._channel.GetValue(),
+                    self._duration.GetValue(),
                 )
 
         dlg = _MidiMetroDlg(parent)
