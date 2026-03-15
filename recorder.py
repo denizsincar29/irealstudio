@@ -481,7 +481,9 @@ class Recorder:
         """
         if self._last_beat_time is None:
             return 0.0
-        return (time.monotonic() - self._last_beat_time) * 1000.0
+        # _last_beat_time is the logical (future) beat time; clamp to 0 so
+        # callers never see a negative elapsed value during the lead-in window.
+        return max(0.0, (time.monotonic() - self._last_beat_time) * 1000.0)
 
     def stop_all(self) -> None:
         """Stop both the metronome/recording and playback threads."""

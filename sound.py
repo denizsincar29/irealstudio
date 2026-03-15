@@ -224,18 +224,19 @@ def play_sound(wave: np.ndarray, target_monotonic: float | None = None) -> None:
 
     Falls back to sd.play() if the persistent stream is unavailable.
     """
-    target_dac: float | None = None
-    if target_monotonic is not None:
-        # Convert monotonic time to PortAudio stream time.
-        target_dac = target_monotonic - _mono_to_stream_offset
-
     if _stream is not None and _stream.active:
+        # Convert to stream time using the current (already calibrated) offset.
+        target_dac = (target_monotonic - _mono_to_stream_offset
+                      ) if target_monotonic is not None else None
         with _lock:
             _pending.append((wave, 0, target_dac))
         return
     # Fallback: try to re-open the stream, then enqueue.
     _open_stream(_current_device)
     if _stream is not None and _stream.active:
+        # Recompute target_dac with the freshly calibrated offset after reopen.
+        target_dac = (target_monotonic - _mono_to_stream_offset
+                      ) if target_monotonic is not None else None
         with _lock:
             _pending.append((wave, 0, target_dac))
         return

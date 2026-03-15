@@ -1046,7 +1046,11 @@ def prompt_metronome_settings(
                         dur  = self._duration.GetValue()
 
                         def _fire_midi():
-                            if comp_ms > 0 and cancel.wait(comp_ms / 1000.0):
+                            # wait(0) returns True immediately if cancelled;
+                            # wait(t) returns True if cancelled within t seconds.
+                            # This ensures cancellation is always checked, even
+                            # when comp_ms is 0.
+                            if cancel.wait(comp_ms / 1000.0):
                                 return  # cancelled by a newer spin event
                             try:
                                 preview_fn(note, vel, ch, dur)
