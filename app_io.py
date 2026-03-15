@@ -468,7 +468,11 @@ class IOMixin:
         name = insert_chord_dialog(parent=self._frame, default=item.chord.name)
         if name and name != item.chord.name:
             self._push_undo()
-            self.progression.add_chord_by_name(name, self.cursor.measure, self.cursor.beat)
+            # Preserve the existing bass/slash note so F2 doesn't silently drop it.
+            self.progression.add_chord_by_name(
+                name, self.cursor.measure, self.cursor.beat,
+                bass_note=item.bass_note,
+            )
             self._mark_dirty()
             self.speak(_("Edited {name}").format(name=name))
 

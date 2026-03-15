@@ -85,8 +85,10 @@ def _read_multiline_changelog() -> str:
 def _update_version_py(version_tag: str) -> None:
     """Write the new version string into ``version.py``.
 
-    ``version_tag`` should be the normalised tag without a leading ``v``,
-    e.g. ``'1.2.3'``.
+    ``version_tag`` may be prefixed with a lowercase or uppercase ``v``
+    (e.g. ``'v1.2.3'`` or ``'1.2.3'``); the prefix is stripped automatically.
+    Both ``VERSION`` and ``__version__`` are written so that all existing
+    import patterns continue to work.
     """
     ver_str = version_tag.removeprefix('v').removeprefix('V')
     version_path = Path('version.py')
@@ -94,7 +96,8 @@ def _update_version_py(version_tag: str) -> None:
         '"""Single source of truth for the application version.\n\n'
         'The release workflow and autoupdater both read this module.\n'
         '"""\n\n'
-        f'VERSION = "{ver_str}"\n',
+        f'VERSION = "{ver_str}"\n'
+        f'__version__ = VERSION\n',
         encoding='utf-8',
     )
     print(f"Updated version.py → VERSION = \"{ver_str}\"")
