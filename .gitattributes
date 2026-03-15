@@ -1,0 +1,5 @@
+# Mark compiled gettext message catalogues as binary so git does not attempt
+# to diff or merge them.  They are derived from the corresponding .po files
+# and are kept in the repository so that end-users do not need the gettext
+# toolchain installed.
+locales/**/*.mo binary linguist-generated=true
