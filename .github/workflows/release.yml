@@ -25,32 +25,23 @@ jobs:
         include:
           - os: windows-latest
             artifact_name: irealstudio.exe
-            nuitka_output: irealstudio.exe
+            output_filename: irealstudio.exe
           - os: ubuntu-latest
             artifact_name: irealstudio-linux
-            nuitka_output: irealstudio.bin
+            output_filename: irealstudio-linux
           - os: macos-latest
             artifact_name: irealstudio-macos
-            nuitka_output: irealstudio.bin
+            output_filename: irealstudio-macos
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
       # wxPython wheels are not available for all Linux environments; install
       # build tools and the GTK headers so pip can build from source if needed.
-      # These must come BEFORE `uv sync` so that native extensions (wxPython,
-      # sounddevice) can compile successfully when no binary wheel is available.
+      # These must come BEFORE `uv sync` so that native extensions
+      # (wxPython, sounddevice) can compile successfully when no binary wheel
+      # is available.
       - name: Install Linux GTK deps
         if: runner.os == 'Linux'
         run: |
@@ -79,48 +70,38 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install portaudio
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --all-groups --system
 
-      - name: Build executable (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          uv run nuitka `
-            --mode=onefile `
-            --output-filename=irealstudio.exe `
-            --output-dir=dist `
-            --windows-console-mode=disable `
-            --assume-yes-for-downloads `
-            --no-progressbar `
-            --quiet `
-            main.py
-
-      - name: Build executable (Linux / macOS)
-        if: runner.os != 'Windows'
-        run: |
-          uv run nuitka \
-            --mode=onefile \
-            --output-filename=irealstudio.bin \
-            --output-dir=dist \
-            --assume-yes-for-downloads \
-            --no-progressbar \
-            --quiet \
-            main.py
-
-      - name: Rename artifact (Linux)
-        if: runner.os == 'Linux'
-        run: cp dist/irealstudio.bin dist/irealstudio-linux
-
-      - name: Rename artifact (macOS)
-        if: runner.os == 'macOS'
-        run: cp dist/irealstudio.bin dist/irealstudio-macos
+      - name: Build executable
+        uses: Nuitka/Nuitka-Action@v1.4
+        with:
+          nuitka-version: "2.7"
+          script-name: main.py
+          mode: onefile
+          output-filename: ${{ matrix.output_filename }}
+          output-dir: dist
+          windows-console-mode: disable
+          assume-yes-for-downloads: true
+          no-progressbar: true
+          quiet: true
+          follow-imports: true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}
+          path: dist/${{ matrix.output_filename }}
           if-no-files-found: error
 
   release:
