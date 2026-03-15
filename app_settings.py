@@ -24,8 +24,6 @@ SAVE_FILE = "progression.ips"
 # ---------------------------------------------------------------------------
 # MIDI metronome defaults
 # ---------------------------------------------------------------------------
-# MIDI metronome defaults
-# ---------------------------------------------------------------------------
 # Default notes for non-percussion channel use (channel 1, 0-indexed as 0).
 # Notes 91 (B6) and 84 (C6) were chosen by the project author as a pleasant
 # two-tone melodic metronome pair with a clear pitch contrast between downbeat

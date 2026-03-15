@@ -571,8 +571,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
             target_pc = (root_pc + interval) % 12
         else:
             target_pc = root_pc
-        # Find the nearest MIDI note with *target_pc* in [note_min, note_max].
-        # Start at the lowest octave ≥ note_min.
+        # Find the lowest MIDI note with *target_pc* that is within [note_min, note_max].
+        # Start at the first octave ≥ note_min that has the right pitch class.
         note = note_min - ((note_min - target_pc) % 12)
         if note < note_min:
             note += 12
@@ -590,7 +590,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         or by falling back to the built-in audio beep.
 
         When ``midi_metro_enabled`` is ``True`` and a MIDI output port is open,
-        sends a short note-on/note-off pair on the configured percussion channel
+        sends a short note-on/note-off pair on the configured MIDI channel
         so external MIDI devices or a DAW can play the metronome sound.
 
         When ``midi_metro_smart`` is also ``True`` *and* chord data is available

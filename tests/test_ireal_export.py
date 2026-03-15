@@ -20,7 +20,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from chords import ChordProgression, TimeSignature, VoltaBracket, Position
-from chords import voice_chord_midi
+from chords import voice_chord_midi, Chord
 from urllib.parse import unquote
 
 
@@ -1391,6 +1391,85 @@ class TestVoiceChordMidi(unittest.TestCase):
         pcs = self._pc_set(notes)
         self.assertNotIn(4, pcs)  # no major 3rd
         self.assertNotIn(7, pcs)  # no perfect 5th
+
+
+class TestChordRootPcAndIsSus(unittest.TestCase):
+    """Tests for the Chord.root_pc and Chord.is_sus cached properties."""
+
+    # ------------------------------------------------------------------
+    # root_pc — natural notes
+    # ------------------------------------------------------------------
+    def test_root_pc_natural_c(self):
+        self.assertEqual(Chord('C').root_pc, 0)
+
+    def test_root_pc_natural_g(self):
+        self.assertEqual(Chord('G').root_pc, 7)
+
+    def test_root_pc_natural_b(self):
+        self.assertEqual(Chord('B').root_pc, 11)
+
+    # ------------------------------------------------------------------
+    # root_pc — sharps
+    # ------------------------------------------------------------------
+    def test_root_pc_sharp_csharp(self):
+        self.assertEqual(Chord('C#').root_pc, 1)
+
+    def test_root_pc_sharp_fsharp(self):
+        self.assertEqual(Chord('F#maj7').root_pc, 6)
+
+    def test_root_pc_sharp_gsharp(self):
+        self.assertEqual(Chord('G#m').root_pc, 8)
+
+    # ------------------------------------------------------------------
+    # root_pc — flats
+    # ------------------------------------------------------------------
+    def test_root_pc_flat_db(self):
+        self.assertEqual(Chord('Db').root_pc, 1)
+
+    def test_root_pc_flat_eb(self):
+        self.assertEqual(Chord('Ebm7').root_pc, 3)
+
+    def test_root_pc_flat_bb(self):
+        self.assertEqual(Chord('Bb').root_pc, 10)
+
+    # ------------------------------------------------------------------
+    # root_pc — chords with quality suffix
+    # ------------------------------------------------------------------
+    def test_root_pc_with_quality(self):
+        self.assertEqual(Chord('Am7').root_pc, 9)
+
+    def test_root_pc_with_maj7(self):
+        self.assertEqual(Chord('Dmaj7').root_pc, 2)
+
+    # ------------------------------------------------------------------
+    # is_sus — positive cases
+    # ------------------------------------------------------------------
+    def test_is_sus_sus4(self):
+        self.assertTrue(Chord('Csus4').is_sus)
+
+    def test_is_sus_sus2(self):
+        self.assertTrue(Chord('Dsus2').is_sus)
+
+    def test_is_sus_7sus4(self):
+        self.assertTrue(Chord('G7sus4').is_sus)
+
+    def test_is_sus_fsus4(self):
+        self.assertTrue(Chord('Fsus4').is_sus)
+
+    # ------------------------------------------------------------------
+    # is_sus — negative cases
+    # ------------------------------------------------------------------
+    def test_not_sus_major(self):
+        self.assertFalse(Chord('C').is_sus)
+
+    def test_not_sus_minor7(self):
+        self.assertFalse(Chord('Am7').is_sus)
+
+    def test_not_sus_dominant7(self):
+        self.assertFalse(Chord('G7').is_sus)
+
+    def test_not_sus_maj7(self):
+        self.assertFalse(Chord('Dmaj7').is_sus)
 
 
 if __name__ == '__main__':

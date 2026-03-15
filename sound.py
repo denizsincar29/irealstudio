@@ -7,7 +7,7 @@ the ~200 ms warm-up latency caused by repeatedly calling sd.play().
 
 Latency budget
 --------------
-* Block-size jitter: 0 – BLOCK_SIZE/SAMPLE_RATE = ~5.8 ms (256 frames)
+* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~5.8 ms (256 frames)
 * Hardware output buffer: requested 5 ms via ``latency=0.005``;
   PortAudio clamps to the device's achievable minimum on each platform
   (Windows WASAPI ≈ 3 ms, Linux ALSA ≈ 1–3 ms, macOS CoreAudio ≈ 3 ms).

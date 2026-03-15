@@ -44,10 +44,14 @@ class Recorder:
         on_playback_chord:
             Optional callback called with the chord name on every playback beat.
         on_beat:
-            Optional callback called on every metronome beat with a boolean
-            ``is_downbeat`` flag (``True`` = beat 1, ``False`` = other beats).
-            When provided it is called *instead of* the built-in audio beep,
-            allowing the caller to drive a MIDI metronome.
+            Optional callback called on every metronome beat.  Signature:
+            ``on_beat(is_downbeat: bool, chords: list | None) -> None``.
+            ``is_downbeat`` is ``True`` for beat 1, ``False`` for all other
+            beats.  ``chords`` is the list of :class:`~chords.Chord` objects
+            active at the current measure during playback, or ``None`` during
+            precount/recording or when no chord data is available.
+            When provided this callback is called *instead of* the built-in
+            audio beep, allowing the caller to drive a MIDI metronome.
         """
         self._speak = speak
         self._tick = tick_sound

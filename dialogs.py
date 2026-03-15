@@ -693,7 +693,7 @@ def prompt_midi_metro_settings(
     duration_ms: int = 100,
     preview_fn=None,
 ) -> "tuple[int, int, int, int, int] | None":
-    """Show a dialog for configuring the MIDI metronome note numbers and channel.
+    """Show a dialog for configuring MIDI metronome note numbers, channel, and duration.
 
     Parameters
     ----------
