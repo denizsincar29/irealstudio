@@ -376,6 +376,9 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                 self._preview_stop: threading.Event | None = None
                 self._tap_times: list[float] = []
                 self._ctrls['bpm'].Bind(wx.EVT_KEY_DOWN, self._on_bpm_key)
+                if 'recording_bpm' in self._ctrls:
+                    self._ctrls['recording_bpm'].Bind(wx.EVT_KEY_DOWN,
+                                                       self._on_rec_bpm_key)
                 list(self._ctrls.values())[0].SetFocus()
 
             def _get_bpm(self) -> int:
@@ -403,6 +406,20 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                 elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
                     self._preview_metronome()
                     event.Skip()
+                else:
+                    event.Skip()
+
+            def _on_rec_bpm_key(self, event: wx.KeyEvent) -> None:
+                key = event.GetKeyCode()
+                if key in (wx.WXK_UP, wx.WXK_DOWN):
+                    step = 10 if event.ControlDown() else 1
+                    ctrl = self._ctrls['recording_bpm']
+                    try:
+                        val = max(BPM_MIN, min(BPM_MAX, int(ctrl.GetValue())))
+                    except ValueError:
+                        val = 120
+                    val += step if key == wx.WXK_UP else -step
+                    ctrl.SetValue(str(max(BPM_MIN, min(BPM_MAX, val))))
                 else:
                     event.Skip()
 
@@ -457,6 +474,134 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
 
         dlg = _ProjectSettingsDlg(parent)
         result = dlg.get_values() if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        return result
+    except Exception:
+        return None
+
+
+def prompt_bpm(title: str, prompt: str, default: int = 120,
+               parent=None) -> int | None:
+    """
+    Show a single-field BPM dialog with arrow-key adjustment and tap tempo.
+
+    * **Up / Down** — change BPM by 1 (hold **Ctrl** for ±10)
+    * **Space** — tap tempo
+    * **Enter** — play a short metronome preview then confirm
+
+    Returns the validated BPM integer on OK, or ``None`` if cancelled.
+    """
+    if not _IS_WINDOWS:
+        print(f"{title}: {prompt} [{default}]", flush=True)
+        try:
+            raw = input("> ").strip()
+            val = int(raw) if raw else default
+            return max(BPM_MIN, min(BPM_MAX, val))
+        except (ValueError, KeyboardInterrupt, EOFError):
+            return None
+
+    try:
+        import wx
+
+        class _BpmDlg(wx.Dialog):
+            def __init__(self, parent_wnd):
+                super().__init__(parent_wnd, title=title,
+                                 style=wx.DEFAULT_DIALOG_STYLE)
+
+                lbl  = wx.StaticText(self, label=prompt)
+                self._ctrl = wx.TextCtrl(self, value=str(default))
+
+                inner = wx.BoxSizer(wx.HORIZONTAL)
+                inner.Add(lbl,        flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                inner.Add(self._ctrl, proportion=1, flag=wx.EXPAND)
+
+                outer = wx.BoxSizer(wx.VERTICAL)
+                outer.Add(inner,
+                          flag=wx.EXPAND | wx.ALL, border=12)
+                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          border=12)
+                self.SetSizerAndFit(outer)
+
+                self._preview_stop: threading.Event | None = None
+                self._tap_times: list[float] = []
+
+                self._ctrl.Bind(wx.EVT_KEY_DOWN, self._on_key)
+                self._ctrl.SetFocus()
+                self._ctrl.SetInsertionPointEnd()
+
+            def _get(self) -> int:
+                try:
+                    return max(BPM_MIN, min(BPM_MAX, int(self._ctrl.GetValue())))
+                except ValueError:
+                    return default
+
+            def _set(self, bpm: int) -> None:
+                self._ctrl.SetValue(str(max(BPM_MIN, min(BPM_MAX, bpm))))
+
+            def _on_key(self, event: wx.KeyEvent) -> None:
+                key = event.GetKeyCode()
+                if key == wx.WXK_UP:
+                    step = 10 if event.ControlDown() else 1
+                    self._set(self._get() + step)
+                    self._preview_metronome()
+                elif key == wx.WXK_DOWN:
+                    step = 10 if event.ControlDown() else 1
+                    self._set(self._get() - step)
+                    self._preview_metronome()
+                elif key == wx.WXK_SPACE:
+                    self._tap_tempo()
+                elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+                    self._preview_metronome()
+                    event.Skip()
+                else:
+                    event.Skip()
+
+            def _preview_metronome(self) -> None:
+                if self._preview_stop is not None:
+                    self._preview_stop.set()
+                bpm = self._get()
+                stop_ev = threading.Event()
+                self._preview_stop = stop_ev
+                interval = 60.0 / bpm
+                total_beats = 4 * _BPM_PREVIEW_BARS
+
+                def _run() -> None:
+                    try:
+                        from sound import make_beep, play_sound
+                        tick = make_beep(1200, 30)
+                        tock = make_beep(800, 25)
+                    except Exception:
+                        return
+                    for i in range(total_beats):
+                        if stop_ev.is_set():
+                            break
+                        play_sound(tick if i % 4 == 0 else tock)
+                        time.sleep(interval)
+
+                threading.Thread(target=_run, daemon=True).start()
+
+            def _tap_tempo(self) -> None:
+                now = time.monotonic()
+                if self._tap_times and (now - self._tap_times[-1]) > 3.0:
+                    self._tap_times.clear()
+                self._tap_times.append(now)
+                if len(self._tap_times) > 10:
+                    self._tap_times = self._tap_times[-10:]
+                if len(self._tap_times) >= 2:
+                    intervals = [
+                        self._tap_times[i + 1] - self._tap_times[i]
+                        for i in range(len(self._tap_times) - 1)
+                    ]
+                    avg = sum(intervals) / len(intervals)
+                    self._set(round(60.0 / avg))
+                    self._preview_metronome()
+
+            def get_value(self) -> int:
+                return self._get()
+
+        dlg = _BpmDlg(parent)
+        result = dlg.get_value() if dlg.ShowModal() == wx.ID_OK else None
         dlg.Destroy()
         return result
     except Exception:
