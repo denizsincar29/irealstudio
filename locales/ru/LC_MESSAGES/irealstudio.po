@@ -50,15 +50,19 @@ msgid ""
 "==================================\n"
 "\n"
 "Navigation\n"
-"  Left / Right          Move cursor one chord\n"
-"  Alt+Left / Alt+Right  Move cursor one beat\n"
-"  Ctrl+Left / Ctrl+Right  Move cursor one measure\n"
-"  Ctrl+Home / Ctrl+End  Go to beginning / end\n"
-"  Shift+Left / Right    Extend selection\n"
+"  Left / Right                    Move cursor one chord\n"
+"  Shift+Left / Right              Extend selection by chord\n"
+"  Alt+Left / Alt+Right            Move cursor one beat\n"
+"  Shift+Alt+Left / Right          Extend selection by beat\n"
+"  Ctrl+Left / Ctrl+Right          Move cursor one measure\n"
+"  Shift+Ctrl+Left / Right         Extend selection by measure\n"
+"  Ctrl+Alt+Left / Right           Move cursor to structural marker\n"
+"  Shift+Ctrl+Alt+Left / Right     Extend selection to structural marker\n"
+"  Ctrl+Home / Ctrl+End            Go to beginning / end\n"
 "\n"
 "Playback & Recording\n"
 "  R                     Start / stop recording\n"
-"  Space                 Play / stop\n"
+"  Space                 Play chord on MIDI output (or play if no MIDI out)\n"
 "  Ctrl+Space            Stop and jump to last position\n"
 "  Escape                Stop recording or playback\n"
 "\n"
@@ -75,6 +79,9 @@ msgid ""
 "  Ctrl+Shift+A/B/C/D    Section A / B / C / D\n"
 "  Ctrl+Shift+V          Verse\n"
 "  Ctrl+Shift+I          Intro\n"
+"  Ctrl+Shift+S          Segno\n"
+"  Ctrl+Shift+Q          Coda\n"
+"  Ctrl+Shift+F          Fine\n"
 "\n"
 "Other\n"
 "  V                     Add volta / ending bracket\n"
@@ -94,44 +101,51 @@ msgstr ""
 "================================\n"
 "\n"
 "Навигация\n"
-"  Left / Right              Перемещение на один аккорд\n"
-"  Alt+Left / Alt+Right      Перемещение на одну долю\n"
-"  Ctrl+Left / Ctrl+Right    Перемещение на один такт\n"
-"  Ctrl+Home / Ctrl+End      В начало / в конец\n"
-"  Shift+Left / Right        Расширить выделение\n"
+"  Left / Right                        Перемещение на один аккорд\n"
+"  Shift+Left / Right                  Расширить выделение на аккорд\n"
+"  Alt+Left / Alt+Right                Перемещение на одну долю\n"
+"  Shift+Alt+Left / Right              Расширить выделение на долю\n"
+"  Ctrl+Left / Ctrl+Right              Перемещение на один такт\n"
+"  Shift+Ctrl+Left / Right             Расширить выделение на такт\n"
+"  Ctrl+Alt+Left / Right               Перейти к структурной метке\n"
+"  Shift+Ctrl+Alt+Left / Right         Расширить выделение до структурной метки\n"
+"  Ctrl+Home / Ctrl+End                В начало / в конец\n"
 "\n"
 "Воспроизведение и запись\n"
-"  R                         Начать / остановить запись\n"
-"  Space                     Воспроизвести / остановить\n"
-"  Ctrl+Space                Остановить и перейти к точке остановки\n"
-"  Escape                    Остановить запись или воспроизведение\n"
+"  R                                   Начать / остановить запись\n"
+"  Space                               Воспроизвести аккорд на MIDI (или пьесу)\n"
+"  Ctrl+Space                          Остановить и перейти к точке остановки\n"
+"  Escape                              Остановить запись или воспроизведение\n"
 "\n"
 "Редактирование\n"
-"  Delete / Backspace              Удалить аккорд под курсором\n"
-"  Ctrl+Delete / Ctrl+Backspace    Удалить структурную метку (раздел, повтор, N.C.)\n"
-"  Ctrl+Z / Ctrl+Y           Отменить / Повторить\n"
-"  Ctrl+X / Ctrl+C / Ctrl+V  Вырезать / Скопировать / Вставить аккорд\n"
-"  Ctrl+Return               Вставить аккорд (диалог)\n"
-"  N                         Вставить или удалить знак N.C. (нет аккорда)\n"
+"  Delete / Backspace                  Удалить аккорд под курсором\n"
+"  Ctrl+Delete / Ctrl+Backspace        Удалить структурную метку (раздел, повтор, N.C.)\n"
+"  Ctrl+Z / Ctrl+Y                     Отменить / Повторить\n"
+"  Ctrl+X / Ctrl+C / Ctrl+V            Вырезать / Скопировать / Вставить аккорд\n"
+"  Ctrl+Return                         Вставить аккорд (диалог)\n"
+"  N                                   Вставить или удалить знак N.C. (нет аккорда)\n"
 "\n"
 "Метки частей (Ctrl+Shift+буква)\n"
-"  Ctrl+Shift+A/B/C/D        Часть A / B / C / D\n"
-"  Ctrl+Shift+V              Куплет\n"
-"  Ctrl+Shift+I              Вступление\n"
+"  Ctrl+Shift+A/B/C/D                  Часть A / B / C / D\n"
+"  Ctrl+Shift+V                        Куплет\n"
+"  Ctrl+Shift+I                        Вступление\n"
+"  Ctrl+Shift+S                        Сеньо\n"
+"  Ctrl+Shift+Q                        Кода\n"
+"  Ctrl+Shift+F                        Фине\n"
 "\n"
 "Прочее\n"
-"  V                         Добавить вольту / окончание\n"
-"  / + (A–G)                 Добавить бас-ноту (слэш-аккорд)\n"
-"  P                         Озвучить полную позицию\n"
-"  D                         Смещение по доле (отладка)\n"
-"  Ctrl+N                    Новый проект\n"
-"  Ctrl+O                    Открыть файл\n"
-"  Ctrl+S                    Сохранить\n"
-"  Ctrl+E                    Экспорт в iReal Pro\n"
-"  Ctrl+Shift+E              Показать QR-код\n"
-"  Ctrl+L                    Прочитать последние записи журнала\n"
-"  F1                        Горячие клавиши\n"
-"  Ctrl+Q                    Выход\n"
+"  V                                   Добавить вольту / окончание\n"
+"  / + (A–G)                           Добавить бас-ноту (слэш-аккорд)\n"
+"  P                                   Озвучить полную позицию\n"
+"  D                                   Смещение по доле (отладка)\n"
+"  Ctrl+N                              Новый проект\n"
+"  Ctrl+O                              Открыть файл\n"
+"  Ctrl+S                              Сохранить\n"
+"  Ctrl+E                              Экспорт в iReal Pro\n"
+"  Ctrl+Shift+E                        Показать QR-код\n"
+"  Ctrl+L                              Прочитать последние записи журнала\n"
+"  F1                                  Горячие клавиши\n"
+"  Ctrl+Q                              Выход\n"
 
 msgid "Keyboard shortcuts dialog opened. Press OK to close."
 msgstr "Диалог горячих клавиш. Нажмите OK для закрытия."
@@ -621,6 +635,24 @@ msgstr "&Куплет"
 msgid "&Intro"
 msgstr "&Вступление"
 
+msgid "&Segno"
+msgstr "&Сеньо"
+
+msgid "&Coda"
+msgstr "&Кода"
+
+msgid "&Fine"
+msgstr "&Фине"
+
+msgid "Segno"
+msgstr "Сеньо"
+
+msgid "Coda"
+msgstr "Кода"
+
+msgid "Fine"
+msgstr "Фине"
+
 msgid "&Volta / Ending"
 msgstr "&Вольта / Окончание"
 
@@ -689,3 +721,191 @@ msgstr "Неизвестно"
 
 msgid "SEL:"
 msgstr "ВЫД:"
+
+# --- note letters (spoken note names in Russian solfège) ---
+msgid "C"
+msgstr "до"
+
+msgid "D"
+msgstr "ре"
+
+msgid "E"
+msgstr "ми"
+
+msgid "F"
+msgstr "фа"
+
+msgid "G"
+msgstr "соль"
+
+msgid "A"
+msgstr "ля"
+
+msgid "B"
+msgstr "си"
+
+# --- accidentals ---
+msgid "sharp"
+msgstr "диез"
+
+msgid "flat"
+msgstr "бемоль"
+
+# --- slash chord separator ---
+msgid "over"
+msgstr "над"
+
+# --- chord quality spoken names ---
+msgid "minor major 7"
+msgstr "минорный мажорный септаккорд"
+
+msgid "minor major 9"
+msgstr "минорный мажорный нонаккорд"
+
+msgid "half diminished"
+msgstr "полуменьшённый"
+
+msgid "half diminished flat 9"
+msgstr "полуменьшённый бемоль девять"
+
+msgid "half diminished 9"
+msgstr "полуменьшённый девять"
+
+msgid "minor 9"
+msgstr "минорный нонаккорд"
+
+msgid "minor 7 sharp 11"
+msgstr "минорный септаккорд диез одиннадцать"
+
+msgid "minor 13"
+msgstr "минорный тринадцатый"
+
+msgid "minor 7"
+msgstr "минорный септаккорд"
+
+msgid "minor 6 9"
+msgstr "минорный шесть девять"
+
+msgid "minor 6"
+msgstr "минорный секстаккорд"
+
+msgid "minor 11"
+msgstr "минорный ундецимаккорд"
+
+msgid "minor sharp 5"
+msgstr "минорный диез пять"
+
+msgid "minor"
+msgstr "минор"
+
+msgid "major 13"
+msgstr "мажорный тринадцатый"
+
+msgid "major 9"
+msgstr "мажорный нонаккорд"
+
+msgid "major 9 sharp 11"
+msgstr "мажорный нонаккорд диез одиннадцать"
+
+msgid "major 7 sharp 11"
+msgstr "мажорный септаккорд диез одиннадцать"
+
+msgid "major 7"
+msgstr "мажорный септаккорд"
+
+msgid "7 flat 9 sharp 11"
+msgstr "доминантовый бемоль девять диез одиннадцать"
+
+msgid "7 sharp 9 sharp 11"
+msgstr "доминантовый диез девять диез одиннадцать"
+
+msgid "7 flat 9 flat 5"
+msgstr "доминантовый бемоль девять бемоль пять"
+
+msgid "7 sharp 9 flat 5"
+msgstr "доминантовый диез девять бемоль пять"
+
+msgid "9 flat 5"
+msgstr "нонаккорд бемоль пять"
+
+msgid "7 flat 5"
+msgstr "доминантовый бемоль пять"
+
+msgid "7 sharp 9 sharp 5"
+msgstr "доминантовый диез девять диез пять"
+
+msgid "7 flat 9 sharp 5"
+msgstr "доминантовый бемоль девять диез пять"
+
+msgid "7 flat 9"
+msgstr "доминантовый бемоль девять"
+
+msgid "7 sharp 9"
+msgstr "доминантовый диез девять"
+
+msgid "9"
+msgstr "нонаккорд"
+
+msgid "7 sharp 11"
+msgstr "доминантовый диез одиннадцать"
+
+msgid "7 flat 13"
+msgstr "доминантовый бемоль тринадцать"
+
+msgid "13"
+msgstr "тринадцатый"
+
+msgid "6 9"
+msgstr "шесть девять"
+
+msgid "diminished 7"
+msgstr "уменьшённый септаккорд"
+
+msgid "diminished"
+msgstr "уменьшённый"
+
+msgid "augmented 7"
+msgstr "увеличенный септаккорд"
+
+msgid "augmented major 7"
+msgstr "увеличенный мажорный септаккорд"
+
+msgid "augmented"
+msgstr "увеличенный"
+
+msgid "7 sus 4"
+msgstr "доминантовый квартовый"
+
+msgid "sus 4"
+msgstr "квартовый"
+
+msgid "add 9"
+msgstr "с добавленной ноной"
+
+msgid "11"
+msgstr "ундецимаккорд"
+
+msgid "7"
+msgstr "септаккорд"
+
+msgid "6"
+msgstr "секстаккорд"
+
+# --- extension token spoken forms (used by _spoken_quality_fallback) ---
+msgid "sharp 11"
+msgstr "диез одиннадцать"
+
+msgid "flat 13"
+msgstr "бемоль тринадцать"
+
+msgid "sharp 9"
+msgstr "диез девять"
+
+msgid "flat 9"
+msgstr "бемоль девять"
+
+msgid "sharp 5"
+msgstr "диез пять"
+
+msgid "flat 5"
+msgstr "бемоль пять"

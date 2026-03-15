@@ -30,15 +30,19 @@ Keyboard Shortcuts – IReal Studio
 ==================================
 
 Navigation
-  Left / Right          Move cursor one chord
-  Alt+Left / Alt+Right  Move cursor one beat
-  Ctrl+Left / Ctrl+Right  Move cursor one measure
-  Ctrl+Home / Ctrl+End  Go to beginning / end
-  Shift+Left / Right    Extend selection
+  Left / Right                    Move cursor one chord
+  Shift+Left / Right              Extend selection by chord
+  Alt+Left / Alt+Right            Move cursor one beat
+  Shift+Alt+Left / Right          Extend selection by beat
+  Ctrl+Left / Ctrl+Right          Move cursor one measure
+  Shift+Ctrl+Left / Right         Extend selection by measure
+  Ctrl+Alt+Left / Right           Move cursor to structural marker
+  Shift+Ctrl+Alt+Left / Right     Extend selection to structural marker
+  Ctrl+Home / Ctrl+End            Go to beginning / end
 
 Playback & Recording
   R                     Start / stop recording
-  Space                 Play / stop
+  Space                 Play chord on MIDI output (or play if no MIDI out)
   Ctrl+Space            Stop and jump to last position
   Escape                Stop recording or playback
 
@@ -55,6 +59,9 @@ Section Marks (Ctrl+Shift+letter)
   Ctrl+Shift+A/B/C/D    Section A / B / C / D
   Ctrl+Shift+V          Verse
   Ctrl+Shift+I          Intro
+  Ctrl+Shift+S          Segno
+  Ctrl+Shift+Q          Coda
+  Ctrl+Shift+F          Fine
 
 Other
   V                     Add volta / ending bracket

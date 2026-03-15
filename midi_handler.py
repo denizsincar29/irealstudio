@@ -172,6 +172,52 @@ class MidiHandler:
                 pass
             self.midi_output = None
 
+    def send_chord(
+        self,
+        notes: list[int],
+        velocity: int = 64,
+        duration: float = 1.5,
+        channel: int = 0,
+    ) -> None:
+        """Play *notes* on the MIDI output port, releasing them after *duration* seconds.
+
+        Does nothing if no MIDI output port is open or *notes* is empty.
+
+        Parameters
+        ----------
+        notes:
+            MIDI note numbers to play simultaneously.
+        velocity:
+            Note-on velocity (0–127).
+        duration:
+            How long (seconds) to hold the notes before sending note-off.
+        channel:
+            MIDI channel (0-based, 0 = channel 1).
+        """
+        if not MIDO_AVAILABLE or self.midi_output is None or not notes:
+            return
+        try:
+            for n in notes:
+                self.midi_output.send(mido.Message('note_on', note=n,
+                                                   velocity=velocity,
+                                                   channel=channel))
+        except Exception as e:
+            _logger.error("MIDI send_chord note_on error: %s", e)
+            return
+
+        def _release():
+            time.sleep(duration)
+            try:
+                if self.midi_output is not None:
+                    for n in notes:
+                        self.midi_output.send(mido.Message('note_off', note=n,
+                                                           velocity=0,
+                                                           channel=channel))
+            except Exception as e:
+                _logger.error("MIDI send_chord note_off error: %s", e)
+
+        threading.Thread(target=_release, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

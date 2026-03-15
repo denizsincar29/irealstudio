@@ -12,6 +12,7 @@ from commands import (
     _CMD_EDIT_UNDO, _CMD_EDIT_REDO, _CMD_EDIT_CUT, _CMD_EDIT_COPY, _CMD_EDIT_PASTE,
     _CMD_INSERT_CHORD, _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
     _CMD_INSERT_SM_D, _CMD_INSERT_SM_V, _CMD_INSERT_SM_I,
+    _CMD_INSERT_SM_S, _CMD_INSERT_SM_Q, _CMD_INSERT_SM_F,
     _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS,
     _CMD_RECORD_START, _CMD_RECORD_PLAY, _CMD_RECORD_STOP,
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
@@ -275,6 +276,9 @@ class MenuMixin:
         sm_menu.Append(_CMD_INSERT_SM_D, _("&D (Section D)") + "\tCtrl+Shift+D")
         sm_menu.Append(_CMD_INSERT_SM_V, _("&Verse") + "\tCtrl+Shift+V")
         sm_menu.Append(_CMD_INSERT_SM_I, _("&Intro") + "\tCtrl+Shift+I")
+        sm_menu.Append(_CMD_INSERT_SM_S, _("&Segno") + "\tCtrl+Shift+S")
+        sm_menu.Append(_CMD_INSERT_SM_Q, _("&Coda") + "\tCtrl+Shift+Q")
+        sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine") + "\tCtrl+Shift+F")
         insert_menu.AppendSubMenu(sm_menu, _("&Section Mark"))
 
         insert_menu.Append(_CMD_INSERT_VOLTA, _("&Volta / Ending") + "\tV")
@@ -388,6 +392,12 @@ class MenuMixin:
                          id=_CMD_INSERT_SM_V)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('i'),
                          id=_CMD_INSERT_SM_I)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('s'),
+                         id=_CMD_INSERT_SM_S)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('q'),
+                         id=_CMD_INSERT_SM_Q)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('f'),
+                         id=_CMD_INSERT_SM_F)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_volta(),
                          id=_CMD_INSERT_VOLTA)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.toggle_no_chord(),
