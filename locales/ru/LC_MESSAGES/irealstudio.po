@@ -3,8 +3,8 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: \n"
-"POT-Creation-Date: \n"
-"PO-Revision-Date: \n"
+"POT-Creation-Date: 2026-01-01 00:00\n"
+"PO-Revision-Date: 2026-03-15 10:00\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "Language: ru\n"
@@ -148,7 +148,7 @@ msgstr ""
 "\n"
 "Экспорт в формат iReal Pro."
 
-msgid "(C) 2024 Deniz Sincar"
+msgid "(C) 2026 Deniz Sincar"
 msgstr "© 2026 Дениз Синджар"
 
 # --- undo / redo ---
@@ -269,7 +269,7 @@ msgstr "{section} в такте {m}"
 
 # --- bass note ---
 msgid "Bass Note"
-msgstr "Бас / обращениеОбращение"
+msgstr "Обращение / бас"
 
 msgid "Enter bass note (e.g. E, Bb):"
 msgstr "Введите басовую ноту (напр. E, Bb):"
@@ -372,17 +372,11 @@ msgstr "MIDI-устройства обновлены"
 msgid "MIDI input: {name}"
 msgstr "MIDI-вход: {name}"
 
-msgid "No MIDI input device"
-msgstr "Нет MIDI-устройства ввода"
-
 msgid "No MIDI devices found"
 msgstr "MIDI-устройства не найдены"
 
 msgid "MIDI output: {name}"
 msgstr "MIDI-выход: {name}"
-
-msgid "No MIDI output device"
-msgstr "Нет MIDI-устройства вывода"
 
 msgid "No MIDI output devices found"
 msgstr "MIDI-устройства вывода не найдены"

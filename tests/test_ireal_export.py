@@ -17,7 +17,7 @@ import os
 import unittest
 
 # Ensure the package root is on the path regardless of where tests are run from
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from chords import ChordProgression, TimeSignature, VoltaBracket, Position
 from urllib.parse import unquote
