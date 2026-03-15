@@ -732,27 +732,25 @@ def prompt_midi_metro_settings(
                 sizer = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
                 sizer.AddGrowableCol(1, 1)
 
-                def _row(label: str, ctrl: wx.Window) -> None:
-                    """Add a label+control pair; set the control's accessible name."""
-                    lbl_text = label.rstrip(':')
+                def _row(label: str, min_val: int, max_val: int, initial: int) -> wx.SpinCtrl:
+                    """Create a StaticText+SpinCtrl pair in that order.
+
+                    Creating the StaticText first (lower z-order/creation index) and the
+                    SpinCtrl immediately after is required for Windows UIA/MSAA to
+                    associate the label with the control — the foundation for NVDA/JAWS
+                    announcing the field name when the spinner receives focus.
+                    """
                     sizer.Add(wx.StaticText(self, label=label),
                               flag=wx.ALIGN_CENTER_VERTICAL)
+                    ctrl = wx.SpinCtrl(self, min=min_val, max=max_val, initial=initial)
                     sizer.Add(ctrl, flag=wx.EXPAND)
-                    # SetName() exposes the label to screen readers (NVDA/JAWS)
-                    # as the accessible name of the control.
-                    ctrl.SetName(lbl_text)
+                    return ctrl
 
-                self._on_note    = wx.SpinCtrl(self, min=0,  max=127,  initial=on_note)
-                self._off_note   = wx.SpinCtrl(self, min=0,  max=127,  initial=off_note)
-                self._velocity   = wx.SpinCtrl(self, min=1,  max=127,  initial=velocity)
-                self._channel    = wx.SpinCtrl(self, min=0,  max=15,   initial=channel)
-                self._duration   = wx.SpinCtrl(self, min=10, max=2000, initial=duration_ms)
-
-                _row(_("Downbeat MIDI note (0-127):"),   self._on_note)
-                _row(_("Upbeat MIDI note (0-127):"),     self._off_note)
-                _row(_("Velocity (1-127):"),              self._velocity)
-                _row(_("Channel (0-15, 0=melodic):"),    self._channel)
-                _row(_("Note length ms (10-2000):"),     self._duration)
+                self._on_note  = _row(_("Downbeat MIDI note (0-127):"),  0,   127, on_note)
+                self._off_note = _row(_("Upbeat MIDI note (0-127):"),    0,   127, off_note)
+                self._velocity = _row(_("Velocity (1-127):"),            1,   127, velocity)
+                self._channel  = _row(_("Channel (0-15, 0=melodic):"),  0,    15, channel)
+                self._duration = _row(_("Note length ms (10-2000):"),   10, 2000, duration_ms)
 
                 # Live-preview: play the note immediately whenever any spin
                 # value changes, so the user can hear the effect right away.
