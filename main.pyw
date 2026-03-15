@@ -309,7 +309,7 @@ class App:
                 try:
                     with open(cli_path, encoding='utf-8') as f:
                         self.progression = ChordProgression.from_json(f.read())
-                    self._current_file = cli_path
+                    self._apply_loaded_progression(cli_path)
                     self._loaded_at_startup = True
                     self.speak(f"Loaded {self.progression.title}")
                 except Exception as e:
@@ -320,21 +320,40 @@ class App:
             try:
                 with open(SAVE_FILE, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
-                self._current_file = Path(SAVE_FILE)
+                self._apply_loaded_progression(Path(SAVE_FILE))
                 self._loaded_at_startup = True
                 self.speak(f"Loaded {self.progression.title}")
             except Exception as e:
-                self.speak(f"Could not load: {e}")
+                self.speak(f"Could not load {SAVE_FILE}: {e}")
         elif Path("progression.json").exists():
             # Backward-compatibility: migrate from legacy JSON file
             try:
                 with open("progression.json", encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
-                self._current_file = None  # will prompt Save As on next Ctrl+S
+                self._apply_loaded_progression(None)  # prompt Save As on next Ctrl+S
                 self._loaded_at_startup = True
                 self.speak(f"Loaded {self.progression.title} (legacy JSON)")
             except Exception as e:
-                self.speak(f"Could not load: {e}")
+                self.speak(f"Could not load progression.json: {e}")
+
+    # ------------------------------------------------------------------
+    # Progression loading helpers
+    # ------------------------------------------------------------------
+
+    def _apply_loaded_progression(self, path: Path | None) -> None:
+        """Reset all dependent app state after ``self.progression`` has been replaced.
+
+        Called from every load path (startup auto-load, CLI load, and interactive
+        open) so that the cursor, undo/redo stacks, selection, recording BPM and
+        dirty flag all reflect the freshly loaded progression.
+        """
+        self._current_file = path
+        self._is_dirty = False
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self.cursor = Position(1, 1, self.progression.time_signature)
+        self.recording_bpm = self.progression.bpm
+        self._clear_selection()
 
     # ------------------------------------------------------------------
     # MIDI chord callback
@@ -1108,12 +1127,7 @@ class App:
             try:
                 with open(path, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
-                self._current_file = path
-                self._is_dirty = False
-                self._undo_stack.clear()
-                self._redo_stack.clear()
-                self.cursor = Position(1, 1, self.progression.time_signature)
-                self._clear_selection()
+                self._apply_loaded_progression(path)
                 self.speak(f"Opened {self.progression.title}")
             except Exception as e:
                 self.speak(f"Open failed: {e}")
