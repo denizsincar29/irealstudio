@@ -62,8 +62,8 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
     _defaults: dict = defaults or {}
     # Text-entry fields (title, composer, bpm only — key and style get choices)
     text_fields = [
-        ('title',    _('Title:'),    _defaults.get('title',    'My Progression')),
-        ('composer', _('Composer:'), _defaults.get('composer', 'Unknown')),
+        ('title',    _('Title:'),    _defaults.get('title',    _('My Progression'))),
+        ('composer', _('Composer:'), _defaults.get('composer', _('Unknown'))),
         ('bpm',      _('BPM:'),      str(_defaults.get('bpm',  120))),
     ]
     default_key   = _defaults.get('key',   'C')
@@ -281,8 +281,8 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
     """
     _defaults: dict = defaults or {}
     text_fields = [
-        ('title',         _('Title:'),           _defaults.get('title',         'My Progression')),
-        ('composer',      _('Composer:'),        _defaults.get('composer',      'Unknown')),
+        ('title',         _('Title:'),           _defaults.get('title',         _('My Progression'))),
+        ('composer',      _('Composer:'),        _defaults.get('composer',      _('Unknown'))),
         ('bpm',           _('BPM:'),             str(_defaults.get('bpm',       120))),
         ('recording_bpm', _('Recording BPM:'),   str(_defaults.get('recording_bpm', 120))),
         ('time_signature',_('Time Signature:'),  _defaults.get('time_signature', '4/4')),

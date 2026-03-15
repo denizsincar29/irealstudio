@@ -1607,12 +1607,12 @@ Other
             self._overwrite_item.Check(mode == RECORDING_MODE_OVERWRITE)
         if self._overwrite_whole_item:
             self._overwrite_whole_item.Enable(mode == RECORDING_MODE_OVERWRITE)
-        _MODE_LABELS = {
+        mode_labels = {
             RECORDING_MODE_OVERDUB:    _('overdub'),
             RECORDING_MODE_OVERWRITE:  _('overwrite'),
         }
         self.speak(_("Recording mode: {mode}").format(
-            mode=_MODE_LABELS.get(mode, mode)))
+            mode=mode_labels.get(mode, mode)))
 
     def _toggle_overwrite_whole(self) -> None:
         self.overwrite_whole_measure = not self.overwrite_whole_measure
@@ -2173,7 +2173,7 @@ Other
     def _schedule_display_update(self) -> None:
         if self._frame is None:
             return
-        bpm_info = f"BPM: {self.progression.bpm}"
+        bpm_info = f"{_('BPM:')} {self.progression.bpm}"
         if self.recording_bpm != self.progression.bpm:
             bpm_info += f"  {_('Rec BPM')}: {self.recording_bpm}"
         dirty_marker = "*" if self._is_dirty else ""
@@ -2185,11 +2185,11 @@ Other
             AppState.PLAYING:   _("playing"),
         }
         state_label = _state_labels.get(self._recorder.state, self._recorder.state)
-        _MODE_LABELS = {
+        mode_labels = {
             RECORDING_MODE_OVERDUB:    _('overdub'),
             RECORDING_MODE_OVERWRITE:  _('overwrite'),
         }
-        rec_mode_label = _MODE_LABELS.get(self.recording_mode, self.recording_mode)
+        rec_mode_label = mode_labels.get(self.recording_mode, self.recording_mode)
         rec_mode_info = (
             f" [{rec_mode_label}"
             + (" " + _("whole") if self.overwrite_whole_measure and self.recording_mode == RECORDING_MODE_OVERWRITE else "")
@@ -2210,7 +2210,7 @@ Other
         # Show selection info if active
         if self._sel_anchor is not None and self._sel_active is not None:
             n = len(self._chords_in_selection())
-            lines[3] += "  [SEL: " + ngettext("{n} chord", "{n} chords", n).format(n=n) + "]"
+            lines[3] += "  [" + _("SEL:") + " " + ngettext("{n} chord", "{n} chords", n).format(n=n) + "]"
         for lbl, text in zip(self._status_labels, lines):
             lbl.SetLabel(text)
         wx.CallLater(50, self._schedule_display_update)

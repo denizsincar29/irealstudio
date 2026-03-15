@@ -652,3 +652,12 @@ msgstr "&О программе IReal Studio"
 
 msgid "&Help"
 msgstr "&Справка"
+
+msgid "My Progression"
+msgstr "Моя прогрессия"
+
+msgid "Unknown"
+msgstr "Неизвестно"
+
+msgid "SEL:"
+msgstr "ВЫД:"
