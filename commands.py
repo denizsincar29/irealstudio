@@ -30,6 +30,7 @@ _CMD_CHORD_PLAY_BOTH    = 3013  # chord playback: both
 _CMD_MIDI_METRO_TOGGLE  = 3020  # MIDI metronome: enable / disable
 _CMD_MIDI_METRO_SETUP   = 3021  # MIDI metronome: configure notes and channel
 _CMD_MIDI_METRO_SMART   = 3022  # MIDI metronome: toggle chord-aware smart mode
+_CMD_METRO_SETTINGS     = 3023  # Centralized metronome settings dialog
 _LANG_BASE              = 3100  # IDs 3100..3199 → language indices 0..99
 _LANGUAGES              = [('en', 'English'), ('ru', 'Русский')]
 _CMD_EDIT_UNDO          = 4001

@@ -42,6 +42,7 @@ from app_settings import (
     _load_app_settings, _save_settings_file,
     MIDI_METRO_ON_NOTE, MIDI_METRO_OFF_NOTE, MIDI_METRO_VELOCITY, MIDI_METRO_CHANNEL,
     MIDI_METRO_DURATION_MS, MIDI_METRO_SMART,
+    AUDIO_METRO_COMPENSATION_MS, MIDI_METRO_COMPENSATION_MS, MAX_COMPENSATION_MS,
 )
 from app_menu import MenuMixin
 from app_keys import KeysMixin
@@ -390,6 +391,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self.midi_metro_duration_ms: int = MIDI_METRO_DURATION_MS
         # Chord-aware smart metronome: fifth/fourth on downbeat, root on upbeat
         self.midi_metro_smart: bool = MIDI_METRO_SMART
+        # Latency compensation (ms) for audio and MIDI metronomes
+        self.audio_compensation_ms: int = AUDIO_METRO_COMPENSATION_MS
+        self.midi_compensation_ms: int = MIDI_METRO_COMPENSATION_MS
+        # Last chord committed during recording (used by smart metronome)
+        self._smart_metro_last_chord: "Chord | None" = None
 
         # Unsaved-changes tracking
         self._is_dirty: bool = False
@@ -424,6 +430,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
 
         self._midi.init()
         self._apply_saved_settings()
+        # Sync compensation values to the recorder after settings are loaded.
+        self._sync_compensation_to_recorder()
 
         # wxPython frame, status labels, and menu handles (created in run())
         self._frame = None
@@ -431,8 +439,6 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._midi_menu = None
         self._midi_out_menu = None
         self._sound_out_menu = None
-        self._midi_metro_toggle_item = None
-        self._midi_metro_smart_item = None
         self._chord_grid: ChordGridPanel | None = None
         # Cached state tuple used to detect changes before refreshing the chord grid.
         # Compared in _schedule_display_update; Refresh() is called only on change.
@@ -514,6 +520,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.progression.total_measures = measure
         if self.recording_mode == RECORDING_MODE_OVERWRITE:
             self._overwrite_recorded.add((measure, beat))
+        # Track the most recently committed chord so smart metronome can
+        # use it during recording (when no playback chord data is available).
+        self._smart_metro_last_chord = chord
         self._mark_dirty()
         self.speak(chord_name_to_spoken(chord.name))
 
@@ -593,10 +602,12 @@ class App(MenuMixin, KeysMixin, IOMixin):
         sends a short note-on/note-off pair on the configured MIDI channel
         so external MIDI devices or a DAW can play the metronome sound.
 
-        When ``midi_metro_smart`` is also ``True`` *and* chord data is available
-        (i.e. during playback), note selection is chord-aware: the perfect fifth
-        of the current chord root (or fourth for sus chords) on the downbeat, and
-        the root note on upbeats, constrained to C6–G7 (MIDI 84–103).
+        When ``midi_metro_smart`` is also ``True``, note selection is
+        chord-aware: the perfect fifth of the current chord root (or fourth for
+        sus chords) on the downbeat, and the root note on upbeats, constrained
+        to C6–G7 (MIDI 84–103).  During playback the current chord list is
+        used; during recording the most recently committed chord is used so the
+        metronome adapts in real time as new chords are played.
 
         Otherwise (MIDI disabled, no output port, or any send error) the method
         plays the built-in audio tick/tock so timing feedback is never silent.
@@ -608,11 +619,20 @@ class App(MenuMixin, KeysMixin, IOMixin):
             return
         # Determine which note to play.
         note: int | None = None
-        if self.midi_metro_smart and chords:
-            note = self._smart_metro_note(
-                chords[0].chord, is_downbeat,
-                self._SMART_METRO_MIN, self._SMART_METRO_MAX,
-            )
+        if self.midi_metro_smart:
+            if chords:
+                # Playback: use chord from progression at current position.
+                note = self._smart_metro_note(
+                    chords[0].chord, is_downbeat,
+                    self._SMART_METRO_MIN, self._SMART_METRO_MAX,
+                )
+            elif self._smart_metro_last_chord is not None:
+                # Recording: use most recently committed chord so the
+                # metronome adapts to chord changes in real time.
+                note = self._smart_metro_note(
+                    self._smart_metro_last_chord, is_downbeat,
+                    self._SMART_METRO_MIN, self._SMART_METRO_MAX,
+                )
         if note is None:
             note = self.midi_metro_on_note if is_downbeat else self.midi_metro_off_note
         try:
@@ -844,6 +864,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.midi_metro_duration_ms = max(10, min(2000, int(settings['midi_metro_duration_ms'])))
         if 'midi_metro_smart' in settings:
             self.midi_metro_smart = bool(settings['midi_metro_smart'])
+        if 'audio_compensation_ms' in settings:
+            self.audio_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(settings['audio_compensation_ms'])))
+        if 'midi_compensation_ms' in settings:
+            self.midi_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(settings['midi_compensation_ms'])))
 
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
@@ -867,6 +891,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_metro_channel': self.midi_metro_channel,
             'midi_metro_duration_ms': self.midi_metro_duration_ms,
             'midi_metro_smart': self.midi_metro_smart,
+            'audio_compensation_ms': self.audio_compensation_ms,
+            'midi_compensation_ms': self.midi_compensation_ms,
         }
         _save_settings_file(settings)
 
