@@ -1242,3 +1242,33 @@
 10:57:07 INFO  MIDI: 2 devices found
 10:57:07 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
 10:57:07 INFO  MIDI connected: MOTU M Series MIDI In 0
+11:17:40 INFO  MIDI: 2 devices found
+11:17:40 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+11:17:40 INFO  MIDI connected: MOTU M Series MIDI In 0
+11:17:40 INFO  IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла.
+11:17:40 DEBUG Update check failed: HTTP Error 404: Not Found
+11:17:55 DEBUG msgfmt not found; cannot recompile 'ru' translation
+11:17:55 INFO  Loaded 'ru' translation from C:\Users\user\files\pythons\irealstudio\locales
+11:17:55 INFO  Язык изменён. Перезапустите IReal Studio для полного применения.
+11:18:19 INFO  MIDI out: Nord Piano 6 MIDI 2
+11:18:37 DEBUG MIDI reader thread stopped
+11:18:37 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+11:18:37 INFO  MIDI connected: Nord Piano 6 MIDI 1
+11:18:37 INFO  MIDI-вход: Nord Piano 6 MIDI 1
+11:18:38 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+11:18:38 DEBUG MIDI reader thread stopped
+11:19:16 INFO  MIDI: 2 devices found
+11:19:16 DEBUG MIDI reader thread started for: MOTU M Series MIDI In 0
+11:19:16 INFO  MIDI connected: MOTU M Series MIDI In 0
+11:19:16 DEBUG msgfmt not found; cannot recompile 'ru' translation
+11:19:16 INFO  Loaded 'ru' translation from C:\Users\user\files\pythons\irealstudio\locales
+11:19:16 DEBUG MIDI reader thread stopped
+11:19:16 DEBUG MIDI reader thread started for: Nord Piano 6 MIDI 1
+11:19:16 INFO  MIDI connected: Nord Piano 6 MIDI 1
+11:19:16 INFO  MIDI out: Nord Piano 6 MIDI 2
+11:19:16 INFO  IReal Studio готов. Нажмите Ctrl+N для нового проекта или Ctrl+O для открытия файла.
+11:19:16 DEBUG Update check failed: HTTP Error 404: Not Found
+11:19:20 INFO  bar 1 beat 1
+11:19:21 INFO  bar 1 beat 1
+11:19:30 DEBUG Closing MIDI port: Nord Piano 6 MIDI 1
+11:19:30 DEBUG MIDI reader thread stopped

@@ -1,15 +1,4 @@
-# task
-Fix the error of the app not starting up with an UnboundLocalError.
-```
-Traceback (most recent call last):                                                                                      
-  File "C:\Users\user\files\pythons\irealstudio\main.py", line 2291, in <module>                                        
-    app.run()                                                                                                           
-    ~~~~~~~^^                                                                                                           
-  File "C:\Users\user\files\pythons\irealstudio\main.py", line 1728, in run                                             
-    self.speak(_("IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."))                       
-               ^                                                                                                        
-UnboundLocalError: cannot access local variable '_' where it is not associated with a value
-```
-
-Carefully check the code and identify similar errors.
-Make nuitka config to make the exe windowed if there is any nuitka config for the app, because changing py to pyw silents all the console output, which is not ideal for debugging when ran from the command line.
+# Task
+1. not everything in the app is translated. Translate the whole app, including the menus, buttons and every single string. Carefully check the app for any untranslated strings and translate them as well.
+2. The language should be in a submenu, not as a dialog. The user should be able to change the language from the settings menu, and the app should remember the selected language for future use.
+3. Carefully check the code for anything that's now not used, like some dialogs that aren't accessed anymore due to new submenus or whatever.
