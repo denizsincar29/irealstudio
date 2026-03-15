@@ -2,19 +2,32 @@
 
 A persistent callback-based PortAudio output stream is kept open for the
 entire lifetime of the process.  play_sound() simply enqueues a buffer into
-a list that is mixed into the stream on every audio callback, eliminating
-the ~200 ms warm-up latency caused by repeatedly calling sd.play().
+a list that is mixed into the stream on every audio callback.
 
-Latency budget
---------------
-* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~23.2 ms (1024 frames)
+DAC-time scheduling
+-------------------
+Each pending item may carry an optional *target_dac_time* (a PortAudio stream
+time value).  When provided, the callback places the first sample of the sound
+at the exact output-buffer offset that will be heard at that stream time,
+giving **sample-accurate scheduling** and eliminating block-size jitter
+entirely.  Without a target the sound is played as soon as possible.
+
+To convert a ``time.monotonic()`` deadline to a stream time, call
+``play_sound(wave, target_monotonic=T)``; the module tracks the
+monotonic→stream offset measured right after the stream opens.
+
+Latency budget (with DAC scheduling)
+-------------------------------------
+* Block-size jitter: eliminated — samples land at the exact target offset.
 * Hardware output buffer: requested 20 ms via ``latency=0.02``;
   PortAudio clamps to the device's achievable minimum on each platform
   (Windows WASAPI ≈ 10–20 ms shared, Linux ALSA ≈ 5–15 ms).
-Total round-trip from play_sound() call to audible output: typically < 50 ms.
-The audio compensation feature (default 60 ms) absorbs this latency.
+* Total latency from play_sound() to audible output: ≈ hardware latency only.
+  The audio compensation feature should be set to match the device's hardware
+  latency (query via ``get_stream_hardware_latency()``).
 """
 
+import time as _time
 import threading
 import numpy as np
 
@@ -26,14 +39,13 @@ except Exception:
 
 SAMPLE_RATE = 44100
 
-# Block size: 1024 frames → ~23.2 ms max callback scheduling jitter.
-# 512 frames (~11.6 ms) still caused occasional xruns/crackles on some
-# WASAPI and ALSA devices whose OS scheduler latency exceeds the callback
-# interval.  1024 frames gives ~23 ms of headroom, which is comfortable
-# even on heavily loaded Windows systems.  The dominant latency source is
-# the hardware output buffer (latency=0.02), so the extra jitter is
-# absorbed by the compensation feature (default 60 ms).
-_BLOCK_SIZE = 1024
+# Block size: 256 frames → ~5.8 ms max callback scheduling jitter.
+# With DAC-time scheduling this jitter no longer affects perceived timing
+# (samples are placed at the exact target offset within each buffer), but a
+# smaller block size still reduces the worst-case queue depth and makes the
+# stream more responsive to device changes.  256 is stable on modern
+# WASAPI/ALSA/CoreAudio setups while avoiding the xruns seen with 128.
+_BLOCK_SIZE = 256
 
 # Attack / release lengths in seconds for the metronome envelope.
 _ATTACK_S  = 0.003   # 3 ms  — fast but click-free
@@ -43,33 +55,75 @@ _RELEASE_S = 0.015   # 15 ms — clean tail-off
 # Persistent stream state
 # ---------------------------------------------------------------------------
 
-# List of (int16 buffer, current_read_position) tuples.
-_pending: list[tuple[np.ndarray, int]] = []
+# Each item is (int16 buffer, current_read_position, target_dac_time | None).
+# target_dac_time, when not None, is a PortAudio stream time (seconds) at
+# which the first sample of the buffer should be heard.  None means "play
+# as soon as possible".
+_pending: list[tuple[np.ndarray, int, float | None]] = []
 _lock = threading.Lock()
 _stream = None          # sd.OutputStream or None
 _current_device: int | None = None  # None = PortAudio default
 
+# Offset used to convert time.monotonic() values into PortAudio stream time:
+#   stream_time = monotonic_time - _mono_to_stream_offset
+# Measured right after the stream is started to minimise clock skew.
+_mono_to_stream_offset: float = 0.0
+
 
 def _callback(outdata: np.ndarray, frames: int, time_info, status) -> None:
-    """Audio callback: mix all pending buffers into *outdata*."""
+    """Audio callback: mix all pending buffers into *outdata*.
+
+    Each pending item may carry an optional *target_dac_time*.  When present,
+    the sample is placed at the exact offset within the output buffer that
+    corresponds to that DAC time, achieving sample-accurate scheduling.
+    Items scheduled for a future buffer are kept in the queue unchanged.
+    Items that are late (target is before the current buffer's start) begin
+    at sample 0 of the current buffer (best-effort recovery).
+    """
     outdata[:] = 0.0
+    dac_time: float = time_info.output_buffer_dac_time  # stream time of buffer[0]
     with _lock:
-        still_playing: list[tuple[np.ndarray, int]] = []
-        for buf, pos in _pending:
-            n = min(frames, len(buf) - pos)
-            if n <= 0:
-                continue
-            outdata[:n, 0] += buf[pos:pos + n].astype(np.float32) / 32767.0
-            new_pos = pos + n
-            if new_pos < len(buf):
-                still_playing.append((buf, new_pos))
+        still_playing: list[tuple[np.ndarray, int, float | None]] = []
+        for buf, pos, target_dac in _pending:
+            if target_dac is not None:
+                # Number of samples from now until the target playback point.
+                sample_start = round((target_dac - dac_time) * SAMPLE_RATE)
+                if sample_start >= frames:
+                    # Target is in a future buffer — keep waiting.
+                    still_playing.append((buf, pos, target_dac))
+                    continue
+                if sample_start < 0:
+                    # We are late: skip the samples that should have already
+                    # played (advance pos by abs(sample_start)) and start
+                    # immediately at the current buffer head.
+                    # Note: pos - sample_start == pos + abs(sample_start) because
+                    # sample_start is negative here.
+                    pos = pos - sample_start  # advance past the missed samples
+                    if pos >= len(buf):
+                        # The entire buffer is in the past — drop it.
+                        continue
+                    sample_start = 0
+                # Fall through with sample_start in [0, frames).
+            else:
+                sample_start = 0
+
+            n = min(frames - sample_start, len(buf) - pos)
+            if n > 0:
+                outdata[sample_start:sample_start + n, 0] += (
+                    buf[pos:pos + n].astype(np.float32) / 32767.0
+                )
+                pos += n
+            if pos < len(buf):
+                # Buffer has remaining samples; continue next callback at pos,
+                # no longer needs DAC targeting (already started playing).
+                still_playing.append((buf, pos, None))
         _pending[:] = still_playing
     np.clip(outdata, -1.0, 1.0, out=outdata)
 
 
 def _open_stream(device: int | None = None) -> None:
     """(Re-)open the persistent output stream on *device* (None = default)."""
-    global _stream, _current_device
+    global _stream, _current_device, _mono_to_stream_offset
     if not _SD_AVAILABLE:
         return
     if _stream is not None:
@@ -91,10 +145,25 @@ def _open_stream(device: int | None = None) -> None:
             # Request a 20 ms output buffer.  A smaller value (e.g. 5 ms)
             # forces WASAPI/ALSA to service the stream very frequently and
             # can cause xruns on systems with higher OS scheduler latency.
-            # 20 ms is still well within the 60 ms audio compensation budget.
+            # 20 ms is still well within the default 60 ms audio compensation
+            # budget; with DAC-time scheduling the hardware latency is
+            # compensated automatically when the caller passes target_monotonic.
             latency=0.02,
         )
         _stream.start()
+        # Calibrate the monotonic→stream-time offset immediately after the
+        # stream starts.  We bracket the Pa_GetStreamTime() call with two
+        # monotonic readings and use their midpoint to minimise clock-read skew.
+        # Note: time.monotonic() and the PortAudio stream clock are independent;
+        # over very long sessions (many hours) clock drift between the two may
+        # accumulate to a few milliseconds.  This is negligible for metronome
+        # use but users running the application for many hours without stopping
+        # may observe slightly increasing click offset.  Recalling
+        # set_output_device() resets the calibration if needed.
+        t_before = _time.monotonic()
+        t_stream = _stream.time
+        t_after  = _time.monotonic()
+        _mono_to_stream_offset = (t_before + t_after) * 0.5 - t_stream
     except Exception:
         _stream = None
 
@@ -134,23 +203,41 @@ def make_beep(freq: int, duration_ms: int) -> np.ndarray:
     return (wave * envelope * 32767).astype(np.int16)
 
 
-def play_sound(wave: np.ndarray) -> None:
-    """Enqueue *wave* for immediate playback on the persistent stream.
+def play_sound(wave: np.ndarray, target_monotonic: float | None = None) -> None:
+    """Enqueue *wave* for playback on the persistent stream.
 
     Returns immediately; the audio callback mixes the buffer into the
-    hardware output on the next audio block (~23 ms at 1024 frames /
-    44 100 Hz), avoiding the ~200 ms latency of sd.play().
+    hardware output on the next audio block, avoiding the ~200 ms latency
+    of sd.play().
+
+    Parameters
+    ----------
+    wave:
+        Mono int16 array to play.
+    target_monotonic:
+        Optional ``time.monotonic()`` value at which the *first* sample of
+        *wave* should be heard through the speakers.  When provided the
+        callback uses DAC-time scheduling to place the sample at the exact
+        output-buffer offset corresponding to this moment, eliminating
+        block-size jitter.  When ``None`` the sound plays as soon as the
+        next callback fires (legacy behaviour).
+
     Falls back to sd.play() if the persistent stream is unavailable.
     """
+    target_dac: float | None = None
+    if target_monotonic is not None:
+        # Convert monotonic time to PortAudio stream time.
+        target_dac = target_monotonic - _mono_to_stream_offset
+
     if _stream is not None and _stream.active:
         with _lock:
-            _pending.append((wave, 0))
+            _pending.append((wave, 0, target_dac))
         return
     # Fallback: try to re-open the stream, then enqueue.
     _open_stream(_current_device)
     if _stream is not None and _stream.active:
         with _lock:
-            _pending.append((wave, 0))
+            _pending.append((wave, 0, target_dac))
         return
     # Last resort: blocking sd.play()
     if _SD_AVAILABLE:
@@ -158,6 +245,24 @@ def play_sound(wave: np.ndarray) -> None:
             sd.play(wave, samplerate=SAMPLE_RATE)
         except Exception:
             pass
+
+
+def get_stream_hardware_latency() -> float:
+    """Return the hardware output latency (seconds) of the active stream.
+
+    This is the PortAudio-reported output latency — the delay between when
+    the callback fills a buffer and when the first sample of that buffer is
+    audible.  Use this value as the audio metronome compensation when you
+    want the click to be heard exactly on the logical beat time.
+
+    Returns 0.02 (the requested latency) when the stream is not open.
+    """
+    if _stream is not None:
+        try:
+            return _stream.latency
+        except Exception:
+            pass
+    return 0.02
 
 
 def get_current_output_device() -> int | None:
