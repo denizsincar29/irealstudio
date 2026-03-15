@@ -1,8 +1,7 @@
-# bug
-fix the bug when openning the app or pressing arrows
-```
-  File "C:\Users\user\files\pythons\irealstudio\main.py", line 203, in _on_paint                                        
-    section_marks[sm.measure] = sm.name                                                                                 
-                                ^^^^^^^                                                                                 
-AttributeError: 'SectionMark' object has no attribute 'name'
-```
+# task
+1. The sound is still crackling in audio metronome but there is a delay. Previously you made block size smaller but it caused crackling and didn't reduce the delay. Make delay compensation feature by 60 ms (changable in advanced metronome settings via spinner).
+2. Make a centralized dialog with metronome settings instead of many submenus. It should include the smart chord aware metronome, midi metronome toggle, it's settings and compensation spinner.
+3. Make sure the localizations are correct for all the new features and dialogs and there are no hanging translation keys.
+4. Smart chord aware metronome playes up beat incorrectly, it should play the root of the chord. And when recording, it should quickly adapt to the chord changes of the very last chord played. Smart metronome should be off by default.
+5. The compensation mustn't effect midi metronome, since midi comes very very quickly. Omg stop, does microsoft gs wavetable synth have a delay? Maybe make a spinner for midi metronome compensation as well, default to 0.
+6. Make a button to reset the midi metronome sliders to default for the selected channel: if 0 than 91 and 84 notes with velosity 48, if 9 for drums than big drum and hihat with velosity 100.
