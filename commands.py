@@ -39,6 +39,7 @@ _CMD_EDIT_CUT           = 4003
 _CMD_EDIT_COPY          = 4004
 _CMD_EDIT_PASTE         = 4005
 _CMD_INSERT_CHORD       = 5001
+_CMD_EDIT_CHORD         = 5022
 _CMD_INSERT_SM_A        = 5010
 _CMD_INSERT_SM_B        = 5011
 _CMD_INSERT_SM_C        = 5012

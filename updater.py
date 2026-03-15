@@ -25,6 +25,12 @@ from typing import Callable
 
 from version import VERSION
 
+# True when running inside a Nuitka-compiled binary, False when running from source.
+try:
+    _IS_COMPILED: bool = bool(__compiled__)  # injected by Nuitka at compile time  # noqa: F821
+except NameError:
+    _IS_COMPILED = False
+
 _logger = logging.getLogger('irealstudio')
 
 _GITHUB_API_URL = (

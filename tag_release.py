@@ -14,8 +14,9 @@ The script:
 5. Checks the new version is strictly higher than the last tag.
 6. Collects a multiline changelog entry (press Enter twice quickly to finish).
 7. Writes ``news.md`` (current release) and updates ``changelog.md`` (history).
-8. Commits ``news.md`` and ``changelog.md``.
-9. Creates and pushes the git tag.
+8. Updates ``version.py`` with the new version number.
+9. Commits ``news.md``, ``changelog.md``, and ``version.py``.
+10. Creates and pushes the git tag.
 """
 
 import sys
@@ -79,6 +80,27 @@ def _read_multiline_changelog() -> str:
     while lines and lines[-1] == '':
         lines.pop()
     return '\n'.join(lines)
+
+
+def _update_version_py(version_tag: str) -> None:
+    """Write the new version string into ``version.py``.
+
+    ``version_tag`` may be prefixed with a lowercase or uppercase ``v``
+    (e.g. ``'v1.2.3'`` or ``'1.2.3'``); the prefix is stripped automatically.
+    Both ``VERSION`` and ``__version__`` are written so that all existing
+    import patterns continue to work.
+    """
+    ver_str = version_tag.removeprefix('v').removeprefix('V')
+    version_path = Path('version.py')
+    version_path.write_text(
+        '"""Single source of truth for the application version.\n\n'
+        'The release workflow and autoupdater both read this module.\n'
+        '"""\n\n'
+        f'VERSION = "{ver_str}"\n'
+        f'__version__ = VERSION\n',
+        encoding='utf-8',
+    )
+    print(f"Updated version.py → VERSION = \"{ver_str}\"")
 
 
 def _write_news(version: str, changelog: str) -> None:
@@ -146,9 +168,10 @@ def main() -> None:
         sys.exit(1)
 
     _write_news(version_tag, changelog)
+    _update_version_py(version_tag)
 
-    # Commit news.md and changelog.md
-    repo.index.add(['news.md', 'changelog.md'])
+    # Commit news.md, changelog.md and version.py
+    repo.index.add(['news.md', 'changelog.md', 'version.py'])
     repo.index.commit(f'chore: release {version_tag}')
     print(f"Committed release notes for {version_tag}")
 
