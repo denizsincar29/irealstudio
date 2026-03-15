@@ -621,14 +621,18 @@ class App(MenuMixin, KeysMixin, IOMixin):
         note: int | None = None
         if self.midi_metro_smart:
             if chords:
-                # Playback: use chord from progression at current position.
+                # Keep _smart_metro_last_chord current so non-chord beats
+                # (beats 2/3/4) in the same measure still use chord-aware
+                # note selection.
+                self._smart_metro_last_chord = chords[0].chord
                 note = self._smart_metro_note(
                     chords[0].chord, is_downbeat,
                     self._SMART_METRO_MIN, self._SMART_METRO_MAX,
                 )
             elif self._smart_metro_last_chord is not None:
-                # Recording: use most recently committed chord so the
-                # metronome adapts to chord changes in real time.
+                # Beats 2/3/4 during playback or any beat during recording:
+                # use the most recently seen chord so the metronome adapts
+                # in real time.
                 note = self._smart_metro_note(
                     self._smart_metro_last_chord, is_downbeat,
                     self._SMART_METRO_MIN, self._SMART_METRO_MAX,

@@ -7,11 +7,12 @@ the ~200 ms warm-up latency caused by repeatedly calling sd.play().
 
 Latency budget
 --------------
-* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~5.8 ms (256 frames)
+* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~11.6 ms (512 frames)
 * Hardware output buffer: requested 5 ms via ``latency=0.005``;
   PortAudio clamps to the device's achievable minimum on each platform
   (Windows WASAPI ≈ 3 ms, Linux ALSA ≈ 1–3 ms, macOS CoreAudio ≈ 3 ms).
-Total round-trip from play_sound() call to audible output: typically < 15 ms.
+Total round-trip from play_sound() call to audible output: typically < 20 ms.
+The audio compensation feature (default 60 ms) absorbs this latency.
 """
 
 import threading
@@ -25,13 +26,14 @@ except Exception:
 
 SAMPLE_RATE = 44100
 
-# Block size: 256 frames → ~5.8 ms max callback scheduling jitter.
-# Smaller values (e.g. 128) reduce jitter by ~3 ms but cause xruns on many
-# systems because the OS must service the callback every 2.9 ms — too tight
-# for reliable WASAPI/ALSA scheduling — leading to audible crackles.
+# Block size: 512 frames → ~11.6 ms max callback scheduling jitter.
+# 256 frames still caused occasional xruns/crackles on some WASAPI and ALSA
+# devices because the OS had to service the callback every ~5.8 ms — too
+# tight on systems with higher scheduler latency.  512 frames gives the OS a
+# comfortable ~11 ms window, eliminating crackles on virtually all hardware.
 # The dominant latency source is the hardware output buffer (latency=0.005),
-# so keeping a stable block size of 256 gives the best quality/latency trade-off.
-_BLOCK_SIZE = 256
+# so the extra ~6 ms of jitter is absorbed by the compensation feature.
+_BLOCK_SIZE = 512
 
 # Attack / release lengths in seconds for the metronome envelope.
 _ATTACK_S  = 0.003   # 3 ms  — fast but click-free
