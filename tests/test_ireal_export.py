@@ -20,6 +20,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from chords import ChordProgression, TimeSignature, VoltaBracket, Position
+from chords import voice_chord_midi
 from urllib.parse import unquote
 
 
@@ -1217,6 +1218,97 @@ class TestLocalization(unittest.TestCase):
             self.assertEqual(i18n._('Deleted'), 'Deleted')
         finally:
             i18n._translation = original_translation
+
+
+class TestVoiceChordMidi(unittest.TestCase):
+    """Tests for the voice_chord_midi() MIDI voicing helper."""
+
+    def _pc_set(self, notes: list[int]) -> set[int]:
+        """Return the pitch-class set of a list of MIDI notes."""
+        return {n % 12 for n in notes}
+
+    def test_dom7_omits_fifth(self):
+        """Dominant 7th chord should NOT include the perfect fifth (7 semitones)."""
+        notes, _ = voice_chord_midi('C7')
+        # C=0, E=4, Bb=10 — no G (7)
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # G not in C7 voicing
+        self.assertIn(0, pcs)      # C (root)
+        self.assertIn(4, pcs)      # E (major 3rd)
+        self.assertIn(10, pcs)     # Bb (minor 7th)
+
+    def test_maj7_omits_fifth(self):
+        """Major 7th chord should NOT include the perfect fifth."""
+        notes, _ = voice_chord_midi('Cmaj7')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # G
+        self.assertIn(0, pcs)      # C
+        self.assertIn(4, pcs)      # E
+        self.assertIn(11, pcs)     # B (major 7th)
+
+    def test_dom9_omits_fifth(self):
+        """Dominant 9th chord should NOT include the perfect fifth."""
+        notes, _ = voice_chord_midi('C9')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # G
+
+    def test_dom13_omits_fifth(self):
+        """Dominant 13th chord should NOT include the perfect fifth."""
+        notes, _ = voice_chord_midi('C13')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # G
+
+    def test_minor7_keeps_fifth(self):
+        """Minor 7th chord MUST keep the perfect fifth."""
+        notes, _ = voice_chord_midi('Cm7')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G (the fifth) should be present
+        self.assertIn(3, pcs)      # Eb (minor 3rd)
+        self.assertIn(10, pcs)     # Bb (minor 7th)
+
+    def test_minor9_keeps_fifth(self):
+        """Minor 9th chord MUST keep the perfect fifth."""
+        notes, _ = voice_chord_midi('Cm9')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G
+
+    def test_minor13_keeps_fifth(self):
+        """Minor 13th chord MUST keep the perfect fifth."""
+        notes, _ = voice_chord_midi('Cm13')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G
+
+    def test_minor_major7_keeps_fifth(self):
+        """Minor-major 7th chord MUST keep the perfect fifth."""
+        notes, _ = voice_chord_midi('CmM7')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G
+
+    def test_triad_keeps_fifth(self):
+        """Plain major triad keeps the fifth (no 7th present)."""
+        notes, _ = voice_chord_midi('C')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G must stay
+
+    def test_minor_triad_keeps_fifth(self):
+        """Minor triad keeps the fifth."""
+        notes, _ = voice_chord_midi('Cm')
+        pcs = self._pc_set(notes)
+        self.assertIn(7, pcs)      # G must stay
+
+    def test_aug7_no_perfect_fifth(self):
+        """Augmented 7th has #5 instead of 5; no perfect fifth to remove."""
+        notes, _ = voice_chord_midi('Caug7')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # No perfect G (expected: C, E, G#, Bb)
+        self.assertIn(8, pcs)      # G# (#5)
+
+    def test_7b5_no_perfect_fifth(self):
+        """7(b5) has b5 instead of 5; voicing should not contain perfect fifth."""
+        notes, _ = voice_chord_midi('C7(b5)')
+        pcs = self._pc_set(notes)
+        self.assertNotIn(7, pcs)   # no perfect G
+        self.assertIn(6, pcs)      # Gb/F# (b5)
 
 
 if __name__ == '__main__':

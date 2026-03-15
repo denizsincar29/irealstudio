@@ -27,7 +27,7 @@ from accessible_output3.outputs.auto import Auto
 from chords import (
     ChordProgression, Position, Chord,
     SECTION_KEYS, NOTE_NAMES, get_note_names_for_key,
-    chord_name_to_spoken,
+    chord_name_to_spoken, voice_chord_midi,
 )
 from sound import make_beep, get_output_devices, set_output_device, get_current_output_device
 from midi_handler import MidiHandler
@@ -117,6 +117,12 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._sel_anchor: Position | None = None
         self._sel_active: Position | None = None
 
+        # MIDI chord voicing: last root MIDI note played (for voice leading)
+        self._last_chord_root_midi: int | None = None
+
+        # Whether to automatically play the chord on the MIDI output when navigating
+        self.play_chord_on_nav: bool = False
+
         # Unsaved-changes tracking
         self._is_dirty: bool = False
 
@@ -127,6 +133,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._overdub_item = None
         self._overwrite_item = None
         self._overwrite_whole_item = None
+        self._play_on_nav_item = None
 
         # Recorder owns metronome/recording/playback state
         self._recorder = Recorder(
@@ -425,6 +432,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
             else:
                 _app_logger.warning("Saved audio output '%s' not found", audio_name)
 
+        self.play_chord_on_nav = bool(settings.get('play_chord_on_nav', False))
+
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
         current_out = get_current_output_device()
@@ -439,6 +448,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_input_device': self._midi.midi_input_name,
             'midi_output_device': self._midi.midi_output_name,
             'audio_output_device_name': audio_name,
+            'play_chord_on_nav': self.play_chord_on_nav,
         }
         _save_settings_file(settings)
 
@@ -450,19 +460,40 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._sel_anchor = None
         self._sel_active = None
 
-    def _extend_selection(self, direction: str) -> None:
+    def _extend_selection(self, direction: str,
+                           by_measure: bool = False,
+                           by_beat: bool = False,
+                           structural: bool = False) -> None:
+        ts = self.progression.time_signature
         if self._sel_anchor is None:
             self._sel_anchor = self.cursor
-        if direction == 'right':
-            nxt = self.progression.find_next_chord_to_right(self.cursor)
-            if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
-                self.cursor = nxt.position
-                self._sel_active = self.cursor
+        if structural:
+            if direction == 'right':
+                new_m = self.progression.navigate_next_structural(self.cursor.measure)
+            else:
+                new_m = self.progression.navigate_prev_structural(self.cursor.measure)
+            self.cursor = Position(new_m, 1, ts)
+        elif by_measure:
+            if direction == 'right':
+                new_m = self.progression.navigate_right_from_measure(self.cursor.measure)
+            else:
+                new_m = self.progression.navigate_left_from_measure(self.cursor.measure)
+            self.cursor = Position(new_m, 1, ts)
+        elif by_beat:
+            if direction == 'right':
+                self.cursor = self.cursor + 1
+            else:
+                self.cursor = self.cursor - 1
         else:
-            prv = self.progression.find_last_chord_to_left(self.cursor)
-            if prv and not self.progression.is_in_hidden_range(prv.position.measure):
-                self.cursor = prv.position
-                self._sel_active = self.cursor
+            if direction == 'right':
+                nxt = self.progression.find_next_chord_to_right(self.cursor)
+                if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
+                    self.cursor = nxt.position
+            else:
+                prv = self.progression.find_last_chord_to_left(self.cursor)
+                if prv and not self.progression.is_in_hidden_range(prv.position.measure):
+                    self.cursor = prv.position
+        self._sel_active = self.cursor
         self._announce_selection()
 
     def _announce_selection(self) -> None:
@@ -598,10 +629,12 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self._announce_position(announce_section=new_section != old_section)
         else:
             self._announce_position(announce_section=False)
+        self._maybe_play_chord_on_nav()
 
     def navigate_home(self) -> None:
         self.cursor = Position(1, 1, self.progression.time_signature)
         self._announce_position(announce_section=True)
+        self._maybe_play_chord_on_nav()
 
     def navigate_end(self) -> None:
         last_m = max(self.progression.last_measure(), 1)
@@ -611,6 +644,43 @@ class App(MenuMixin, KeysMixin, IOMixin):
             else Position(last_m, 1, self.progression.time_signature)
         )
         self._announce_position(announce_section=True)
+        self._maybe_play_chord_on_nav()
+
+    def navigate_structural(self, direction: str) -> None:
+        """Move the cursor to the next/previous structural marker."""
+        ts = self.progression.time_signature
+        old_measure = self.cursor.measure
+        if direction == 'right':
+            new_m = self.progression.navigate_next_structural(self.cursor.measure)
+        else:
+            new_m = self.progression.navigate_prev_structural(self.cursor.measure)
+        self.cursor = Position(new_m, 1, ts)
+        new_measure = self.cursor.measure
+        old_section = self.progression.get_section_at_measure(old_measure)
+        new_section = self.progression.get_section_at_measure(new_measure)
+        self._announce_position(announce_section=new_section != old_section)
+        self._maybe_play_chord_on_nav()
+
+    def _maybe_play_chord_on_nav(self) -> None:
+        """Play the chord at the cursor on MIDI output if the setting is enabled."""
+        if self.play_chord_on_nav and self._midi.midi_output is not None:
+            self.play_current_chord_midi()
+
+    def play_current_chord_midi(self) -> None:
+        """Play the chord at the current cursor position on the MIDI output.
+
+        Uses the voicing algorithm from ``voice_chord_midi()`` and updates
+        ``_last_chord_root_midi`` for voice-leading continuity.
+        """
+        chords = self.progression.find_chords_at_position(self.cursor)
+        if not chords:
+            return
+        item = chords[0]
+        chord_name = item.chord.name
+        notes, root_midi = voice_chord_midi(chord_name, self._last_chord_root_midi)
+        if notes:
+            self._last_chord_root_midi = root_midi
+            self._midi.send_chord(notes)
 
     # ------------------------------------------------------------------
     # Position announcement
@@ -620,6 +690,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         names = {
             '*A': _('Section A'), '*B': _('Section B'), '*C': _('Section C'),
             '*D': _('Section D'), '*V': _('Verse'), '*i': _('Intro'),
+            'S':  _('Segno'), 'Q': _('Coda'), 'f': _('Fine'),  # 'f' is the iReal Pro standard for Fine
         }
         return names.get(mark, mark)
 

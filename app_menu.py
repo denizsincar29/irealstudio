@@ -12,10 +12,11 @@ from commands import (
     _CMD_EDIT_UNDO, _CMD_EDIT_REDO, _CMD_EDIT_CUT, _CMD_EDIT_COPY, _CMD_EDIT_PASTE,
     _CMD_INSERT_CHORD, _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
     _CMD_INSERT_SM_D, _CMD_INSERT_SM_V, _CMD_INSERT_SM_I,
+    _CMD_INSERT_SM_S, _CMD_INSERT_SM_Q, _CMD_INSERT_SM_F,
     _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS,
     _CMD_RECORD_START, _CMD_RECORD_PLAY, _CMD_RECORD_STOP,
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
-    _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE,
+    _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE, _CMD_SETTINGS_PLAY_ON_NAV,
     _CMD_MIDI_REFRESH, _CMD_MIDI_NONE, _CMD_MIDI_OUT_REFRESH, _CMD_MIDI_OUT_NONE,
     _CMD_SOUND_OUT_REFRESH, _CMD_SOUND_OUT_NONE, _CMD_SOUND_OUT_DEFAULT,
     _CMD_HELP_SHORTCUTS, _CMD_HELP_ABOUT,
@@ -230,6 +231,17 @@ class MenuMixin:
                 _("Language changed. Please restart IReal Studio for full effect.")
             )
 
+    def _toggle_play_on_nav(self) -> None:
+        """Toggle the 'play chord when navigating' setting and persist it."""
+        self.play_chord_on_nav = not self.play_chord_on_nav
+        if self._play_on_nav_item is not None:
+            self._play_on_nav_item.Check(self.play_chord_on_nav)
+        self._save_app_settings()
+        if self.play_chord_on_nav:
+            self.speak(_("Play chord on navigation: on"))
+        else:
+            self.speak(_("Play chord on navigation: off"))
+
     # ------------------------------------------------------------------
     # Menu building
     # ------------------------------------------------------------------
@@ -275,6 +287,9 @@ class MenuMixin:
         sm_menu.Append(_CMD_INSERT_SM_D, _("&D (Section D)") + "\tCtrl+Shift+D")
         sm_menu.Append(_CMD_INSERT_SM_V, _("&Verse") + "\tCtrl+Shift+V")
         sm_menu.Append(_CMD_INSERT_SM_I, _("&Intro") + "\tCtrl+Shift+I")
+        sm_menu.Append(_CMD_INSERT_SM_S, _("&Segno") + "\tCtrl+Shift+S")
+        sm_menu.Append(_CMD_INSERT_SM_Q, _("&Coda") + "\tCtrl+Shift+Q")
+        sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine") + "\tCtrl+Shift+F")
         insert_menu.AppendSubMenu(sm_menu, _("&Section Mark"))
 
         insert_menu.Append(_CMD_INSERT_VOLTA, _("&Volta / Ending") + "\tV")
@@ -306,6 +321,12 @@ class MenuMixin:
         # --- Settings ---
         settings_menu = wx.Menu()
         settings_menu.Append(_CMD_SETTINGS_PROJECT, _("&Project Settings...") + "\tCtrl+P")
+
+        # Play chord on navigation toggle
+        settings_menu.AppendSeparator()
+        self._play_on_nav_item = settings_menu.AppendCheckItem(
+            _CMD_SETTINGS_PLAY_ON_NAV, _("&Play chord when navigating"))
+        self._play_on_nav_item.Check(self.play_chord_on_nav)
 
         # Device sub-menus under Settings
         settings_menu.AppendSeparator()
@@ -388,6 +409,12 @@ class MenuMixin:
                          id=_CMD_INSERT_SM_V)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('i'),
                          id=_CMD_INSERT_SM_I)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('s'),
+                         id=_CMD_INSERT_SM_S)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('q'),
+                         id=_CMD_INSERT_SM_Q)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('f'),
+                         id=_CMD_INSERT_SM_F)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_volta(),
                          id=_CMD_INSERT_VOLTA)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.toggle_no_chord(),
@@ -412,6 +439,8 @@ class MenuMixin:
         # Settings
         self._frame.Bind(wx.EVT_MENU, lambda e: self._open_project_settings(),
                          id=_CMD_SETTINGS_PROJECT)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._toggle_play_on_nav(),
+                         id=_CMD_SETTINGS_PLAY_ON_NAV)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_check_for_updates(),
                          id=_CMD_SETTINGS_UPDATE)
         self._frame.Bind(wx.EVT_MENU, self._on_menu_language,

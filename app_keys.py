@@ -56,7 +56,8 @@ class KeysMixin:
                 self._recorder.stop_all()
                 self.speak(_("Stopped"))
 
-        # Space – play / stop (also stops recording)
+        # Space – play/stop playback; also previews the current chord on MIDI
+        # output when "play chord when navigating" is enabled.
         elif key == 'space':
             if ctrl:
                 if self._recorder.state == AppState.PLAYING:
@@ -68,6 +69,9 @@ class KeysMixin:
                         self._announce_position()
             else:
                 if self._recorder.state == AppState.IDLE:
+                    # Preview chord on MIDI output when the nav-play toggle is on.
+                    if self._midi.midi_output is not None and self.play_chord_on_nav:
+                        self.play_current_chord_midi()
                     self._recorder.start_playback(self.progression, self.cursor)
                 elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
                     self._recorder.stop_all()
@@ -78,19 +82,39 @@ class KeysMixin:
                     self._recorder.stop_all()
 
         # Navigation – Left/Right
-        # Shift+Left/Right: extend selection
-        # Ctrl+Left/Right: by measure; Alt+Left/Right: by beat; plain: by chord
+        # Shift+Left/Right: extend selection by chord
+        # Ctrl+Left/Right: by measure; Alt+Left/Right: by beat
+        # Ctrl+Alt+Left/Right: by structural marker
+        # Shift+Ctrl/Alt/Ctrl+Alt variants: extend selection accordingly
         elif key == 'left':
             if self._recorder.state == AppState.IDLE:
-                if shift and not ctrl and not alt:
+                if shift and ctrl and alt:
+                    self._extend_selection('left', structural=True)
+                elif shift and ctrl and not alt:
+                    self._extend_selection('left', by_measure=True)
+                elif shift and alt and not ctrl:
+                    self._extend_selection('left', by_beat=True)
+                elif shift and not ctrl and not alt:
                     self._extend_selection('left')
+                elif ctrl and alt and not shift:
+                    self._clear_selection()
+                    self.navigate_structural('left')
                 else:
                     self._clear_selection()
                     self.navigate('left', by_measure=ctrl, by_beat=alt)
         elif key == 'right':
             if self._recorder.state == AppState.IDLE:
-                if shift and not ctrl and not alt:
+                if shift and ctrl and alt:
+                    self._extend_selection('right', structural=True)
+                elif shift and ctrl and not alt:
+                    self._extend_selection('right', by_measure=True)
+                elif shift and alt and not ctrl:
+                    self._extend_selection('right', by_beat=True)
+                elif shift and not ctrl and not alt:
                     self._extend_selection('right')
+                elif ctrl and alt and not shift:
+                    self._clear_selection()
+                    self.navigate_structural('right')
                 else:
                     self._clear_selection()
                     self.navigate('right', by_measure=ctrl, by_beat=alt)
@@ -170,8 +194,8 @@ class KeysMixin:
             if self._recorder.state == AppState.IDLE:
                 self._insert_chord_from_menu()
 
-        # Ctrl+Shift+A/B/C/D/V/I – section marks
-        elif ctrl and shift and len(key) == 1 and key in 'abcdvi':
+        # Ctrl+Shift+A/B/C/D/V/I/S/Q/F – section marks
+        elif ctrl and shift and len(key) == 1 and key in 'abcdvisqf':
             if self._recorder.state == AppState.IDLE:
                 self.add_section_mark(key)
 

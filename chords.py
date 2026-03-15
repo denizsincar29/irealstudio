@@ -316,7 +316,7 @@ class Chord:
         name = _identify_chord_name(notes)
         return cls(name, notes) if name else None
 
-# iReal Pro rehearsal marks supported by the app (S key + letter)
+# iReal Pro rehearsal marks supported by the app (Ctrl+Shift+letter)
 SECTION_KEYS = {
     'a': '*A',
     'b': '*B',
@@ -324,6 +324,9 @@ SECTION_KEYS = {
     'd': '*D',
     'v': '*V',
     'i': '*i',
+    's': 'S',   # Segno
+    'q': 'Q',   # Coda
+    'f': 'f',   # Fine
 }
 
 
@@ -629,17 +632,22 @@ _SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
 def _spoken_root(root: str) -> str:
     """Convert a note name (``C#``, ``Bb``, etc.) to its spoken form.
 
+    The note letter and accidental words are passed through ``_()`` so that
+    they can be localised (e.g. Russian: "до диез", "си бемоль").
+
     Example::
 
-        _spoken_root('C#')  → 'C sharp'
-        _spoken_root('Bb')  → 'B flat'
-        _spoken_root('G')   → 'G'
+        _spoken_root('C#')  → 'C sharp'  (English) / 'до диез'  (Russian)
+        _spoken_root('Bb')  → 'B flat'   (English) / 'си бемоль' (Russian)
+        _spoken_root('G')   → 'G'        (English) / 'соль'      (Russian)
     """
+    letter = root[0]
+    letter_spoken = _(letter)
     if root.endswith('#'):
-        return root[:-1] + ' sharp'
+        return letter_spoken + ' ' + _('sharp')
     if len(root) == 2 and root[1] == 'b':
-        return root[0] + ' flat'
-    return root
+        return letter_spoken + ' ' + _('flat')
+    return letter_spoken
 
 
 # Extension-token spoken forms (order matters: longer tokens first)
@@ -687,14 +695,14 @@ def _spoken_quality_fallback(quality: str) -> str:
         matched = False
         for token, spoken in _EXT_SPOKEN:
             if remainder[pos:].startswith(token):
-                ext_parts.append(spoken)
+                ext_parts.append(_(spoken))
                 pos += len(token)
                 matched = True
                 break
         if not matched:
             # Unrecognized fragment - return whole string as-is to avoid garbling
             return quality
-    combined = best_base_spoken
+    combined = _(best_base_spoken) if best_base_spoken else ''
     if ext_parts:
         combined = (combined + ' ' if combined else '') + ' '.join(ext_parts)
     return combined or quality
@@ -756,7 +764,7 @@ def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
     quality_spoken = ''
     for src, dst in _SPOKEN_QUALITY_MAP:
         if quality_and_ext == src:
-            quality_spoken = dst
+            quality_spoken = _(dst)
             break
     # Unrecognized non-empty quality: try longest-prefix match + spoken extension
     if not quality_spoken and quality_and_ext:
@@ -767,7 +775,7 @@ def chord_name_to_spoken(name: str, bass_note: str = '') -> str:
         parts.append(quality_spoken)
     result = ' '.join(parts)
     if resolved_bass:
-        result += ' over ' + _spoken_root(resolved_bass)
+        result += ' ' + _('over') + ' ' + _spoken_root(resolved_bass)
     return result
 
 
@@ -1083,6 +1091,43 @@ class ChordProgression:
         measures += list(self.no_chord_measures)
         return max(measures) if measures else 1
 
+    def structural_marker_measures(self) -> list[int]:
+        """Return sorted list of measures that have structural markers.
+
+        Structural markers are: section marks (*A, *B, S, Q, f, …) and the
+        start of each volta bracket (repeat_start, ending1_start,
+        ending2_start).
+        """
+        marks: set[int] = set()
+        for sm in self.section_marks:
+            marks.add(sm.measure)
+        for vb in self.volta_brackets:
+            marks.add(vb.repeat_start)
+            marks.add(vb.ending1_start)
+            if vb.is_complete():
+                marks.add(vb.ending2_start)
+        return sorted(marks)
+
+    def navigate_next_structural(self, measure: int) -> int:
+        """Return the measure number of the next structural marker after *measure*.
+
+        Returns *measure* unchanged if there is no structural marker ahead.
+        """
+        for m in self.structural_marker_measures():
+            if m > measure:
+                return m
+        return measure
+
+    def navigate_prev_structural(self, measure: int) -> int:
+        """Return the measure number of the previous structural marker before *measure*.
+
+        Returns *measure* unchanged if there is no structural marker behind.
+        """
+        for m in reversed(self.structural_marker_measures()):
+            if m < measure:
+                return m
+        return measure
+
     def add_no_chord(self, measure: int) -> None:
         """Mark *measure* as a 'no chord' (N.C.) measure for iReal Pro export."""
         self.no_chord_measures.add(measure)
@@ -1277,3 +1322,251 @@ class ChordProgression:
 
     def __iter__(self):
         return iter(self.items)
+
+
+# ---------------------------------------------------------------------------
+# MIDI chord voicing
+# ---------------------------------------------------------------------------
+
+# MIDI note range for the root note (F1=29, C3=48)
+_VOICE_ROOT_LOW  = 29   # F1
+_VOICE_ROOT_HIGH = 48   # C3
+
+# MIDI note range for the core chord tones (C3=48, A4=69)
+_VOICE_CORE_LOW  = 48   # C3
+_VOICE_CORE_HIGH = 69   # A4
+
+# Base chord quality → (core_semitone_intervals, extension_semitone_intervals)
+# core: non-root tones within an octave (3rd, 5th, 7th)
+# extensions: 9th=14, 11th=17, 13th=21 (compound intervals), or b9=13, #9=15, #11=18
+_QUALITY_INTERVALS: dict[str, tuple[list[int], list[int]]] = {
+    '':           ([4, 7],       []),
+    'm':          ([3, 7],       []),
+    'dim':        ([3, 6],       []),
+    'aug':        ([4, 8],       []),
+    'sus4':       ([5, 7],       []),
+    'sus2':       ([2, 7],       []),
+    'sus':        ([5, 7],       []),
+    '7':          ([4, 7, 10],   []),
+    'maj7':       ([4, 7, 11],   []),
+    'm7':         ([3, 7, 10],   []),
+    'mM7':        ([3, 7, 11],   []),
+    'm7b5':       ([3, 6, 10],   []),
+    'm7(b5)':     ([3, 6, 10],   []),
+    'dim7':       ([3, 6, 9],    []),
+    'aug7':       ([4, 8, 10],   []),
+    'augM7':      ([4, 8, 11],   []),
+    '7sus4':      ([5, 7, 10],   []),
+    '7sus':       ([5, 7, 10],   []),
+    '6':          ([4, 7, 9],    []),
+    'm6':         ([3, 7, 9],    []),
+    'm#5':        ([3, 8],       []),
+    'add9':       ([4, 7],       [14]),
+    '9':          ([4, 7, 10],   [14]),
+    'maj9':       ([4, 7, 11],   [14]),
+    'm9':         ([3, 7, 10],   [14]),
+    'mM7(9)':     ([3, 7, 11],   [14]),
+    'm11':        ([3, 7, 10],   [14, 17]),
+    'm13':        ([3, 7, 10],   [14, 21]),
+    'maj11':      ([4, 7, 11],   [14, 17]),
+    'maj13':      ([4, 7, 11],   [14, 21]),
+    '11':         ([4, 7, 10],   [14, 17]),
+    '13':         ([4, 7, 10],   [14, 21]),
+    '6/9':        ([4, 7, 9],    [14]),
+    'm6/9':       ([3, 7, 9],    [14]),
+    '7(b9)':      ([4, 7, 10],   [13]),
+    '7(#9)':      ([4, 7, 10],   [15]),
+    '7(#11)':     ([4, 7, 10],   [18]),
+    '7(b5)':      ([4, 6, 10],   []),
+    '7(b13)':     ([4, 7, 10],   [20]),
+    '7(9)':       ([4, 7, 10],   [14]),
+    '7(13)':      ([4, 7, 10],   [21]),
+    '7(b9#11)':   ([4, 7, 10],   [13, 18]),
+    '7(#9#11)':   ([4, 7, 10],   [15, 18]),
+    '7(b9b5)':    ([4, 6, 10],   [13]),
+    '7(#9b5)':    ([4, 6, 10],   [15]),
+    '7(9b5)':     ([4, 6, 10],   [14]),
+    '7(#9#5)':    ([4, 8, 10],   [15]),
+    '7(b9#5)':    ([4, 8, 10],   [13]),
+    'maj7(#11)':  ([4, 7, 11],   [18]),
+    'maj7(9)':    ([4, 7, 11],   [14]),
+    'maj7(9#11)': ([4, 7, 11],   [14, 18]),
+    'maj7(13)':   ([4, 7, 11],   [21]),
+    'm7(9)':      ([3, 7, 10],   [14]),
+    'm7(#11)':    ([3, 7, 10],   [18]),
+    'm7(13)':     ([3, 7, 10],   [21]),
+    'm7b5(b9)':   ([3, 6, 10],   [13]),
+    'm7b5(9)':    ([3, 6, 10],   [14]),
+    '7sus4(b9)':  ([5, 7, 10],   [13]),
+    'maj7sus4':   ([5, 7, 11],   []),
+}
+
+# Extension token → additional semitone interval (ordered longest first)
+_EXT_TOKEN_INTERVALS: list[tuple[str, int]] = [
+    ('#11', 18), ('b13', 20), ('#9', 15), ('b9', 13),
+    ('#5', 8), ('b5', 6), ('13', 21), ('11', 17), ('9', 14),
+    ('7', 10), ('6', 9),
+]
+
+
+def _quality_to_intervals(quality: str) -> tuple[list[int], list[int]]:
+    """Map a chord quality string to ``(core_intervals, ext_intervals)``.
+
+    First tries exact match in ``_QUALITY_INTERVALS``, then falls back to a
+    longest-prefix match plus parsed extension tokens.
+    """
+    if quality in _QUALITY_INTERVALS:
+        core, exts = _QUALITY_INTERVALS[quality]
+        return list(core), list(exts)
+
+    # Strip outer parentheses
+    inner = quality
+    if inner.startswith('(') and inner.endswith(')'):
+        inner = inner[1:-1]
+
+    # Longest-prefix match against known base qualities
+    best_base = ''
+    for q in _QUALITY_INTERVALS:
+        if inner.startswith(q) and len(q) > len(best_base):
+            best_base = q
+
+    if best_base:
+        core, exts = _QUALITY_INTERVALS[best_base]
+        core = list(core)
+        exts = list(exts)
+
+        remainder = inner[len(best_base):]
+        if remainder.startswith('(') and remainder.endswith(')'):
+            remainder = remainder[1:-1]
+
+        pos = 0
+        while pos < len(remainder):
+            matched = False
+            for token, interval in _EXT_TOKEN_INTERVALS:
+                if remainder[pos:].startswith(token):
+                    if interval >= 12:
+                        exts.append(interval)
+                    else:
+                        core.append(interval)
+                    pos += len(token)
+                    matched = True
+                    break
+            if not matched:
+                pos += 1  # skip unknown character
+        return core, exts
+
+    # Fallback: major triad
+    return [4, 7], []
+
+
+def _pick_root_midi(root_pc: int, prev_root: int | None) -> int:
+    """Pick the MIDI note for the root with voice leading in [ROOT_LOW, ROOT_HIGH].
+
+    Selects the candidate in ``[_VOICE_ROOT_LOW, _VOICE_ROOT_HIGH]`` closest to
+    *prev_root* (to minimise octave jumps between chords).
+    """
+    candidates = [
+        n for n in range(_VOICE_ROOT_LOW, _VOICE_ROOT_HIGH + 1) if n % 12 == root_pc
+    ]
+    if not candidates:
+        # Compute a fallback outside the range
+        n = _VOICE_ROOT_LOW
+        while n % 12 != root_pc:
+            n += 1
+        candidates = [n]
+
+    if prev_root is None:
+        return candidates[0]
+    return min(candidates, key=lambda x: abs(x - prev_root))
+
+
+def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int], int]:
+    """Voice a chord as a list of MIDI note numbers.
+
+    Implements the voicing rules from task.md:
+
+    * **Root** is placed in the range F1–C3 (MIDI 29–48) with voice leading
+      (smallest jump from *prev_root*).
+    * **Core tones** (3rd, 5th, 7th) are placed in C3–A4 (MIDI 48–69) in
+      ascending close-position order above the root, clamped to the range.
+    * **Extensions** (9th, 11th, 13th and altered equivalents) are placed in
+      the octave starting one octave above the root (i.e. root_midi + 12).
+
+    Parameters
+    ----------
+    name:
+        Chord name in canonical form, e.g. ``'Cmaj7'``, ``'Am7b5'``.
+        Slash-chord bass notes (``/E``) are stripped before voicing.
+    prev_root:
+        MIDI note number of the previous chord's root for voice-leading.
+        ``None`` uses the lowest candidate in range.
+
+    Returns
+    -------
+    (notes, root_midi):
+        Sorted list of MIDI note numbers and the root MIDI note (to pass as
+        *prev_root* on the next call).
+    """
+    # Parse root
+    root_str = ''
+    for r in _ALL_ROOTS:
+        if name.startswith(r):
+            root_str = r
+            break
+    if not root_str:
+        return [], 0
+
+    quality = name[len(root_str):]
+
+    # Strip slash-chord bass note (e.g. '/E') from the quality
+    for idx in range(len(quality) - 1, -1, -1):
+        if quality[idx] == '/' and idx + 1 < len(quality) and quality[idx + 1].isupper():
+            quality = quality[:idx]
+            break
+
+    root_pc = _NOTE_TO_PC.get(root_str, 0)
+    core_ivals, ext_ivals = _quality_to_intervals(quality)
+
+    # Jazz voicing: omit the perfect fifth (7 semitones) from non-minor 7th /
+    # extended chords (dominant, major-7th, maj9, maj13, 9, 11, 13, etc.).
+    # The fifth adds no harmonic colour to these chords.  Keep it for minor,
+    # diminished, augmented and sus chords where it matters.
+    if 4 in core_ivals and (10 in core_ivals or 11 in core_ivals):
+        try:
+            core_ivals.remove(7)
+        except ValueError:
+            pass   # chord already lacks a perfect fifth (e.g. aug7, 7(b5))
+
+    root_midi = _pick_root_midi(root_pc, prev_root)
+
+    notes: list[int] = [root_midi]
+
+    # Place core tones: ascending above root_midi, clamped to [CORE_LOW, CORE_HIGH]
+    cursor = root_midi
+    for ival in sorted(set(core_ivals)):
+        note_pc = (root_pc + ival) % 12
+        # Start from same octave as cursor
+        n = (cursor // 12) * 12 + note_pc
+        # Ensure strictly above cursor to keep ascending order
+        while n <= cursor:
+            n += 12
+        # Clamp into core range
+        while n > _VOICE_CORE_HIGH:
+            n -= 12
+        if n < _VOICE_CORE_LOW:
+            n += 12
+        if n not in notes:
+            notes.append(n)
+            cursor = n
+
+    # Place extension tones starting from root_midi + 12 upward
+    ext_base = root_midi + 12
+    for ival in sorted(set(ext_ivals)):
+        note_pc = (root_pc + ival) % 12
+        n = (ext_base // 12) * 12 + note_pc
+        while n < ext_base:
+            n += 12
+        if n not in notes:
+            notes.append(n)
+
+    return sorted(notes), root_midi
