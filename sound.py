@@ -7,11 +7,12 @@ the ~200 ms warm-up latency caused by repeatedly calling sd.play().
 
 Latency budget
 --------------
-* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~5.8 ms (256 frames)
-* Hardware output buffer: requested 5 ms via ``latency=0.005``;
+* Block-size jitter: 0 – _BLOCK_SIZE/SAMPLE_RATE = ~23.2 ms (1024 frames)
+* Hardware output buffer: requested 20 ms via ``latency=0.02``;
   PortAudio clamps to the device's achievable minimum on each platform
-  (Windows WASAPI ≈ 3 ms, Linux ALSA ≈ 1–3 ms, macOS CoreAudio ≈ 3 ms).
-Total round-trip from play_sound() call to audible output: typically < 15 ms.
+  (Windows WASAPI ≈ 10–20 ms shared, Linux ALSA ≈ 5–15 ms).
+Total round-trip from play_sound() call to audible output: typically < 50 ms.
+The audio compensation feature (default 60 ms) absorbs this latency.
 """
 
 import threading
@@ -25,13 +26,14 @@ except Exception:
 
 SAMPLE_RATE = 44100
 
-# Block size: 256 frames → ~5.8 ms max callback scheduling jitter.
-# Smaller values (e.g. 128) reduce jitter by ~3 ms but cause xruns on many
-# systems because the OS must service the callback every 2.9 ms — too tight
-# for reliable WASAPI/ALSA scheduling — leading to audible crackles.
-# The dominant latency source is the hardware output buffer (latency=0.005),
-# so keeping a stable block size of 256 gives the best quality/latency trade-off.
-_BLOCK_SIZE = 256
+# Block size: 1024 frames → ~23.2 ms max callback scheduling jitter.
+# 512 frames (~11.6 ms) still caused occasional xruns/crackles on some
+# WASAPI and ALSA devices whose OS scheduler latency exceeds the callback
+# interval.  1024 frames gives ~23 ms of headroom, which is comfortable
+# even on heavily loaded Windows systems.  The dominant latency source is
+# the hardware output buffer (latency=0.02), so the extra jitter is
+# absorbed by the compensation feature (default 60 ms).
+_BLOCK_SIZE = 1024
 
 # Attack / release lengths in seconds for the metronome envelope.
 _ATTACK_S  = 0.003   # 3 ms  — fast but click-free
@@ -86,10 +88,11 @@ def _open_stream(device: int | None = None) -> None:
             callback=_callback,
             blocksize=_BLOCK_SIZE,
             device=device,
-            # Request a 5 ms output buffer.  PortAudio uses the device's
-            # achievable minimum when the requested value is below it, so
-            # this is safe even on hardware that can't reach 5 ms.
-            latency=0.005,
+            # Request a 20 ms output buffer.  A smaller value (e.g. 5 ms)
+            # forces WASAPI/ALSA to service the stream very frequently and
+            # can cause xruns on systems with higher OS scheduler latency.
+            # 20 ms is still well within the 60 ms audio compensation budget.
+            latency=0.02,
         )
         _stream.start()
     except Exception:
@@ -135,7 +138,7 @@ def play_sound(wave: np.ndarray) -> None:
     """Enqueue *wave* for immediate playback on the persistent stream.
 
     Returns immediately; the audio callback mixes the buffer into the
-    hardware output on the next audio block (~5.8 ms at 256 frames /
+    hardware output on the next audio block (~23 ms at 1024 frames /
     44 100 Hz), avoiding the ~200 ms latency of sd.play().
     Falls back to sd.play() if the persistent stream is unavailable.
     """

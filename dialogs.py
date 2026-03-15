@@ -11,6 +11,7 @@ import time
 import threading
 
 from i18n import _
+from app_settings import MAX_COMPENSATION_MS
 
 _IS_WINDOWS = sys.platform == 'win32'
 
@@ -803,6 +804,272 @@ def prompt_midi_metro_settings(
                 )
 
         dlg = _MidiMetroDlg(parent)
+        result = dlg.get_values() if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        return result
+    except Exception:
+        return None
+
+
+# Default MIDI notes per channel role
+_MIDI_DEFAULTS_MELODIC = (91, 84, 48)   # B6 / C6, velocity 48 — melodic metronome (ch 0-8, 10-15)
+_MIDI_DEFAULTS_DRUMS   = (35, 42, 100)  # Acoustic Bass Drum (35) / Closed Hi-Hat (42), velocity 100 (ch 9)
+
+
+def prompt_metronome_settings(
+    parent=None,
+    # Audio
+    audio_compensation_ms: int = 60,
+    # MIDI metro
+    midi_metro_enabled: bool = False,
+    midi_metro_smart: bool = False,
+    on_note: int = 91,
+    off_note: int = 84,
+    velocity: int = 48,
+    channel: int = 0,
+    duration_ms: int = 100,
+    midi_compensation_ms: int = 0,
+    preview_fn=None,
+    audio_preview_fn=None,
+) -> "dict | None":
+    """Show the centralized Metronome Settings dialog.
+
+    Parameters
+    ----------
+    preview_fn:
+        Optional callable ``(note, velocity, channel, duration_ms) -> None``
+        for live MIDI preview when any MIDI field changes.
+    audio_preview_fn:
+        Optional callable ``() -> None`` that plays one audio tick so the
+        user can compare it against the simultaneous MIDI preview and judge
+        whether the audio compensation value is correct.  Called together
+        with *preview_fn* (downbeat note) whenever the audio compensation
+        spinner changes.
+
+    Returns a dict with keys::
+
+        audio_compensation_ms, midi_metro_enabled, midi_metro_smart,
+        on_note, off_note, velocity, channel, duration_ms, midi_compensation_ms
+
+    or ``None`` if the user cancelled.
+    """
+    if not _IS_WINDOWS:
+        print(_("Metronome Settings"))
+        try:
+            aud_s = input(
+                f"  Audio compensation ms (0-{MAX_COMPENSATION_MS}) [{audio_compensation_ms}]: "
+            ).strip()
+            audio_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(aud_s or audio_compensation_ms)))
+            en_s = input(
+                f"  Enable MIDI metronome (1/0) [{int(midi_metro_enabled)}]: "
+            ).strip()
+            midi_metro_enabled = bool(int(en_s or int(midi_metro_enabled)))
+            sm_s = input(
+                f"  Smart metronome (1/0) [{int(midi_metro_smart)}]: "
+            ).strip()
+            midi_metro_smart = bool(int(sm_s or int(midi_metro_smart)))
+            on_s   = input(f"  Downbeat MIDI note (0-127) [{on_note}]: ").strip()
+            off_s  = input(f"  Upbeat MIDI note (0-127) [{off_note}]: ").strip()
+            vel_s  = input(f"  Velocity (1-127) [{velocity}]: ").strip()
+            ch_s   = input(f"  Channel (0-15) [{channel}]: ").strip()
+            dur_s  = input(f"  Note length ms (10-2000) [{duration_ms}]: ").strip()
+            mid_s  = input(
+                f"  MIDI compensation ms (0-{MAX_COMPENSATION_MS}) [{midi_compensation_ms}]: "
+            ).strip()
+            on_note    = max(0,   min(127,  int(on_s   or on_note)))
+            off_note   = max(0,   min(127,  int(off_s  or off_note)))
+            velocity   = max(1,   min(127,  int(vel_s  or velocity)))
+            channel    = max(0,   min(15,   int(ch_s   or channel)))
+            duration_ms = max(10, min(2000, int(dur_s  or duration_ms)))
+            midi_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(mid_s or midi_compensation_ms)))
+            return dict(
+                audio_compensation_ms=audio_compensation_ms,
+                midi_metro_enabled=midi_metro_enabled,
+                midi_metro_smart=midi_metro_smart,
+                on_note=on_note,
+                off_note=off_note,
+                velocity=velocity,
+                channel=channel,
+                duration_ms=duration_ms,
+                midi_compensation_ms=midi_compensation_ms,
+            )
+        except (KeyboardInterrupt, EOFError, ValueError):
+            return None
+
+    try:
+        import wx
+
+        class _MetroDlg(wx.Dialog):
+            def __init__(self, parent_wnd):
+                super().__init__(parent_wnd, title=_("Metronome Settings"),
+                                 style=wx.DEFAULT_DIALOG_STYLE)
+
+                # ----- helpers -----
+                def _row(sizer, label: str, min_val: int, max_val: int,
+                         initial: int) -> wx.SpinCtrl:
+                    """StaticText must be created before its SpinCtrl for NVDA/JAWS."""
+                    sizer.Add(wx.StaticText(self, label=label),
+                              flag=wx.ALIGN_CENTER_VERTICAL)
+                    ctrl = wx.SpinCtrl(self, min=min_val, max=max_val,
+                                       initial=initial)
+                    sizer.Add(ctrl, flag=wx.EXPAND)
+                    return ctrl
+
+                outer = wx.BoxSizer(wx.VERTICAL)
+
+                # === Audio Metronome section ===
+                outer.Add(
+                    wx.StaticText(self, label=_("Audio Metronome")),
+                    flag=wx.LEFT | wx.TOP, border=12,
+                )
+                audio_grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
+                audio_grid.AddGrowableCol(1, 1)
+                self._audio_comp = _row(
+                    audio_grid,
+                    _("Audio compensation (ms, 0-500):"),
+                    0, MAX_COMPENSATION_MS, audio_compensation_ms,
+                )
+                outer.Add(audio_grid, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP,
+                          border=12)
+
+                outer.Add(wx.StaticLine(self), flag=wx.EXPAND | wx.TOP | wx.BOTTOM,
+                          border=8)
+
+                # === MIDI Metronome section ===
+                outer.Add(
+                    wx.StaticText(self, label=_("MIDI Metronome")),
+                    flag=wx.LEFT, border=12,
+                )
+                midi_sizer = wx.BoxSizer(wx.VERTICAL)
+
+                # Enable / Smart checkboxes
+                self._enable_cb = wx.CheckBox(self, label=_("Enable MIDI Metronome"))
+                self._enable_cb.SetValue(midi_metro_enabled)
+                self._smart_cb  = wx.CheckBox(self, label=_("Smart (chord-aware)"))
+                self._smart_cb.SetValue(midi_metro_smart)
+                midi_sizer.Add(self._enable_cb, flag=wx.LEFT | wx.TOP, border=4)
+                midi_sizer.Add(self._smart_cb,  flag=wx.LEFT | wx.TOP, border=4)
+
+                # Note / velocity / channel / duration grid
+                midi_grid = wx.FlexGridSizer(cols=2, vgap=8, hgap=8)
+                midi_grid.AddGrowableCol(1, 1)
+                self._on_note  = _row(midi_grid,
+                                      _("Downbeat MIDI note (0-127):"),
+                                      0, 127, on_note)
+                self._off_note = _row(midi_grid,
+                                      _("Upbeat MIDI note (0-127):"),
+                                      0, 127, off_note)
+                self._velocity = _row(midi_grid,
+                                      _("Velocity (1-127):"),
+                                      1, 127, velocity)
+                self._channel  = _row(midi_grid,
+                                      _("Channel (0-15, 0=melodic):"),
+                                      0, 15, channel)
+                self._duration = _row(midi_grid,
+                                      _("Note length ms (10-2000):"),
+                                      10, 2000, duration_ms)
+                self._midi_comp = _row(midi_grid,
+                                       _("MIDI compensation (ms, 0-500):"),
+                                       0, MAX_COMPENSATION_MS, midi_compensation_ms)
+                midi_sizer.Add(midi_grid,
+                               flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP,
+                               border=4)
+
+                # Reset-to-defaults button (resets MIDI note/velocity fields only)
+                self._reset_btn = wx.Button(self, label=_("Reset MIDI to defaults"))
+                midi_sizer.Add(self._reset_btn, flag=wx.LEFT | wx.TOP, border=4)
+
+                outer.Add(midi_sizer,
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          border=12)
+
+                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          border=14)
+                self.SetSizerAndFit(outer)
+
+                # ----- live preview bindings -----
+                if preview_fn is not None:
+                    def _make_preview(note_ctrl):
+                        def _on_spin(evt):
+                            evt.Skip()
+                            try:
+                                note = note_ctrl.GetValue()
+                                vel  = self._velocity.GetValue()
+                                ch   = self._channel.GetValue()
+                                dur  = self._duration.GetValue()
+                                preview_fn(note, vel, ch, dur)
+                            except Exception:
+                                pass
+                        return _on_spin
+
+                    def _on_any_spin(evt):
+                        evt.Skip()
+                        try:
+                            note = self._on_note.GetValue()
+                            vel  = self._velocity.GetValue()
+                            ch   = self._channel.GetValue()
+                            dur  = self._duration.GetValue()
+                            preview_fn(note, vel, ch, dur)
+                        except Exception:
+                            pass
+
+                    self._on_note.Bind(wx.EVT_SPINCTRL, _make_preview(self._on_note))
+                    self._off_note.Bind(wx.EVT_SPINCTRL, _make_preview(self._off_note))
+                    self._velocity.Bind(wx.EVT_SPINCTRL, _on_any_spin)
+                    self._channel.Bind(wx.EVT_SPINCTRL,  _on_any_spin)
+                    self._duration.Bind(wx.EVT_SPINCTRL, _on_any_spin)
+
+                # Audio compensation preview: fires audio tick + MIDI downbeat
+                # together so the user can hear whether they land in sync.
+                def _on_audio_comp_spin(evt):
+                    evt.Skip()
+                    try:
+                        if audio_preview_fn is not None:
+                            audio_preview_fn()
+                    except Exception:
+                        pass
+                    try:
+                        if preview_fn is not None:
+                            note = self._on_note.GetValue()
+                            vel  = self._velocity.GetValue()
+                            ch   = self._channel.GetValue()
+                            dur  = self._duration.GetValue()
+                            preview_fn(note, vel, ch, dur)
+                    except Exception:
+                        pass
+                self._audio_comp.Bind(wx.EVT_SPINCTRL, _on_audio_comp_spin)
+
+                # ----- reset button -----
+                self._reset_btn.Bind(wx.EVT_BUTTON, self._on_reset)
+
+                self._audio_comp.SetFocus()
+
+            def _on_reset(self, _evt) -> None:
+                """Reset MIDI note/velocity fields to channel-appropriate defaults."""
+                ch = self._channel.GetValue()
+                if ch == 9:
+                    on_n, off_n, vel = _MIDI_DEFAULTS_DRUMS
+                else:
+                    on_n, off_n, vel = _MIDI_DEFAULTS_MELODIC
+                self._on_note.SetValue(on_n)
+                self._off_note.SetValue(off_n)
+                self._velocity.SetValue(vel)
+
+            def get_values(self) -> dict:
+                return dict(
+                    audio_compensation_ms=self._audio_comp.GetValue(),
+                    midi_metro_enabled=self._enable_cb.GetValue(),
+                    midi_metro_smart=self._smart_cb.GetValue(),
+                    on_note=self._on_note.GetValue(),
+                    off_note=self._off_note.GetValue(),
+                    velocity=self._velocity.GetValue(),
+                    channel=self._channel.GetValue(),
+                    duration_ms=self._duration.GetValue(),
+                    midi_compensation_ms=self._midi_comp.GetValue(),
+                )
+
+        dlg = _MetroDlg(parent)
         result = dlg.get_values() if dlg.ShowModal() == wx.ID_OK else None
         dlg.Destroy()
         return result

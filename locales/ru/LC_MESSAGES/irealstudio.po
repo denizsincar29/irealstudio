@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "POT-Creation-Date: 2026-01-01 00:00\n"
-"PO-Revision-Date: 2026-03-15 10:00\n"
+"PO-Revision-Date: 2026-03-15 16:00\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "Language: ru\n"
@@ -997,3 +997,34 @@ msgstr "Воспроизведение аккордов: при воспроиз
 
 msgid "Chord playback: both"
 msgstr "Воспроизведение аккордов: оба режима"
+
+# --- centralized metronome settings dialog ---
+msgid "Metronome Settings"
+msgstr "Настройки метронома"
+
+msgid "Audio Metronome"
+msgstr "Аудио-метроном"
+
+msgid "Audio compensation (ms, 0-500):"
+msgstr "Компенсация аудио (мс, 0–500):"
+
+msgid "MIDI Metronome"
+msgstr "MIDI-метроном"
+
+msgid "Enable MIDI Metronome"
+msgstr "Включить MIDI-метроном"
+
+msgid "Smart (chord-aware)"
+msgstr "Умный режим (по аккордам)"
+
+msgid "MIDI compensation (ms, 0-500):"
+msgstr "Компенсация MIDI (мс, 0–500):"
+
+msgid "Reset MIDI to defaults"
+msgstr "Сбросить MIDI к настройкам по умолчанию"
+
+msgid "&Metronome Settings..."
+msgstr "&Настройки метронома..."
+
+msgid "Metronome settings saved"
+msgstr "Настройки метронома сохранены"

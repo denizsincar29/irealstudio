@@ -33,7 +33,19 @@ MIDI_METRO_OFF_NOTE: int = 84   # C6 — upbeat
 MIDI_METRO_VELOCITY: int = 48
 MIDI_METRO_CHANNEL: int = 0     # channel 1 (0-indexed) — melodic (not percussion)
 MIDI_METRO_DURATION_MS: int = 100  # note-on duration in milliseconds
-MIDI_METRO_SMART: bool = True   # chord-aware smart metronome mode enabled by default
+MIDI_METRO_SMART: bool = False  # chord-aware smart metronome mode (off by default)
+
+# ---------------------------------------------------------------------------
+# Metronome latency compensation defaults and bounds
+# ---------------------------------------------------------------------------
+# Audio output goes through PortAudio + OS audio stack; 60 ms pre-fire
+# keeps the click perceptually on the beat for most sound cards.
+# MIDI is sent directly to the port driver and arrives in < 1 ms, so the
+# default MIDI compensation is 0 (user can raise it for MS GS Wavetable etc.)
+AUDIO_METRO_COMPENSATION_MS: int = 60
+MIDI_METRO_COMPENSATION_MS: int = 0
+# Upper bound for compensation spinners in the UI and clamping in setters/loaders.
+MAX_COMPENSATION_MS: int = 500
 
 
 def _get_settings_path() -> Path:

@@ -9,6 +9,7 @@ import numpy as np
 
 from chords import ChordProgression, Position
 from sound import play_sound
+from app_settings import MAX_COMPENSATION_MS
 
 _logger = logging.getLogger('irealstudio')
 
@@ -30,6 +31,7 @@ class Recorder:
         tock_sound: np.ndarray,
         on_playback_chord: Callable[[str], None] | None = None,
         on_beat: "Callable[[bool, list | None], None] | None" = None,
+        use_midi_compensation: "Callable[[], bool] | None" = None,
     ) -> None:
         """
         Parameters
@@ -52,12 +54,21 @@ class Recorder:
             precount/recording or when no chord data is available.
             When provided this callback is called *instead of* the built-in
             audio beep, allowing the caller to drive a MIDI metronome.
+        use_midi_compensation:
+            Optional zero-argument callable that returns ``True`` when the MIDI
+            metronome is actually active (MIDI output open, MIDI metro enabled)
+            and ``False`` when the click falls back to audio.  Used to pick the
+            correct latency compensation value at the start of each session.
+            Defaults to always returning ``False`` (audio compensation).
         """
         self._speak = speak
         self._tick = tick_sound
         self._tock = tock_sound
         self._on_playback_chord = on_playback_chord
         self._on_beat = on_beat
+        self._use_midi_compensation: "Callable[[], bool]" = (
+            use_midi_compensation if use_midi_compensation is not None else (lambda: False)
+        )
 
         self.state: str = AppState.IDLE
         self.recording_start_time: float = 0.0
@@ -73,6 +84,13 @@ class Recorder:
         # Beat-timing debug: updated each beat (monotonic time) so the UI can
         # query the offset since the last beat fired.
         self._last_beat_time: float | None = None
+
+        # Latency compensation: fire the click this many ms before the logical
+        # beat time so the sound reaches the listener on-beat.
+        # Audio metronome default: 60 ms (PortAudio + OS audio stack latency).
+        # MIDI metronome default: 0 ms (MIDI driver latency is typically < 1 ms).
+        self._audio_compensation_ms: int = 60
+        self._midi_compensation_ms: int = 0
 
     def _click(self, is_downbeat: bool, chords: "list | None" = None) -> None:
         """Fire a metronome click for one beat.
@@ -106,6 +124,39 @@ class Recorder:
     def tock_sound(self) -> "np.ndarray":
         """Audio sample used for non-downbeat clicks."""
         return self._tock
+
+    @property
+    def audio_compensation_ms(self) -> int:
+        """Milliseconds to fire the audio click before the logical beat time."""
+        return self._audio_compensation_ms
+
+    @audio_compensation_ms.setter
+    def audio_compensation_ms(self, value: int) -> None:
+        self._audio_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(value)))
+
+    @property
+    def midi_compensation_ms(self) -> int:
+        """Milliseconds to fire the MIDI beat callback before the logical beat time."""
+        return self._midi_compensation_ms
+
+    @midi_compensation_ms.setter
+    def midi_compensation_ms(self, value: int) -> None:
+        self._midi_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(value)))
+
+    def _get_clamped_compensation(self, interval: float) -> float:
+        """Return the effective latency compensation in seconds for *interval*-length beats.
+
+        Selects MIDI or audio compensation based on whether the MIDI metronome
+        is currently active (via ``_use_midi_compensation``), then clamps the
+        result to less than one full beat interval so that
+        ``next_beat_time`` stays monotonically increasing even at extreme
+        compensation values.
+        """
+        raw_s = (
+            self._midi_compensation_ms if self._use_midi_compensation()
+            else self._audio_compensation_ms
+        ) / 1000.0
+        return min(raw_s, interval * 0.9)
 
     # ------------------------------------------------------------------
     # Recording
@@ -143,6 +194,11 @@ class Recorder:
         beat_names = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
         interval = 60.0 / self.recording_bpm
 
+        # Latency compensation: fire the click this many seconds before the
+        # logical beat time so that the sound (or MIDI event) arrives at the
+        # listener/device exactly on the beat.
+        comp_s = self._get_clamped_compensation(interval)
+
         # Use time.monotonic() throughout so beat scheduling is immune to
         # wall-clock adjustments (NTP, manual time changes, etc.).
         t0 = time.monotonic()
@@ -179,8 +235,9 @@ class Recorder:
                 # Second precount measure (or non-4/4): full count.
                 self._speak(beat_names[b] if b < len(beat_names) else str(b + 1))
 
-            # Sleep until the absolute time of the next beat.
-            next_beat_time = t0 + (i + 1) * interval
+            # Sleep until comp_s before the next logical beat so the click
+            # sound/MIDI event arrives on time after hardware latency.
+            next_beat_time = t0 + (i + 1) * interval - comp_s
             sleep_time = next_beat_time - time.monotonic()
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -206,8 +263,8 @@ class Recorder:
             self.state = AppState.IDLE
             return
 
-        # Recording begins exactly on the beat that follows the last pre-count
-        # beat, continuing the same absolute timeline.
+        # recording_start_time is the *logical* beat time (without compensation)
+        # so that chord positions computed from elapsed time are correct.
         self.recording_start_time = t0 + total_precount_beats * interval
         self.state = AppState.RECORDING
         self._speak("Recording")
@@ -246,9 +303,10 @@ class Recorder:
                 self._click(False)
 
             beat_count += 1
-            # Use absolute timing so the recording metronome stays locked to
-            # the same grid established by the pre-count.
-            next_beat_time = self.recording_start_time + beat_count * interval
+            # Fire the click comp_s before the logical beat time so the sound
+            # arrives on time.  recording_start_time itself is the logical time,
+            # so chord position calculations remain unaffected.
+            next_beat_time = self.recording_start_time + beat_count * interval - comp_s
             sleep_time = next_beat_time - time.monotonic()
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -302,6 +360,9 @@ class Recorder:
             if vb.is_complete():
                 last_m = max(last_m, vb.ending2_start)
 
+        # Latency compensation (see _precount_and_record for rationale).
+        comp_s = self._get_clamped_compensation(interval)
+
         # Anchor the beat grid to an absolute timeline so processing overhead
         # (chord lookup, speak, play_sound enqueue) does not accumulate and
         # drift the metronome — same pattern used in _precount_and_record.
@@ -329,9 +390,10 @@ class Recorder:
                 cur.measure, cur.beat, progression.time_signature
             )
 
-            # Sleep until the absolute time of the next beat.
+            # Sleep until comp_s before the next logical beat so the click
+            # sound/MIDI event arrives on time.
             beat_count += 1
-            next_beat_time = t0 + beat_count * interval
+            next_beat_time = t0 + beat_count * interval - comp_s
             sleep_time = next_beat_time - time.monotonic()
             if sleep_time > 0:
                 time.sleep(sleep_time)
