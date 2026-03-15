@@ -80,7 +80,7 @@ _app_logger.addHandler(_ring_handler)
 # ---------------------------------------------------------------------------
 # Chord grid visualization panel
 # ---------------------------------------------------------------------------
-class ChordGridPanel(wx.Panel):
+class ChordGridPanel(wx.ScrolledWindow):
     """Visual chord grid showing the progression on a 2-D grid of measures.
 
     * Each row shows ``MEASURES_PER_ROW`` measures left-to-right.
@@ -89,6 +89,9 @@ class ChordGridPanel(wx.Panel):
     * The playback position (during playback) is highlighted in red.
     * Mouse left-click moves the cursor; click-and-drag extends the selection.
     * Section markers (A, B, …) are drawn in amber on the measure where they start.
+    * N.C. (no chord) measures show a grey "N.C." label.
+    * Inherits from ``wx.ScrolledWindow`` so vertical scroll bars appear
+      automatically when the progression is taller than the visible area.
     """
 
     CELL_W: int = 140       # pixels wide per measure cell
@@ -108,11 +111,13 @@ class ChordGridPanel(wx.Panel):
     _BEAT_LINE = wx.Colour(65,  65,  65)    # vertical beat separator
 
     def __init__(self, parent: wx.Window, app) -> None:
-        super().__init__(parent, style=0)
+        super().__init__(parent, style=wx.HSCROLL | wx.VSCROLL)
         self._app = app
         self._mouse_drag = False
         self.SetBackgroundColour(self._BG)
         self.SetMinSize((-1, self.CELL_H * 4))
+        # Enable pixel-level scrolling (scroll rate in x and y pixels per step)
+        self.SetScrollRate(10, 10)
         self.Bind(wx.EVT_PAINT,       self._on_paint)
         self.Bind(wx.EVT_LEFT_DOWN,   self._on_mouse_down)
         self.Bind(wx.EVT_MOTION,      self._on_mouse_move)
@@ -128,23 +133,29 @@ class ChordGridPanel(wx.Panel):
         return max(prog.last_measure(), prog.total_measures, 1)
 
     def _pos_from_xy(self, mx: int, my: int):
-        """Return a ``Position`` from pixel coords, or ``None`` if out of range."""
+        """Return a ``Position`` from *client* pixel coords, or ``None`` if out of range.
+
+        Converts client (scrolled) coordinates to virtual (unscrolled) coordinates
+        before computing the measure/beat.
+        """
         from chords import Position as _Pos
+        # CalcUnscrolledPosition converts client coords → virtual coords
+        vx, vy = self.CalcUnscrolledPosition(mx, my)
         ts = self._app.progression.time_signature
         beats = ts.numerator
-        col  = mx // self.CELL_W
-        row  = my // self.CELL_H
+        col  = vx // self.CELL_W
+        row  = vy // self.CELL_H
         if col >= self.MEASURES_PER_ROW or col < 0 or row < 0:
             return None
         measure = row * self.MEASURES_PER_ROW + col + 1
         if measure > self._total_measures():
             return None
         beat_w = self.CELL_W / beats
-        beat = max(1, min(beats, int((mx % self.CELL_W) / beat_w) + 1))
+        beat = max(1, min(beats, int((vx % self.CELL_W) / beat_w) + 1))
         return _Pos(measure, beat, ts)
 
     def _cell_rect(self, measure: int) -> tuple[int, int, int, int]:
-        """Return (x, y, w, h) pixel rect for a given 1-based measure number."""
+        """Return (x, y, w, h) pixel rect for a given 1-based measure number in virtual space."""
         idx = measure - 1
         col = idx % self.MEASURES_PER_ROW
         row = idx // self.MEASURES_PER_ROW
@@ -156,6 +167,8 @@ class ChordGridPanel(wx.Panel):
 
     def _on_paint(self, _event) -> None:
         dc = wx.PaintDC(self)
+        # Adjust the DC origin so drawing uses virtual (unscrolled) coordinates.
+        self.PrepareDC(dc)
         dc.SetBackground(wx.Brush(self._BG))
         dc.Clear()
 
@@ -165,7 +178,7 @@ class ChordGridPanel(wx.Panel):
         beats  = prog.time_signature.numerator
         total  = self._total_measures()
 
-        # Build fast-lookup: measure → list of (beat, chord_name) or None for N.C.
+        # Build fast-lookup: measure → list of (beat, chord_name); chord_name=None → N.C.
         by_measure: dict[int, list[tuple[int, str | None]]] = {}
         for item in prog.items:
             m = item.position.measure
@@ -175,8 +188,9 @@ class ChordGridPanel(wx.Panel):
         # Selection range
         sel_range = app._selected_range()
 
-        # Playback / recording beat
-        play_pos = app._recorder.playback_stopped_at if app._recorder.state == 'playing' else None
+        # Playback beat position (only during active playback)
+        play_pos = (app._recorder.playback_stopped_at
+                    if app._recorder.state == AppState.PLAYING else None)
 
         # Font for chord names
         font_chord = wx.Font(11, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
@@ -247,7 +261,7 @@ class ChordGridPanel(wx.Panel):
                 dc.SetTextForeground(self._SECTION)
                 dc.DrawText(section_marks[m], x + 3, y + 2)
 
-            # --- chord names ---
+            # --- chord names (or N.C. label) ---
             dc.SetFont(font_chord)
             chords_in_m = by_measure.get(m, [])
             if chords_in_m:
@@ -260,8 +274,13 @@ class ChordGridPanel(wx.Panel):
                     else:
                         dc.SetTextForeground(self._TEXT)
                         dc.DrawText(name, bx, y + h // 2 - 8)
+            elif prog.is_no_chord(m):
+                # N.C. set directly on the measure (not via a ProgressionItem)
+                dc.SetTextForeground(self._NC)
+                dc.DrawText("N.C.", x + 4, y + h // 2 - 8)
 
-        # Required virtual size so scroll bars appear if the grid is tall
+        # Update the scrollable virtual canvas size so scroll bars appear when
+        # the grid is taller than the visible panel area.
         rows = max(1, (total + self.MEASURES_PER_ROW - 1) // self.MEASURES_PER_ROW)
         self.SetVirtualSize(self.MEASURES_PER_ROW * self.CELL_W, rows * self.CELL_H)
 
@@ -407,6 +426,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._sound_out_menu = None
         self._midi_metro_toggle_item = None
         self._chord_grid: ChordGridPanel | None = None
+        # Cached state tuple used to detect changes before refreshing the chord grid.
+        # Compared in _schedule_display_update; Refresh() is called only on change.
+        self._last_grid_state: tuple | None = None
 
         # Current open file path (None = unsaved / new project)
         self._current_file: Path | None = None
@@ -505,16 +527,20 @@ class App(MenuMixin, KeysMixin, IOMixin):
     def _midi_metro_beat(self, is_downbeat: bool) -> None:
         """MIDI metronome callback — fires on every beat from Recorder.
 
+        This method is passed as the *on_beat* callback to the Recorder, which
+        means it is the *sole* handler for every metronome click.  The Recorder
+        will **not** play audio on its own when an *on_beat* callback is set, so
+        this method must always produce audible feedback — either via MIDI output
+        or by falling back to the built-in audio beep.
+
         When ``midi_metro_enabled`` is ``True`` and a MIDI output port is open,
         sends a short note-on/note-off pair on the configured percussion channel
         so external MIDI devices or a DAW can play the metronome sound.
-        When disabled, falls back to the built-in audio beep by returning
-        without doing anything (the Recorder will then call play_sound itself
-        because *on_beat* is set; so we must pass through to audio when MIDI is
-        not active).
+        Otherwise (MIDI disabled, no output port, or any send error) the method
+        plays the built-in audio tick/tock so timing feedback is never silent.
         """
         if not self.midi_metro_enabled or self._midi.midi_output is None:
-            # Fall back to audio click
+            # MIDI metronome disabled or no output open — use audio fallback.
             from sound import play_sound
             play_sound(self._recorder.tick_sound if is_downbeat else self._recorder.tock_sound)
             return
@@ -540,7 +566,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
             t.daemon = True
             t.start()
         except Exception:
-            _app_logger.debug("MIDI metro beat failed", exc_info=True)
+            _app_logger.debug("MIDI metro beat failed — falling back to audio", exc_info=True)
+            # Ensure timing feedback is never lost on MIDI failure.
+            from sound import play_sound
+            play_sound(self._recorder.tick_sound if is_downbeat else self._recorder.tock_sound)
 
     # ------------------------------------------------------------------
     # Undo / redo
@@ -1360,9 +1389,24 @@ class App(MenuMixin, KeysMixin, IOMixin):
             lines[3] += "  [" + _('SEL:') + " " + ngettext('{n} chord', '{n} chords', n).format(n=n) + "]"
         for lbl, text in zip(self._status_labels, lines):
             lbl.SetLabel(text)
-        # Refresh the chord grid whenever any state changes
+        # Refresh the chord grid only when something that affects its rendering
+        # has actually changed, to avoid an unconditional 50 ms repaint that wastes
+        # CPU and can cause flickering on large progressions.
         if self._chord_grid is not None:
-            self._chord_grid.Refresh()
+            grid_state = (
+                self.cursor,
+                self._sel_anchor,
+                self._sel_active,
+                self._recorder.state,
+                self._recorder.playback_stopped_at,
+                len(self.progression.items),
+                self.progression.total_measures,
+                len(self.progression.no_chord_measures),
+                len(self.progression.section_marks),
+            )
+            if grid_state != self._last_grid_state:
+                self._last_grid_state = grid_state
+                self._chord_grid.Refresh()
         wx.CallLater(50, self._schedule_display_update)
 
 

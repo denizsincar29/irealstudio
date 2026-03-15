@@ -1539,7 +1539,12 @@ def voice_chord_midi(name: str, prev_root: int | None = None) -> tuple[list[int]
     # Sus voicing: root + b7 (if present) + 9th + 11th + (13th if present).
     # No 3rd, no 5th — the 4th (11th) is the characteristic sus tone and
     # stacking 7–9–11 in fourths gives the idiomatic jazz sus sound.
-    has_sus = 5 in core_ivals  # perfect 4th (11th) marks a sus chord
+    #
+    # Key the sus branch off the *quality token* rather than just checking for
+    # interval-5 in core_ivals.  This ensures that chords like maj7sus4, which
+    # also contain a perfect 4th but have a distinct major-7th colour, are NOT
+    # collapsed into the plain sus voicing and retain all of their tones.
+    has_sus = quality.startswith(('sus4', '7sus4'))
     if has_sus:
         b7_present = 10 in core_ivals
         # Core keeps only the b7 so it lands low in the core range.

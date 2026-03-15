@@ -1356,8 +1356,9 @@ class TestVoiceChordMidi(unittest.TestCase):
         core_ext = [n for n in notes if n != root]
         bb = next((n for n in core_ext if n % 12 == 10), None)
         e  = next((n for n in core_ext if n % 12 == 4), None)
-        if bb is not None and e is not None:
-            self.assertLess(bb, e, "b7 (Bb) should be lower than maj3 (E) in dom9")
+        self.assertIsNotNone(bb, "C9 voicing should contain Bb (b7)")
+        self.assertIsNotNone(e,  "C9 voicing should contain E (maj3)")
+        self.assertLess(bb, e, "b7 (Bb) should be lower than maj3 (E) in dom9")
 
     # ------------------------------------------------------------------
     # Sus chord voicing: root + (b7) + 9 + 11, no maj3, no perfect 5th

@@ -80,10 +80,10 @@ class Recorder:
         if self._on_beat is not None:
             try:
                 self._on_beat(is_downbeat)
+                return
             except Exception:
-                _logger.error("on_beat callback raised", exc_info=True)
-        else:
-            play_sound(self._tick if is_downbeat else self._tock)
+                _logger.error("on_beat callback raised — falling back to audio", exc_info=True)
+        play_sound(self._tick if is_downbeat else self._tock)
 
     @property
     def tick_sound(self) -> "np.ndarray":

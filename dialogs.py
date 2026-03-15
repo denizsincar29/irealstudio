@@ -517,7 +517,9 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
         'aug7',   # augmented dominant 7
     ]
 
-    # Extensions available for each base quality (empty = no extension checkboxes shown)
+    # Extensions permitted for each base quality.
+    # An empty list means all alteration checkboxes are *disabled* for that quality
+    # (they are always displayed in the dialog but greyed out when not applicable).
     _QUALITY_EXTENSIONS: dict[str, list[str]] = {
         '':      [],
         'm':     [],
