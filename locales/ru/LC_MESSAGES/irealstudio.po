@@ -169,3 +169,13 @@ msgstr "Язык"
 
 msgid "Language changed. Please restart IReal Studio for full effect."
 msgstr "Язык изменён. Перезапустите IReal Studio для полного применения."
+
+# --- new project ---
+msgid "'{title}' has unsaved changes.\n\nSave before creating a new project?"
+msgstr "'{title}' содержит несохранённые изменения.\n\nСохранить перед созданием нового проекта?"
+
+msgid "Unsaved Changes"
+msgstr "Несохранённые изменения"
+
+msgid "New project: {title}"
+msgstr "Новый проект: {title}"

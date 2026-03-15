@@ -1097,11 +1097,17 @@ class App:
 
     def new_project(self) -> None:
         """Prompt to save unsaved changes, then show New Project dialog and reset state."""
+        # Stop any active recording / playback before resetting state.
+        if self._recorder.state != AppState.IDLE:
+            self._recorder.stop_all()
+
         if self._is_dirty:
             dlg = wx.MessageDialog(
                 self._frame,
-                f"'{self.progression.title}' has unsaved changes.\n\nSave before creating a new project?",
-                "Unsaved Changes",
+                _("'{title}' has unsaved changes.\n\nSave before creating a new project?").format(
+                    title=self.progression.title
+                ),
+                _("Unsaved Changes"),
                 wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT | wx.ICON_WARNING,
             )
             result = dlg.ShowModal()
@@ -1143,8 +1149,10 @@ class App:
             if BPM_MIN <= bpm <= BPM_MAX:
                 self.progression.bpm = bpm
                 self.recording_bpm   = bpm
+            else:
+                self.recording_bpm = self.progression.bpm
         except (ValueError, TypeError):
-            pass
+            self.recording_bpm = self.progression.bpm
 
         self.cursor = Position(1, 1, self.progression.time_signature)
         self._current_file = None
@@ -1152,7 +1160,7 @@ class App:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._clear_selection()
-        self.speak(f"New project: {self.progression.title}")
+        self.speak(_("New project: {title}").format(title=self.progression.title))
 
     def _on_change_language(self) -> None:
         """Show a language-selection dialog and save the chosen language to settings."""
