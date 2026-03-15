@@ -39,7 +39,7 @@ jobs:
 
       # wxPython wheels are not available for all Linux environments; install
       # build tools and the GTK headers so pip can build from source if needed.
-      # These must come BEFORE `pip install` so that native extensions
+      # These must come BEFORE `uv sync` so that native extensions
       # (wxPython, sounddevice) can compile successfully when no binary wheel
       # is available.
       - name: Install Linux GTK deps
@@ -70,21 +70,27 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install portaudio
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install .
+        run: uv sync --all-groups --system
 
       - name: Build executable
-        uses: Nuitka/Nuitka-Action@main
+        uses: Nuitka/Nuitka-Action@v1.4
         with:
-          nuitka-version: main
+          nuitka-version: "2.7"
           script-name: main.py
           mode: onefile
           output-filename: ${{ matrix.output_filename }}
+          output-dir: dist
           windows-console-mode: disable
           assume-yes-for-downloads: true
           no-progressbar: true
@@ -95,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: build/${{ matrix.output_filename }}
+          path: dist/${{ matrix.output_filename }}
           if-no-files-found: error
 
   release:
