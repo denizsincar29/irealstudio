@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=2.4.3",
     "pyrealpro>=0.2.0",
     "python-rtmidi>=1.5.8",
+    "pillow>=10.0.0",
     "qrcode>=8.2",
     "sounddevice>=0.5.5",
     "wxpython>=4.2.0",

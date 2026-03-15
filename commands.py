@@ -23,6 +23,7 @@ _CMD_SOUND_OUT_NONE     = 2006
 _CMD_SOUND_OUT_DEFAULT  = 2007  # "System default" audio device
 _CMD_SETTINGS_PROJECT   = 3008  # "Project Settings…" (all-in-one dialog)
 _CMD_SETTINGS_UPDATE    = 3009  # "Check for Updates…"
+_CMD_SETTINGS_PLAY_ON_NAV = 3010  # "Play chord on navigation" toggle
 _LANG_BASE              = 3100  # IDs 3100..3199 → language indices 0..99
 _LANGUAGES              = [('en', 'English'), ('ru', 'Русский')]
 _CMD_EDIT_UNDO          = 4001

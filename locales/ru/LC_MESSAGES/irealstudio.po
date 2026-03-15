@@ -686,6 +686,15 @@ msgstr "Перезапись: &Весь такт"
 msgid "&Project Settings..."
 msgstr "&Настройки проекта..."
 
+msgid "&Play chord when navigating"
+msgstr "&Играть аккорд при навигации"
+
+msgid "Play chord on navigation: on"
+msgstr "Играть аккорд при навигации: включено"
+
+msgid "Play chord on navigation: off"
+msgstr "Играть аккорд при навигации: выключено"
+
 msgid "MIDI &Input Device"
 msgstr "MIDI &Вход"
 
