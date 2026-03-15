@@ -31,6 +31,7 @@ class Recorder:
         tock_sound: np.ndarray,
         on_playback_chord: Callable[[str], None] | None = None,
         on_beat: "Callable[[bool, list | None], None] | None" = None,
+        use_midi_compensation: "Callable[[], bool] | None" = None,
     ) -> None:
         """
         Parameters
@@ -53,12 +54,21 @@ class Recorder:
             precount/recording or when no chord data is available.
             When provided this callback is called *instead of* the built-in
             audio beep, allowing the caller to drive a MIDI metronome.
+        use_midi_compensation:
+            Optional zero-argument callable that returns ``True`` when the MIDI
+            metronome is actually active (MIDI output open, MIDI metro enabled)
+            and ``False`` when the click falls back to audio.  Used to pick the
+            correct latency compensation value at the start of each session.
+            Defaults to always returning ``False`` (audio compensation).
         """
         self._speak = speak
         self._tick = tick_sound
         self._tock = tock_sound
         self._on_playback_chord = on_playback_chord
         self._on_beat = on_beat
+        self._use_midi_compensation: "Callable[[], bool]" = (
+            use_midi_compensation if use_midi_compensation is not None else (lambda: False)
+        )
 
         self.state: str = AppState.IDLE
         self.recording_start_time: float = 0.0
@@ -133,6 +143,21 @@ class Recorder:
     def midi_compensation_ms(self, value: int) -> None:
         self._midi_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(value)))
 
+    def _get_clamped_compensation(self, interval: float) -> float:
+        """Return the effective latency compensation in seconds for *interval*-length beats.
+
+        Selects MIDI or audio compensation based on whether the MIDI metronome
+        is currently active (via ``_use_midi_compensation``), then clamps the
+        result to less than one full beat interval so that
+        ``next_beat_time`` stays monotonically increasing even at extreme
+        compensation values.
+        """
+        raw_s = (
+            self._midi_compensation_ms if self._use_midi_compensation()
+            else self._audio_compensation_ms
+        ) / 1000.0
+        return min(raw_s, interval * 0.9)
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -171,12 +196,8 @@ class Recorder:
 
         # Latency compensation: fire the click this many seconds before the
         # logical beat time so that the sound (or MIDI event) arrives at the
-        # listener/device exactly on the beat.  The compensation is determined
-        # by whether a MIDI on_beat callback or the built-in audio beep is used.
-        comp_s = (
-            self._midi_compensation_ms if self._on_beat is not None
-            else self._audio_compensation_ms
-        ) / 1000.0
+        # listener/device exactly on the beat.
+        comp_s = self._get_clamped_compensation(interval)
 
         # Use time.monotonic() throughout so beat scheduling is immune to
         # wall-clock adjustments (NTP, manual time changes, etc.).
@@ -340,10 +361,7 @@ class Recorder:
                 last_m = max(last_m, vb.ending2_start)
 
         # Latency compensation (see _precount_and_record for rationale).
-        comp_s = (
-            self._midi_compensation_ms if self._on_beat is not None
-            else self._audio_compensation_ms
-        ) / 1000.0
+        comp_s = self._get_clamped_compensation(interval)
 
         # Anchor the beat grid to an absolute timeline so processing overhead
         # (chord lookup, speak, play_sound enqueue) does not accumulate and

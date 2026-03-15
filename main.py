@@ -426,6 +426,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
             tock_sound=make_beep(800,   8),
             on_playback_chord=self._on_playback_chord_midi,
             on_beat=self._midi_metro_beat,
+            use_midi_compensation=lambda: (
+                self.midi_metro_enabled and self._midi.midi_output is not None
+            ),
         )
 
         self._midi.init()
@@ -540,6 +543,18 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if self._recorder.state != AppState.IDLE:
             return
         self.toggle_no_chord()
+
+    def _seed_smart_metro(self) -> None:
+        """Seed ``_smart_metro_last_chord`` for the upcoming recording/playback session.
+
+        Sets the cached chord to the most recently placed chord at or before
+        the current cursor position, so the smart metronome starts with the
+        right note immediately rather than staying silent until the first
+        downbeat chord is passed.  Resets to ``None`` when no chord exists to
+        the left of the cursor.
+        """
+        item = self.progression.find_last_chord_to_left(self.cursor)
+        self._smart_metro_last_chord = item.chord if item is not None else None
 
     # ------------------------------------------------------------------
     # Smart-metronome note helper

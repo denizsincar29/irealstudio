@@ -18,7 +18,6 @@ from commands import (
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
     _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE,
     _CMD_CHORD_PLAY_OFF, _CMD_CHORD_PLAY_NAV, _CMD_CHORD_PLAY_PB, _CMD_CHORD_PLAY_BOTH,
-    _CMD_MIDI_METRO_TOGGLE, _CMD_MIDI_METRO_SETUP, _CMD_MIDI_METRO_SMART,
     _CMD_METRO_SETTINGS,
     _CMD_MIDI_REFRESH, _CMD_MIDI_NONE, _CMD_MIDI_OUT_REFRESH, _CMD_MIDI_OUT_NONE,
     _CMD_SOUND_OUT_REFRESH, _CMD_SOUND_OUT_NONE, _CMD_SOUND_OUT_DEFAULT,
@@ -203,6 +202,7 @@ class MenuMixin:
         if self._recorder.state == AppState.IDLE:
             if self.recording_mode == RECORDING_MODE_OVERWRITE:
                 self._start_overwrite_session()
+            self._seed_smart_metro()
             self._recorder.start_recording(
                 self.progression, self.cursor,
                 recording_bpm=self.recording_bpm,
@@ -212,6 +212,7 @@ class MenuMixin:
 
     def _menu_play(self) -> None:
         if self._recorder.state == AppState.IDLE:
+            self._seed_smart_metro()
             self._recorder.start_playback(self.progression, self.cursor)
         elif self._recorder.state == AppState.PLAYING:
             self._recorder.stop_all()

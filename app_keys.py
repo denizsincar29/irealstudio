@@ -43,6 +43,7 @@ class KeysMixin:
             if self._recorder.state == AppState.IDLE:
                 if self.recording_mode == RECORDING_MODE_OVERWRITE:
                     self._start_overwrite_session()
+                self._seed_smart_metro()
                 self._recorder.start_recording(
                     self.progression, self.cursor,
                     recording_bpm=self.recording_bpm,
@@ -72,6 +73,7 @@ class KeysMixin:
                     # Preview chord on MIDI output when navigation mode is active.
                     if self._midi.midi_output is not None and self.chord_play_mode in ('navigation', 'both'):
                         self.play_current_chord_midi()
+                    self._seed_smart_metro()
                     self._recorder.start_playback(self.progression, self.cursor)
                 elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
                     self._recorder.stop_all()
