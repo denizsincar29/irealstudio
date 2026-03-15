@@ -118,6 +118,9 @@ class ChordGridPanel(wx.ScrolledWindow):
         self.SetMinSize((-1, self.CELL_H * 4))
         # Enable pixel-level scrolling (scroll rate in x and y pixels per step)
         self.SetScrollRate(10, 10)
+        # Prevent the chord grid from ever taking keyboard focus so that all
+        # key events (including arrow keys) always reach the main panel handler.
+        self.SetCanFocus(False)
         self.Bind(wx.EVT_PAINT,       self._on_paint)
         self.Bind(wx.EVT_LEFT_DOWN,   self._on_mouse_down)
         self.Bind(wx.EVT_MOTION,      self._on_mouse_move)
@@ -1281,7 +1284,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
 
         panel.SetSizer(sizer)
 
-        for w in (self._frame, panel):
+        for w in (self._frame, panel, self._chord_grid):
             w.Bind(wx.EVT_KEY_DOWN, self._on_keydown)
             w.Bind(wx.EVT_KEY_UP,   self._on_keyup)
 
@@ -1291,7 +1294,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._refresh_menu_state()
 
         self._frame.Show()
-        panel.SetFocus()
+        # Use CallAfter so focus is set after wxPython has finished processing
+        # the Show() activation messages; otherwise the OS may redirect focus to
+        # the first focusable child (ChordGridPanel) before our SetFocus() fires.
+        wx.CallAfter(panel.SetFocus)
 
         self._schedule_display_update()
         self._start_background_update_check()
