@@ -19,7 +19,7 @@ Keyboard shortcuts:
   / + (a-g)     - Add bass note to chord at cursor (slash chord)
   Delete/Backspace - Delete chord at current position
   Ctrl+Delete   - Delete section mark / repeat bracket / N.C. at current measure
-  Ctrl+O        - Open progression file (.ips or .json)
+  Ctrl+O        - Open progression file (.ips)
   Ctrl+S        - Save progression (to current file, or prompts if new)
   Ctrl+E        - Export to iReal Pro format (HTML file, prompts for save location)
   Ctrl+Shift+E  - Show QR code for iReal Pro URL in a popup dialog
@@ -30,8 +30,7 @@ Keyboard shortcuts:
 All events are written to irealstudio.log in the working directory.
 
 File formats:
-  .ips  - IReal Studio format (default); same JSON content as .json
-  .json - Legacy JSON format, still supported for reading and writing
+  .ips  - IReal Studio format (default)
 
 On Windows the program can be registered as the default handler for .ips files
 via "Open with" so that double-clicking a .ips file opens it in IReal Studio.
@@ -315,7 +314,6 @@ class App:
                 except Exception as e:
                     self.speak(f"Could not load {cli_path.name}: {e}")
         # Auto-load the last saved project file so the user's work is restored.
-        # Try .ips first, then fall back to the legacy .json name.
         elif Path(SAVE_FILE).exists():
             try:
                 with open(SAVE_FILE, encoding='utf-8') as f:
@@ -325,16 +323,6 @@ class App:
                 self.speak(f"Loaded {self.progression.title}")
             except Exception as e:
                 self.speak(f"Could not load {SAVE_FILE}: {e}")
-        elif Path("progression.json").exists():
-            # Backward-compatibility: migrate from legacy JSON file
-            try:
-                with open("progression.json", encoding='utf-8') as f:
-                    self.progression = ChordProgression.from_json(f.read())
-                self._apply_loaded_progression(None)  # prompt Save As on next Ctrl+S
-                self._loaded_at_startup = True
-                self.speak(f"Loaded {self.progression.title} (legacy JSON)")
-            except Exception as e:
-                self.speak(f"Could not load progression.json: {e}")
 
     # ------------------------------------------------------------------
     # Progression loading helpers
@@ -1051,7 +1039,7 @@ class App:
     # ------------------------------------------------------------------
 
     def _save_to_path(self, path: Path) -> None:
-        """Write the progression as JSON/IPS to *path* and update _current_file."""
+        """Write the progression to *path* and update _current_file."""
         with open(path, 'w', encoding='utf-8') as f:
             f.write(self.progression.to_json())
         self._current_file = path
@@ -1069,7 +1057,7 @@ class App:
             self.save_as()
 
     def save_as(self) -> None:
-        """Show a Save-As dialog; save as .ips by default, .json also accepted."""
+        """Show a Save-As dialog; save as .ips."""
         if self._frame is not None:
             default_name = (
                 self.progression.title.replace(' ', '_') + '.ips'
@@ -1078,11 +1066,7 @@ class App:
                 self._frame,
                 message="Save progression",
                 defaultFile=default_name,
-                wildcard=(
-                    "IReal Studio files (*.ips)|*.ips"
-                    "|JSON files (*.json)|*.json"
-                    "|All files (*.*)|*.*"
-                ),
+                wildcard="IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*",
                 style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
             )
             if dlg.ShowModal() == wx.ID_OK:
@@ -1103,22 +1087,14 @@ class App:
             except Exception as e:
                 self.speak(f"Save failed: {e}")
 
-    # Backward-compatible alias kept for the Ctrl+S menu binding
-    def save_json(self) -> None:
-        self.save()
-
     def open_file(self) -> None:
-        """Show an Open dialog and load the selected .ips or .json file."""
+        """Show an Open dialog and load the selected .ips file."""
         if self._frame is None:
             return
         dlg = wx.FileDialog(
             self._frame,
             message="Open progression",
-            wildcard=(
-                "IReal Studio files (*.ips)|*.ips"
-                "|JSON files (*.json)|*.json"
-                "|All files (*.*)|*.*"
-            ),
+            wildcard="IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*",
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         )
         if dlg.ShowModal() == wx.ID_OK:
