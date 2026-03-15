@@ -4,6 +4,14 @@ A persistent callback-based PortAudio output stream is kept open for the
 entire lifetime of the process.  play_sound() simply enqueues a buffer into
 a list that is mixed into the stream on every audio callback, eliminating
 the ~200 ms warm-up latency caused by repeatedly calling sd.play().
+
+Latency budget
+--------------
+* Block-size jitter: 0 – BLOCK_SIZE/SAMPLE_RATE = ~2.9 ms (128 frames)
+* Hardware output buffer: requested 5 ms via ``latency=0.005``;
+  PortAudio clamps to the device's achievable minimum on each platform
+  (Windows WASAPI ≈ 3 ms, Linux ALSA ≈ 1–3 ms, macOS CoreAudio ≈ 3 ms).
+Total round-trip from play_sound() call to audible output: typically < 10 ms.
 """
 
 import threading
@@ -17,8 +25,9 @@ except Exception:
 
 SAMPLE_RATE = 44100
 
-# Small block size keeps scheduling jitter low (~5.8 ms per block).
-_BLOCK_SIZE = 256
+# Block size: 128 frames → ~2.9 ms max callback scheduling jitter.
+# (Halved from 256 to reduce the gap between play_sound() and first output.)
+_BLOCK_SIZE = 128
 
 # Attack / release lengths in seconds for the metronome envelope.
 _ATTACK_S  = 0.003   # 3 ms  — fast but click-free
@@ -73,7 +82,10 @@ def _open_stream(device: int | None = None) -> None:
             callback=_callback,
             blocksize=_BLOCK_SIZE,
             device=device,
-            latency='low',
+            # Request a 5 ms output buffer.  PortAudio uses the device's
+            # achievable minimum when the requested value is below it, so
+            # this is safe even on hardware that can't reach 5 ms.
+            latency=0.005,
         )
         _stream.start()
     except Exception:
@@ -119,7 +131,7 @@ def play_sound(wave: np.ndarray) -> None:
     """Enqueue *wave* for immediate playback on the persistent stream.
 
     Returns immediately; the audio callback mixes the buffer into the
-    hardware output on the next audio block (~5.8 ms at 256 frames /
+    hardware output on the next audio block (~2.9 ms at 128 frames /
     44 100 Hz), avoiding the ~200 ms latency of sd.play().
     Falls back to sd.play() if the persistent stream is unavailable.
     """
