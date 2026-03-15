@@ -266,6 +266,9 @@ class App:
         # Unsaved-changes tracking
         self._is_dirty: bool = False
 
+        # Tracks whether a progression was loaded at startup (used for welcome message)
+        self._loaded_at_startup: bool = False
+
         # Menu items that may need to be checked/unchecked at runtime
         self._overdub_item:          wx.MenuItem | None = None
         self._overwrite_item:        wx.MenuItem | None = None
@@ -307,9 +310,31 @@ class App:
                     with open(cli_path, encoding='utf-8') as f:
                         self.progression = ChordProgression.from_json(f.read())
                     self._current_file = cli_path
+                    self._loaded_at_startup = True
                     self.speak(f"Loaded {self.progression.title}")
                 except Exception as e:
                     self.speak(f"Could not load {cli_path.name}: {e}")
+        # Auto-load the last saved project file so the user's work is restored.
+        # Try .ips first, then fall back to the legacy .json name.
+        elif Path(SAVE_FILE).exists():
+            try:
+                with open(SAVE_FILE, encoding='utf-8') as f:
+                    self.progression = ChordProgression.from_json(f.read())
+                self._current_file = Path(SAVE_FILE)
+                self._loaded_at_startup = True
+                self.speak(f"Loaded {self.progression.title}")
+            except Exception as e:
+                self.speak(f"Could not load: {e}")
+        elif Path("progression.json").exists():
+            # Backward-compatibility: migrate from legacy JSON file
+            try:
+                with open("progression.json", encoding='utf-8') as f:
+                    self.progression = ChordProgression.from_json(f.read())
+                self._current_file = None  # will prompt Save As on next Ctrl+S
+                self._loaded_at_startup = True
+                self.speak(f"Loaded {self.progression.title} (legacy JSON)")
+            except Exception as e:
+                self.speak(f"Could not load: {e}")
 
     # ------------------------------------------------------------------
     # MIDI chord callback
@@ -1706,7 +1731,11 @@ Other
     def run(self) -> None:
         wx_app = wx.App(False)
 
-        self.speak(_("IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."))
+        if self._loaded_at_startup:
+            self.speak(_("IReal Studio ready. {title}. Press R to record.").format(
+                title=self.progression.title))
+        else:
+            self.speak(_("IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file."))
 
         self._frame = wx.Frame(None, title="IReal Studio", size=(500, 140))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
