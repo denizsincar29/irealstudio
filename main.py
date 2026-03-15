@@ -1735,7 +1735,7 @@ Other
         self._status_labels = []
 
         # Status labels (lines 0-3): title/key/bpm, cursor, chords, current chord
-        for _ in range(4):
+        for _i in range(4):
             lbl = wx.StaticText(panel, label="", style=wx.ST_NO_AUTORESIZE)
             lbl.SetForegroundColour(wx.Colour(200, 200, 200))
             sizer.Add(lbl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
