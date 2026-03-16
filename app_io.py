@@ -496,30 +496,43 @@ class IOMixin:
         """Silently check for updates on startup; notify the user if one is found."""
         from updater import check_for_updates_async
 
-        def _on_found(tag: str, url: str) -> None:
-            wx.CallAfter(self._notify_update_available, tag, url)
+        def _on_found(tag: str, url: str, release_data: dict) -> None:
+            wx.CallAfter(self._notify_update_available, tag, url, release_data)
 
         check_for_updates_async(on_update_found=_on_found)
 
-    def _notify_update_available(self, tag: str, url: str) -> None:
+    def _notify_update_available(self, tag: str, url: str, release_data: dict) -> None:
         """Show a non-blocking update notification in the wx main thread.
 
         When running from source (not compiled), logs a debug message via
         speech instead of showing a dialog, to avoid interrupting development.
+        In compiled mode, offers to download and install the update automatically.
         """
-        from updater import _IS_COMPILED
-        if not _IS_COMPILED:
+        from updater import is_compiled, can_auto_install, run_download_and_install
+        if not is_compiled():
             self.speak(_("Debug: new update available: {tag}").format(tag=tag))
             return
-        import webbrowser as _wb
-        msg = _(
-            "A new version of IReal Studio is available: {tag}\n\n"
-            "Open the download page?"
-        ).format(tag=tag)
+
+        auto_install = can_auto_install(release_data)
+        if auto_install:
+            msg = _(
+                "A new version of IReal Studio is available: {tag}\n\n"
+                "Download and install the update now?"
+            ).format(tag=tag)
+        else:
+            msg = _(
+                "A new version of IReal Studio is available: {tag}\n\n"
+                "Open the download page?"
+            ).format(tag=tag)
+
         dlg = wx.MessageDialog(
             self._frame, msg, _("Update Available"),
             wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION,
         )
         if dlg.ShowModal() == wx.ID_YES:
-            _wb.open(url)
+            if auto_install:
+                run_download_and_install(self._frame, release_data)
+            else:
+                import webbrowser as _wb
+                _wb.open(url)
         dlg.Destroy()

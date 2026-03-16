@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.7 - 2026-03-16
+
+Fixed exe not running from GitHub release (output-file instead of output-filename in release workflow). Added auto-download and install support to the updater.
+
 ## v0.1.6 - 2026-03-16
 
 Fix --include-data-dir option format in release workflow (use = instead of :)

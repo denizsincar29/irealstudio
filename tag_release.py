@@ -49,6 +49,9 @@ _DRAFT_FILE = Path('.release_draft.json')
 # Sentinel representing "no prior release found".
 _ZERO_VERSION = semver.Version(0, 0, 0)
 
+# Maximum number of characters to show when echoing a CLI-supplied changelog.
+_CHANGELOG_PREVIEW_LEN = 60
+
 
 def _check_clean_tree(repo: git.Repo) -> None:
     if repo.is_dirty(untracked_files=True):
@@ -234,11 +237,20 @@ def _prompt_version(existing_tags: list[str], last: semver.Version) -> tuple[str
         return version_tag, parsed
 
 
-def main() -> None:
+def main(version_arg: str | None = None, changelog_arg: str | None = None) -> None:
     """Entry point: behaviour is determined automatically from the current branch.
 
     * **main branch** – full release (interactive or finalise existing draft).
     * **any other branch** – draft-only (commit files; no tag or push).
+
+    Parameters
+    ----------
+    version_arg:
+        Version string provided via CLI (e.g. ``"0.1.7"``).  Skips the
+        interactive version prompt when supplied.
+    changelog_arg:
+        Changelog text provided via CLI.  Skips the interactive changelog
+        prompt when supplied.
     """
     repo = git.Repo('.')
     try:
@@ -288,12 +300,37 @@ def main() -> None:
 
     existing_tags = _get_existing_tags(repo)
     last = _last_version_tag(existing_tags)
-    version_tag, _ = _prompt_version(existing_tags, last)
 
-    changelog = _read_multiline_changelog()
-    if not changelog.strip():
-        print("ERROR: Changelog cannot be empty.")
-        sys.exit(1)
+    if version_arg is not None:
+        # Non-interactive: validate the supplied version.
+        parsed = _parse_version(version_arg)
+        if parsed is None:
+            print(f"ERROR: Invalid version '{version_arg}'. Use x.y.z (e.g. 1.2.3).")
+            sys.exit(1)
+        version_tag = f'v{parsed}'
+        if version_tag in existing_tags:
+            print(f"ERROR: Tag '{version_tag}' already exists.")
+            sys.exit(1)
+        if parsed <= last:
+            print(
+                f"ERROR: Version {version_tag} is not higher than the last tag v{last}."
+            )
+            sys.exit(1)
+        print(f"Using version {version_tag}")
+    else:
+        version_tag, _ = _prompt_version(existing_tags, last)
+
+    if changelog_arg is not None:
+        changelog = changelog_arg.strip()
+        if not changelog:
+            print("ERROR: Changelog cannot be empty.")
+            sys.exit(1)
+        print(f"Using provided changelog: {changelog[:_CHANGELOG_PREVIEW_LEN]}{'…' if len(changelog) > _CHANGELOG_PREVIEW_LEN else ''}")
+    else:
+        changelog = _read_multiline_changelog()
+        if not changelog.strip():
+            print("ERROR: Changelog cannot be empty.")
+            sys.exit(1)
 
     _write_news(version_tag, changelog)
     _update_version_py(version_tag)
@@ -323,11 +360,29 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        print(
-            f"ERROR: Unknown argument '{sys.argv[1]}'.\n"
-            "This script takes no arguments; branch is detected automatically."
-        )
-        sys.exit(1)
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Tag a release for IReal Studio.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            'When VERSION and CHANGELOG are both supplied the script runs\n'
+            'non-interactively.  Omit them for the interactive prompts.\n\n'
+            'Branch behaviour is detected automatically:\n'
+            '  main branch   → full release (commit + tag + push)\n'
+            '  other branch  → draft only (commit; no tag or push)\n'
+        ),
+    )
+    parser.add_argument(
+        'version',
+        nargs='?',
+        help='Version to release (e.g. 0.1.7).  Omit for interactive prompt.',
+    )
+    parser.add_argument(
+        'changelog',
+        nargs='?',
+        help='Changelog text.  Omit for interactive prompt.',
+    )
+    args = parser.parse_args()
+    main(version_arg=args.version, changelog_arg=args.changelog)
 
