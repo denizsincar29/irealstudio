@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.8 - 2026-03-16
+
+- Fixed app compilation.
+- Fixed Github workflow.
+
 ## v0.1.7 - 2026-03-16
 
 Fixed exe not running from GitHub release (output-file instead of output-filename in release workflow). Added auto-download and install support to the updater.
