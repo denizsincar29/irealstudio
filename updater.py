@@ -135,7 +135,7 @@ def download_update(
     """
     asset = _find_platform_asset(release_data.get('assets', []))
     if asset is None:
-        _logger.debug("No platform asset found in release.")
+        _logger.warning("No platform asset found in release.")
         return None
 
     download_url = asset['browser_download_url']
@@ -144,6 +144,7 @@ def download_update(
 
     tmp_dir = Path(tempfile.mkdtemp(prefix='irealstudio_update_'))
     dest = tmp_dir / asset_name
+    _logger.info("Downloading update asset '%s' (%d bytes) to %s", asset_name, total_size, dest)
     try:
         req = urllib.request.Request(
             download_url,
@@ -164,6 +165,7 @@ def download_update(
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
+    _logger.info("Download complete: %d bytes written to %s", downloaded, dest)
     return dest
 
 
@@ -221,6 +223,7 @@ def extract_update(asset_path: Path) -> Path | None:
         name = asset_path.name
         extract_dir = asset_path.parent / 'extracted'
         extract_dir.mkdir(exist_ok=True)
+        _logger.info("Extracting update asset '%s' to %s", name, extract_dir)
 
         if name.endswith('.zip'):
             with zipfile.ZipFile(asset_path, 'r') as zf:
@@ -230,12 +233,15 @@ def extract_update(asset_path: Path) -> Path | None:
                 _safe_extract_tar(tf, extract_dir)
         else:
             # Treat as a single executable (macOS onefile).
+            _logger.info("Asset is a single executable; no extraction needed.")
             return asset_path
 
         # If the archive contained a single top-level directory, return that.
         contents = list(extract_dir.iterdir())
         if len(contents) == 1 and contents[0].is_dir():
+            _logger.info("Extraction complete; content directory: %s", contents[0])
             return contents[0]
+        _logger.info("Extraction complete; content directory: %s", extract_dir)
         return extract_dir
     except Exception as exc:
         _logger.error("Update extraction failed: %s", exc)
@@ -250,9 +256,10 @@ def apply_update_and_restart(
 
     On **Windows**: cannot replace files that are in use, so a small
     PowerShell script is written to a temp location, launched, and the app
-    exits.  The script waits a few seconds, copies the new files over the
-    installation directory, starts the application again, and deletes both the
-    temp script and the temp download directory.
+    exits.  The script waits for the current process to exit, copies the new
+    files over the installation directory, starts the application again, and
+    deletes both the temp script and the temp download directory.  All steps
+    are logged to ``irealstudio.log``.
 
     On **Linux / macOS**: new files are staged to a sibling directory first.
     If staging succeeds the old directory is backed up and the staging
@@ -284,14 +291,24 @@ def apply_update_and_restart(
     current_dir = current_exe.parent
     system = platform.system()
 
+    _logger.info(
+        "Applying update: system=%s, src=%s, dst=%s",
+        system, new_content_dir, current_dir,
+    )
+
     if system == 'Windows':
         # Write a PowerShell script that:
         #   1. Waits for this process to exit
         #   2. Copies the new files over the installation directory
-        #   3. Starts the application
-        #   4. Cleans up the temp download dir and itself
+        #   3. Logs the result to irealstudio.log
+        #   4. Starts the application
+        #   5. Cleans up the temp download dir and itself
         import subprocess
         pid = os.getpid()
+        # Absolute path to log file so the PS1 script can write to it even
+        # after the working directory may change.
+        log_file_abs = str(Path('irealstudio.log').resolve())
+
         # Use utf-8-sig (BOM) so PowerShell reads it correctly on any codepage.
         with tempfile.NamedTemporaryFile(
             mode='w', suffix='_irealstudio_update.ps1',
@@ -305,14 +322,30 @@ def apply_update_and_restart(
             src = _ps_esc(str(new_content_dir))
             dst = _ps_esc(str(current_dir))
             exe = _ps_esc(str(current_exe))
+            log = _ps_esc(log_file_abs)
             tmp_dir_str = _ps_esc(str(cleanup_dir)) if cleanup_dir else None
             lines = [
                 '# IReal Studio auto-update helper\r\n',
+                # Helper function to append a timestamped line to the log file,
+                # matching the Python log format: "HH:mm:ss INFO  <message>".
+                'function Write-UpdateLog($msg) {\r\n',
+                '    $ts = Get-Date -Format "HH:mm:ss"\r\n',
+                f'    Add-Content -Path "{log}" -Value "$ts INFO  [updater] $msg" -Encoding UTF8\r\n',
+                '}\r\n',
                 f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}\r\n',
                 'Start-Sleep -Seconds 2\r\n',
-                # robocopy returns 0-7 for success; redirect to suppress output.
-                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS | Out-Null\r\n',
-                f'Start-Process -FilePath "{exe}"\r\n',
+                'Write-UpdateLog "Windows update helper started; copying files"\r\n',
+                # robocopy returns 0-7 for success (8+ = error). Redirect
+                # stdout/stderr to $null to suppress console output.
+                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS > $null 2>&1\r\n',
+                '$rc = $LASTEXITCODE\r\n',
+                'if ($rc -le 7) {\r\n',
+                '    Write-UpdateLog "Files copied successfully (robocopy exit code $rc)"\r\n',
+                '    Write-UpdateLog "Starting updated application"\r\n',
+                f'    Start-Process -FilePath "{exe}"\r\n',
+                '} else {\r\n',
+                '    Write-UpdateLog "ERROR: robocopy failed with exit code $rc — update not applied"\r\n',
+                '}\r\n',
             ]
             if tmp_dir_str:
                 lines.append(
@@ -322,10 +355,13 @@ def apply_update_and_restart(
                 'Remove-Item -Force -ErrorAction SilentlyContinue -Path $MyInvocation.MyCommand.Path\r\n'
             )
             ps_file.write(''.join(lines))
+
+        _logger.info("Launching update helper script: %s", ps_path)
         subprocess.Popen(  # noqa: S603
             ['powershell', '-NonInteractive', '-WindowStyle', 'Hidden',
              '-ExecutionPolicy', 'Bypass', '-File', ps_path],
-            creationflags=getattr(subprocess, 'DETACHED_PROCESS', 8),
+            creationflags=getattr(subprocess, 'DETACHED_PROCESS', 8)
+            | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200),
             close_fds=True,
         )
         raise SystemExit(0)
@@ -334,6 +370,7 @@ def apply_update_and_restart(
         if system == 'Darwin' and new_content_dir.is_file():
             # macOS onefile: replace the single binary in-place.
             import stat
+            _logger.info("macOS onefile update: replacing %s", current_exe)
             orig_mode = current_exe.stat().st_mode
             shutil.copy2(new_content_dir, current_exe)
             current_exe.chmod(orig_mode | stat.S_IEXEC)
@@ -343,6 +380,11 @@ def apply_update_and_restart(
             # old directory for rollback.
             staging_dir = current_dir.parent / f'.{current_dir.name}.new'
             backup_dir = current_dir.parent / f'.{current_dir.name}.bak'
+
+            _logger.info(
+                "Staging update: %s -> %s (backup: %s)",
+                new_content_dir, staging_dir, backup_dir,
+            )
 
             # Remove stale staging/backup dirs from a previous aborted update.
             for _d in (staging_dir, backup_dir):
@@ -368,15 +410,21 @@ def apply_update_and_restart(
                 # Clean up staging dir if it was not moved.
                 if staging_dir.exists():
                     shutil.rmtree(staging_dir, ignore_errors=True)
+                _logger.error("Update staging/swap failed; installation restored.")
                 raise
 
             # Success — remove the backup.
             shutil.rmtree(backup_dir, ignore_errors=True)
+            _logger.info("Update staged successfully; restarting application.")
 
         # Clean up the temp download directory before exec.
         if cleanup_dir and cleanup_dir.exists():
             shutil.rmtree(cleanup_dir, ignore_errors=True)
 
+        _logger.info("Restarting via os.execv: %s", current_exe)
+        # Flush and close all log handlers so the restart entry reaches the
+        # file before os.execv replaces the process image.
+        logging.shutdown()
         os.execv(str(current_exe), [str(current_exe)] + sys.argv[1:])
 
     raise RuntimeError(f"Unsupported platform for auto-update: {system}")
@@ -407,23 +455,26 @@ def check_for_updates_async(
     def _worker() -> None:
         data = fetch_latest_release()
         if data is None:
+            _logger.warning("Update check: could not reach GitHub.")
             if on_error:
                 on_error("Could not reach GitHub to check for updates.")
             return
         tag = data.get('tag_name', '')
         if not tag:
             msg = data.get('message', 'GitHub API did not return a release tag.')
-            _logger.debug("Update check: unexpected response: %s", msg)
+            _logger.warning("Update check: unexpected response: %s", msg)
             if on_error:
                 on_error(f"Update check failed: {msg}")
             return
         latest = _parse_version(tag)
         current = _current_version()
         if latest > current:
+            _logger.info("Update available: %s (current: %s)", tag, VERSION)
             url = data.get('html_url', _RELEASES_PAGE)
             if on_update_found:
                 on_update_found(tag, url, data)
         else:
+            _logger.info("Already up to date (v%s).", VERSION)
             if on_up_to_date:
                 on_up_to_date()
 
@@ -566,8 +617,10 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
         progress.Destroy()
         asset_path: Path | None = result['asset_path']
         if result['error'] or asset_path is None:
+            err_msg = result['error'] or 'no asset found'
+            _logger.error("Update download failed: %s", err_msg)
             wx.MessageBox(
-                f"Download failed: {result['error'] or 'no asset found'}",
+                f"Download failed: {err_msg}",
                 "Update Failed",
                 wx.OK | wx.ICON_ERROR,
                 parent_window,
@@ -585,12 +638,29 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
                 parent_window,
             )
             return
+        # Notify the user that the update is about to be applied.
+        wx.MessageBox(
+            "The update has been downloaded and will now be applied.\n"
+            "The application will restart automatically.",
+            "Applying Update",
+            wx.OK | wx.ICON_INFORMATION,
+            parent_window,
+        )
+        _logger.info("User acknowledged restart; applying update now.")
         # Apply and restart; pass tmp_dir so it is cleaned up after apply.
         try:
             apply_update_and_restart(new_dir, cleanup_dir=tmp_dir)
         except SystemExit:
+            # On Windows, apply_update_and_restart raises SystemExit(0) after
+            # launching the helper script.  Shut down the wx main loop cleanly
+            # before letting SystemExit propagate so that all wx resources are
+            # properly released and the helper script can overwrite the files.
+            app = wx.GetApp()
+            if app is not None:
+                app.ExitMainLoop()
             raise
         except Exception as exc:
+            _logger.error("Failed to apply update: %s", exc)
             shutil.rmtree(tmp_dir, ignore_errors=True)
             wx.MessageBox(
                 f"Failed to apply update: {exc}",
