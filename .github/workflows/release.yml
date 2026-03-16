@@ -82,7 +82,7 @@ jobs:
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
         with:
-          nuitka-version: "2.7"
+          nuitka-version: "4.0.5"
           script-name: main.py
           mode: onefile
           output-filename: ${{ matrix.output_filename }}
@@ -128,7 +128,7 @@ jobs:
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
         with:
-          nuitka-version: "2.7"
+          nuitka-version: "4.0.5"
           script-name: main.py
           mode: onefile
           output-filename: irealstudio-macos
@@ -153,7 +153,7 @@ jobs:
     if: >-
       always() &&
       needs.build.result == 'success' &&
-      (needs.build_macos.result == 'success' || needs.build_macos.result == 'skipped') &&
+      needs.build_macos.result != 'cancelled' &&
       startsWith(github.ref, 'refs/tags/') &&
       (github.event_name == 'push' || inputs.create_release == true)
 
