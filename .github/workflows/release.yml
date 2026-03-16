@@ -99,7 +99,7 @@ jobs:
           quiet: true
           follow-imports: true
           # Include localisation (.mo) files so translations work in the build
-          include-data-dir: locales:locales
+          include-data-dir: locales=locales
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
@@ -162,7 +162,7 @@ jobs:
           quiet: true
           follow-imports: true
           # Embed localisation (.mo) files inside the single macOS binary
-          include-data-dir: locales:locales
+          include-data-dir: locales=locales
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -1,5 +1,5 @@
-# v0.1.5 Release Notes
+# v0.1.6 Release Notes
 
-## v0.1.5 - 2026-03-16
+## v0.1.6 - 2026-03-16
 
-Fixing github release to do zips instead of 1 file.
+Fix --include-data-dir option format in release workflow (use = instead of :)
