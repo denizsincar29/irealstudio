@@ -159,6 +159,11 @@ def _pull_latest(repo: git.Repo) -> None:
         print(f"Pulling latest changes from origin/{branch}…")
         origin.pull(branch)
         print("Up to date.")
+    except TypeError:
+        # active_branch raises TypeError in detached-HEAD state; callers should
+        # have already guarded against this, but be safe.
+        print("ERROR: HEAD is detached. Please check out a branch before releasing.")
+        sys.exit(1)
     except git.GitCommandError as exc:
         print(f"ERROR: git pull failed: {exc}")
         sys.exit(1)
@@ -239,7 +244,8 @@ def main() -> None:
     try:
         branch = repo.active_branch.name
     except TypeError:
-        branch = None  # detached HEAD
+        print("ERROR: HEAD is detached. Please check out a branch before releasing.")
+        sys.exit(1)
 
     on_main = branch == 'main'
 
