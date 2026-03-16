@@ -89,26 +89,32 @@ jobs:
         run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
 
       - name: Build executable
-        uses: Nuitka/Nuitka-Action@v1.4
-        with:
-          nuitka-version: "4.0.5"
-          script-name: main.py
-          # Standalone mode avoids Windows Defender false-positives on single-file
-          # executables.  The output directory is zipped/tarred in the next step.
-          mode: standalone
-          output-file: ${{ matrix.output_filename }}
-          output-dir: dist
-          windows-console-mode: disable
-          assume-yes-for-downloads: true
-          quiet: true
-          # mido loads its rtmidi backend dynamically by string; Nuitka won't
-          # auto-discover it, so we force-include it here.
-          include-module: mido.backends.rtmidi
-          # Include localisation (.mo) files and screen-reader DLLs from
-          # accessible_output3 so that NVDA/JAWS/ZoomText integration works.
-          include-data-dir: |
-            locales=locales
-            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
+        # shell: bash uses Git Bash on Windows runners (always available on
+        # GitHub-hosted runners) so that the same script runs on all platforms.
+        shell: bash
+        run: |
+          # Build the standalone executable using the same flags as compile.bat.
+          # --windows-console-mode is Windows-only; skip it on Linux.
+          # $RUNNER_OS is set by GitHub Actions to 'Windows', 'Linux', or 'macOS'.
+          NUITKA_FLAGS=(
+            --mode=standalone
+            "--output-file=${{ matrix.output_filename }}"
+            --output-dir=dist
+            --assume-yes-for-downloads
+            --follow-imports
+            "--include-data-dir=locales=locales"
+            "--include-data-dir=${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib"
+            --include-module=mido.backends.rtmidi
+            --nofollow-import-to=unittest
+            --nofollow-import-to=doctest
+            --nofollow-import-to=pdb
+            --nofollow-import-to=tkinter
+            --nofollow-import-to=test
+          )
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            NUITKA_FLAGS+=(--windows-console-mode=disable)
+          fi
+          uv run python -m nuitka "${NUITKA_FLAGS[@]}" main.py
 
       - name: Copy accessible_output3 DLLs (Windows)
         if: runner.os == 'Windows'
@@ -172,24 +178,24 @@ jobs:
         run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
 
       - name: Build executable
-        uses: Nuitka/Nuitka-Action@v1.4
-        with:
-          nuitka-version: "4.0.5"
-          script-name: main.py
-          mode: onefile
-          output-file: irealstudio-macos
-          output-dir: dist
-          windows-console-mode: disable
-          assume-yes-for-downloads: true
-          quiet: true
-          # mido loads its rtmidi backend dynamically by string; force-include it.
-          include-module: mido.backends.rtmidi
-          # Embed localisation (.mo) files and screen-reader DLL directory
-          # inside the single macOS binary (DLLs are Windows-only but bundling
-          # keeps the build config symmetric and harmless on macOS).
-          include-data-dir: |
-            locales=locales
-            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
+        run: |
+          # Build a single self-contained binary using the same flags as compile.sh.
+          uv run python -m nuitka \
+            --mode=onefile \
+            --output-file=irealstudio-macos \
+            --output-dir=dist \
+            --assume-yes-for-downloads \
+            --follow-imports \
+            "--include-data-dir=locales=locales" \
+            "--include-data-dir=${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib" \
+            --include-module=mido.backends.rtmidi \
+            --nofollow-import-to=unittest \
+            --nofollow-import-to=doctest \
+            --nofollow-import-to=pdb \
+            --nofollow-import-to=tkinter \
+            --nofollow-import-to=test \
+            main.py
+          chmod +x dist/irealstudio-macos
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
