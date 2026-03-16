@@ -27,11 +27,15 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: irealstudio.exe
+            artifact_name: irealstudio-windows
             output_filename: irealstudio.exe
+            dist_dir: irealstudio-windows
+            package_file: irealstudio-windows.zip
           - os: ubuntu-latest
             artifact_name: irealstudio-linux
             output_filename: irealstudio-linux
+            dist_dir: irealstudio-linux
+            package_file: irealstudio-linux.tar.gz
 
     steps:
       - name: Checkout
@@ -84,7 +88,9 @@ jobs:
         with:
           nuitka-version: "4.0.5"
           script-name: main.py
-          mode: onefile
+          # Standalone mode avoids Windows Defender false-positives on single-file
+          # executables.  The output directory is zipped/tarred in the next step.
+          mode: standalone
           output-filename: ${{ matrix.output_filename }}
           output-dir: dist
           windows-console-mode: disable
@@ -92,12 +98,29 @@ jobs:
           no-progressbar: true
           quiet: true
           follow-imports: true
+          # Include localisation (.mo) files so translations work in the build
+          include-data-dir: locales:locales
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Nuitka names the standalone output directory after the script: main.dist
+          Rename-Item -Path "dist\main.dist" -NewName "${{ matrix.dist_dir }}"
+          Compress-Archive -Path "dist\${{ matrix.dist_dir }}" -DestinationPath "dist\${{ matrix.package_file }}"
+
+      - name: Package artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Nuitka names the standalone output directory after the script: main.dist
+          mv dist/main.dist dist/${{ matrix.dist_dir }}
+          tar -czf dist/${{ matrix.package_file }} -C dist ${{ matrix.dist_dir }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.output_filename }}
+          path: dist/${{ matrix.package_file }}
           if-no-files-found: error
 
   build_macos:
@@ -138,6 +161,8 @@ jobs:
           no-progressbar: true
           quiet: true
           follow-imports: true
+          # Embed localisation (.mo) files inside the single macOS binary
+          include-data-dir: locales:locales
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -179,8 +204,8 @@ jobs:
           name: Release ${{ github.ref_name }}
           body_path: release_notes.txt
           files: |
-            artifacts/irealstudio.exe/irealstudio.exe
-            artifacts/irealstudio-linux/irealstudio-linux
+            artifacts/irealstudio-windows/irealstudio-windows.zip
+            artifacts/irealstudio-linux/irealstudio-linux.tar.gz
             artifacts/irealstudio-macos/irealstudio-macos
           draft: false
           prerelease: false

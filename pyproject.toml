@@ -13,6 +13,7 @@ dependencies = [
     "python-rtmidi>=1.5.8",
     "pillow>=10.0.0",
     "qrcode>=8.2",
+    "semver>=3.0.4",
     "sounddevice>=0.5.5",
     "wxpython>=4.2.0",
 ]
@@ -26,8 +27,9 @@ dev = [
 # Entry point
 script-name = "main.py"
 
-# Output a self-contained single-file executable using onefile mode
-mode = "onefile"
+# Output a standalone directory (avoids Windows Defender false-positive on
+# single-file executables). On macOS the release workflow uses onefile instead.
+mode = "standalone"
 output-dir = "dist"
 
 # Disable the Windows console window (GUI application)
@@ -42,6 +44,9 @@ quiet = true
 
 # Follow all imports so that runtime-imported modules are included
 follow-imports = true
+
+# Include localisation files so translations work in the distributed build
+include-data-dir = ["locales:locales"]
 
 # Reduce bloat by excluding test frameworks and unused stdlib modules
 nofollow-import-to = [
