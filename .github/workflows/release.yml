@@ -123,7 +123,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: uv sync --all-groups --system
+        run: uv sync --all-groups
 
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
