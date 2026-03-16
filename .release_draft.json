@@ -1,4 +1,0 @@
-{
-  "version": "v0.1.6",
-  "changelog": "Fix --include-data-dir option format in release workflow (use = instead of :)"
-}
