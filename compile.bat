@@ -103,6 +103,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Nuitka's --include-data-dir can silently skip DLLs on Windows.
+:: Copy the accessible_output3 DLLs explicitly so they are always present.
+if not exist "dist\main.dist\accessible_output3\lib" md "dist\main.dist\accessible_output3\lib"
+xcopy /Y /Q "!AO3_LIB!\*.*" "dist\main.dist\accessible_output3\lib\"
+if errorlevel 1 (
+    echo ERROR: Failed to copy accessible_output3 DLLs.
+    exit /b 1
+)
+
 :: Nuitka names the standalone output dir after the script: main.dist
 :: Rename it to irealstudio-windows
 echo [4/4] Packaging...
