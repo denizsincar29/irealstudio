@@ -508,13 +508,13 @@ class IOMixin:
         speech instead of showing a dialog, to avoid interrupting development.
         In compiled mode, offers to download and install the update automatically.
         """
-        from updater import _IS_COMPILED, _find_platform_asset, _run_download_and_install
-        if not _IS_COMPILED:
+        from updater import is_compiled, can_auto_install, run_download_and_install
+        if not is_compiled():
             self.speak(_("Debug: new update available: {tag}").format(tag=tag))
             return
 
-        can_auto_install = _find_platform_asset(release_data.get('assets', [])) is not None
-        if can_auto_install:
+        auto_install = can_auto_install(release_data)
+        if auto_install:
             msg = _(
                 "A new version of IReal Studio is available: {tag}\n\n"
                 "Download and install the update now?"
@@ -530,8 +530,8 @@ class IOMixin:
             wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION,
         )
         if dlg.ShowModal() == wx.ID_YES:
-            if can_auto_install:
-                _run_download_and_install(self._frame, release_data)
+            if auto_install:
+                run_download_and_install(self._frame, release_data)
             else:
                 import webbrowser as _wb
                 _wb.open(url)
