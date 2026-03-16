@@ -7,16 +7,18 @@ Usage::
 
 The script:
 1. Checks that there are no uncommitted or untracked changes.
-2. Asks for a version number in ``x.x.x`` format (the ``v`` prefix is added
+2. Pulls the latest changes from origin.
+3. Displays the last release tag and suggests next semver bumps (patch/minor/major).
+4. Asks for a version number in ``x.x.x`` format (the ``v`` prefix is added
    automatically).
-3. Validates the format.
-4. Checks the tag does not already exist.
-5. Checks the new version is strictly higher than the last tag.
-6. Collects a multiline changelog entry (press Enter twice quickly to finish).
-7. Writes ``news.md`` (current release) and updates ``changelog.md`` (history).
-8. Updates ``version.py`` with the new version number.
-9. Commits ``news.md``, ``changelog.md``, and ``version.py``.
-10. Creates and pushes the git tag.
+5. Validates the format.
+6. Checks the tag does not already exist.
+7. Checks the new version is strictly higher than the last tag.
+8. Collects a multiline changelog entry (press Enter twice quickly to finish).
+9. Writes ``news.md`` (current release) and updates ``changelog.md`` (history).
+10. Updates ``version.py`` with the new version number.
+11. Commits ``news.md``, ``changelog.md``, and ``version.py``.
+12. Creates and pushes the git tag.
 """
 
 import sys
@@ -128,9 +130,40 @@ def _write_news(version: str, changelog: str) -> None:
     print(f"Updated changelog.md for {version}")
 
 
+def _pull_latest(repo: git.Repo) -> None:
+    """Pull the latest changes from origin for the current branch."""
+    try:
+        origin = repo.remotes.origin
+        branch = repo.active_branch.name
+        print(f"Pulling latest changes from origin/{branch}…")
+        origin.pull(branch)
+        print("Up to date.")
+    except git.GitCommandError as exc:
+        print(f"ERROR: git pull failed: {exc}")
+        sys.exit(1)
+
+
+def _suggest_next_versions(last: tuple[int, ...]) -> dict[str, str]:
+    """Return a dict of bump type → suggested version string."""
+    major, minor, patch = last
+    return {
+        'patch': f'{major}.{minor}.{patch + 1}',
+        'minor': f'{major}.{minor + 1}.0',
+        'major': f'{major + 1}.0.0',
+    }
+
+
 def main() -> None:
     repo = git.Repo('.')
     _check_clean_tree(repo)
+    _pull_latest(repo)
+
+    existing_tags = _get_existing_tags(repo)
+    last = _last_version_tag(existing_tags)
+    last_str = 'v{}.{}.{}'.format(*last) if last != (0, 0, 0) else '(none)'
+    suggestions = _suggest_next_versions(last)
+    print(f"Last release: {last_str}")
+    print(f"  Suggested bumps:  patch → {suggestions['patch']}  |  minor → {suggestions['minor']}  |  major → {suggestions['major']}")
 
     # Ask for version (user does NOT need to type the 'v' prefix)
     while True:
@@ -146,15 +179,12 @@ def main() -> None:
         version_tag = 'v{}.{}.{}'.format(*parsed)
         break
 
-    existing_tags = _get_existing_tags(repo)
-
     # Check tag doesn't already exist
     if version_tag in existing_tags:
         print(f"ERROR: Tag '{version_tag}' already exists.")
         sys.exit(1)
 
     # Check version is higher than the last tag
-    last = _last_version_tag(existing_tags)
     if parsed <= last:
         last_str = 'v{}.{}.{}'.format(*last)
         print(
