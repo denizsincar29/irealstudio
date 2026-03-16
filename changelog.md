@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.6 - 2026-03-16
+
+Fix --include-data-dir option format in release workflow (use = instead of :)
+
 ## v0.1.5 - 2026-03-16
 
 Minor fixes and improvements:
