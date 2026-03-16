@@ -3,7 +3,7 @@
 
 Usage::
 
-    uv run python tag_release.py            # interactive full release
+    uv run python tag_release.py            # interactive full release (or auto-finalizes draft)
     uv run python tag_release.py prepare    # agent: prepare draft (no tag/push)
     uv run python tag_release.py auto       # human: finalize draft (tag + push)
 
@@ -301,7 +301,16 @@ def auto() -> None:
 
 
 def main() -> None:
-    """Interactive full release (default when no subcommand is given)."""
+    """Interactive full release (default when no subcommand is given).
+
+    If ``.release_draft.json`` is present (written by ``prepare``), the draft
+    is used automatically — no prompts are shown and the release is finalized
+    immediately (equivalent to running ``auto``).
+    """
+    if _DRAFT_FILE.exists():
+        print(f"Found release draft ({_DRAFT_FILE}). Finalizing automatically…")
+        auto()
+        return
     repo = git.Repo('.')
     _check_clean_tree(repo)
     _pull_latest(repo)
