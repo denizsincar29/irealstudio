@@ -108,6 +108,7 @@ if $ONEFILE; then
         --follow-imports \
         --include-data-dir=locales=locales \
         "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
+        --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \
@@ -124,6 +125,7 @@ else
         --follow-imports \
         --include-data-dir=locales=locales \
         "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
+        --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \

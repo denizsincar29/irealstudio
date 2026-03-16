@@ -68,6 +68,10 @@ if not defined AO3_LIB (
     echo ERROR: Could not resolve accessible_output3 lib path.
     exit /b 1
 )
+if not exist "!AO3_LIB!" (
+    echo ERROR: accessible_output3 lib directory not found: !AO3_LIB!
+    exit /b 1
+)
 
 :: Remove previous build artifacts so the output is clean
 echo [2/4] Cleaning previous build output...
@@ -86,6 +90,7 @@ uv run python -m nuitka ^
     --follow-imports ^
     --include-data-dir=locales=locales ^
     "--include-data-dir=!AO3_LIB!=accessible_output3/lib" ^
+    --include-module=mido.backends.rtmidi ^
     --nofollow-import-to=unittest ^
     --nofollow-import-to=doctest ^
     --nofollow-import-to=pdb ^

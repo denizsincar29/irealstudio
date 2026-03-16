@@ -86,13 +86,24 @@ jobs:
       - name: Get accessible_output3 lib path
         id: ao3_path
         shell: bash
-        run: python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+        run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
 
+      - name: Build executable
+        uses: Nuitka/Nuitka-Action@v1.4
+        with:
+          nuitka-version: "4.0.5"
+          script-name: main.py
+          # Standalone mode avoids Windows Defender false-positives on single-file
+          # executables.  The output directory is zipped/tarred in the next step.
+          mode: standalone
           output-file: ${{ matrix.output_filename }}
           output-dir: dist
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
+          # mido loads its rtmidi backend dynamically by string; Nuitka won't
+          # auto-discover it, so we force-include it here.
+          include-module: mido.backends.rtmidi
           # Include localisation (.mo) files and screen-reader DLLs from
           # accessible_output3 so that NVDA/JAWS/ZoomText integration works.
           include-data-dir: |
@@ -149,7 +160,7 @@ jobs:
       - name: Get accessible_output3 lib path
         id: ao3_path
         shell: bash
-        run: python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+        run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
 
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
@@ -162,6 +173,8 @@ jobs:
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
+          # mido loads its rtmidi backend dynamically by string; force-include it.
+          include-module: mido.backends.rtmidi
           # Embed localisation (.mo) files and screen-reader DLL directory
           # inside the single macOS binary (DLLs are Windows-only but bundling
           # keeps the build config symmetric and harmless on macOS).
