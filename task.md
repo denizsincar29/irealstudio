@@ -1,11 +1,9 @@
-# task
-Rewrite the workflow to use nuitka action instead of doing huge steps in the wf.
-Here are the official guides:
-```
-# Build python script into a stand-alone exe
-- uses: Nuitka/Nuitka-Action@main
-  with:
-    nuitka-version: main
-    script-name: hello_world.py
-```
-Check out [nuitka action docs](https://github.com/Nuitka/Nuitka-Action) and rewrite the workflow that releases into github releases using nuitka action. Make sure to include steps for building the executable and uploading it to the releases section of the repository.
+# Task
+## High priority tasks
+1. Make the released app compile not in one file, because windows defender freaking eats it. Ship zips / tars instead. On mac it can stay as it is.
+2. In the release, the mo files for translations should also be shipped in the zip/tar.
+
+## medium priority tasks
+1. In tag_release.py use semantic versioning library instead of regex everywhere.
+2. Block further execution if branch is not main, or delete the prepare/auto subcommands and make them automatic based on the branch. If not main, it prepares the release in a draft as it's now done in the prepare subcommand, but it doesn't publish it. If main, it prepares and publishes the release either from the draft or from scratch.
+3. Prepare a release 0.1.5 with very small description of fixes.
