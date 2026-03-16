@@ -327,10 +327,12 @@ def apply_update_and_restart(
             lines = [
                 '# IReal Studio auto-update helper\r\n',
                 # Helper function to append a timestamped line to the log file,
-                # matching the Python log format: "HH:mm:ss INFO  <message>".
-                'function Write-UpdateLog($msg) {\r\n',
+                # matching the Python log format: "HH:mm:ss LEVEL <message>".
+                # The $level parameter defaults to "INFO " (5 chars, padded to
+                # match Python's %-5s levelname format).
+                'function Write-UpdateLog($msg, $level = "INFO ") {\r\n',
                 '    $ts = Get-Date -Format "HH:mm:ss"\r\n',
-                f'    Add-Content -Path "{log}" -Value "$ts INFO  [updater] $msg" -Encoding UTF8\r\n',
+                f'    Add-Content -Path "{log}" -Value "$ts $level [updater] $msg" -Encoding UTF8\r\n',
                 '}\r\n',
                 f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}\r\n',
                 'Start-Sleep -Seconds 2\r\n',
@@ -344,7 +346,7 @@ def apply_update_and_restart(
                 '    Write-UpdateLog "Starting updated application"\r\n',
                 f'    Start-Process -FilePath "{exe}"\r\n',
                 '} else {\r\n',
-                '    Write-UpdateLog "ERROR: robocopy failed with exit code $rc — update not applied"\r\n',
+                '    Write-UpdateLog "robocopy failed with exit code $rc — update not applied" "ERROR"\r\n',
                 '}\r\n',
             ]
             if tmp_dir_str:
