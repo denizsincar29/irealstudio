@@ -3,5 +3,5 @@
 The release workflow and autoupdater both read this module.
 """
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 __version__ = VERSION
