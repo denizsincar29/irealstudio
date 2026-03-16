@@ -83,24 +83,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Build executable
-        uses: Nuitka/Nuitka-Action@v1.4
-        with:
-          nuitka-version: "4.0.5"
-          script-name: main.py
-          # Standalone mode avoids Windows Defender false-positives on single-file
-          # executables.  The output directory is zipped/tarred in the next step.
-          mode: standalone
+      - name: Get accessible_output3 lib path
+        id: ao3_path
+        shell: bash
+        run: python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+
           output-file: ${{ matrix.output_filename }}
           output-dir: dist
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
-          # Include localisation (.mo) files so translations work in the build
-          include-data-dir: locales=locales
-          # Include DLLs and other data files from accessible_output3 so that
-          # screen-reader integration (NVDA, JAWS, etc.) works in the compiled exe
-          include-package-data: accessible_output3
+          # Include localisation (.mo) files and screen-reader DLLs from
+          # accessible_output3 so that NVDA/JAWS/ZoomText integration works.
+          include-data-dir: |
+            locales=locales
+            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
@@ -149,6 +146,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Get accessible_output3 lib path
+        id: ao3_path
+        shell: bash
+        run: python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
         with:
@@ -160,11 +162,12 @@ jobs:
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
-          # Embed localisation (.mo) files inside the single macOS binary
-          include-data-dir: locales=locales
-          # Include any data files from accessible_output3 (no-op on macOS but
-          # keeps the build config consistent across platforms)
-          include-package-data: accessible_output3
+          # Embed localisation (.mo) files and screen-reader DLL directory
+          # inside the single macOS binary (DLLs are Windows-only but bundling
+          # keeps the build config symmetric and harmless on macOS).
+          include-data-dir: |
+            locales=locales
+            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

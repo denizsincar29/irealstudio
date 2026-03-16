@@ -60,6 +60,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Resolve the accessible_output3 lib directory so Nuitka can bundle the DLLs
+:: (NVDA/JAWS/ZoomText etc.) at the path load_library() expects at runtime:
+::   <exe_dir>\accessible_output3\lib\<dll>
+for /f "tokens=*" %%i in ('uv run python -c "import os,accessible_output3; print(os.path.join(os.path.dirname(accessible_output3.__file__),'lib'))"') do set AO3_LIB=%%i
+if not defined AO3_LIB (
+    echo ERROR: Could not resolve accessible_output3 lib path.
+    exit /b 1
+)
+
 :: Remove previous build artifacts so the output is clean
 echo [2/4] Cleaning previous build output...
 if exist dist\main.dist   rmdir /s /q dist\main.dist
@@ -76,7 +85,7 @@ uv run python -m nuitka ^
     --assume-yes-for-downloads ^
     --follow-imports ^
     --include-data-dir=locales=locales ^
-    --include-package-data=accessible_output3 ^
+    "--include-data-dir=!AO3_LIB!=accessible_output3/lib" ^
     --nofollow-import-to=unittest ^
     --nofollow-import-to=doctest ^
     --nofollow-import-to=pdb ^
