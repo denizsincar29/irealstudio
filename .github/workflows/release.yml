@@ -98,6 +98,9 @@ jobs:
           quiet: true
           # Include localisation (.mo) files so translations work in the build
           include-data-dir: locales=locales
+          # Include DLLs and other data files from accessible_output3 so that
+          # screen-reader integration (NVDA, JAWS, etc.) works in the compiled exe
+          include-package-data: accessible_output3
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
@@ -159,6 +162,9 @@ jobs:
           quiet: true
           # Embed localisation (.mo) files inside the single macOS binary
           include-data-dir: locales=locales
+          # Include any data files from accessible_output3 (no-op on macOS but
+          # keeps the build config consistent across platforms)
+          include-package-data: accessible_output3
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

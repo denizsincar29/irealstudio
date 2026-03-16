@@ -99,6 +99,7 @@ if $ONEFILE; then
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        --include-package-data=accessible_output3 \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \
@@ -114,6 +115,7 @@ else
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        --include-package-data=accessible_output3 \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \

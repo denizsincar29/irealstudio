@@ -2,7 +2,12 @@
 :: compile.bat – Build IReal Studio for Windows using Nuitka (standalone mode).
 ::
 :: Usage:
-::   compile.bat
+::   compile.bat [--console]
+::
+:: Options:
+::   --console   Build with a visible console window (useful for debugging
+::               startup crashes – shows Python tracebacks in a terminal).
+::               Without this flag the app runs silently as a GUI application.
 ::
 :: Requirements:
 ::   uv must be installed (https://github.com/astral-sh/uv)
@@ -19,6 +24,18 @@ setlocal EnableDelayedExpansion
 :: ── configuration ──────────────────────────────────────────────────────────
 set DIST_DIR=dist\irealstudio-windows
 set ARCHIVE=dist\irealstudio-windows.zip
+:: ────────────────────────────────────────────────────────────────────────────
+
+:: ── parse arguments ─────────────────────────────────────────────────────────
+:: Pass --console to build with a visible console window for debugging.
+:: Without --console the app runs silently (no console window).
+set CONSOLE_MODE=disable
+:parse_args
+if "%~1"=="--console" (
+    set CONSOLE_MODE=force
+    shift
+    goto parse_args
+)
 :: ────────────────────────────────────────────────────────────────────────────
 
 echo.
@@ -55,10 +72,11 @@ uv run python -m nuitka ^
     --mode=standalone ^
     --output-file=irealstudio.exe ^
     --output-dir=dist ^
-    --windows-console-mode=disable ^
+    --windows-console-mode=!CONSOLE_MODE! ^
     --assume-yes-for-downloads ^
     --follow-imports ^
     --include-data-dir=locales=locales ^
+    --include-package-data=accessible_output3 ^
     --nofollow-import-to=unittest ^
     --nofollow-import-to=doctest ^
     --nofollow-import-to=pdb ^
