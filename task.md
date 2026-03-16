@@ -1,2 +1,3 @@
 # Task
-Compiled exe on windows but the app not running. Make compile consoled option to debug in compile.bat and find causing issues.
+The autoupdater is not working. It downloaded the update, but i guess didn't install it. Btw exe can't replace itself while running, so we need to make a separate process / bat or sh that runs unzipping and exe replacement when the main process is closed.
+Make logging of update process to irealstudio.log, so we can see what is going on. Also add some error handling, so if something goes wrong, we can see it in the logs. And maybe add a notification to the user if the update was successful or if there was an error.

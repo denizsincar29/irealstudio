@@ -181,7 +181,7 @@ jobs:
         run: |
           # Build a single self-contained binary using the same flags as compile.sh.
           uv run python -m nuitka \
-            --mode=onefile \
+            --mode=app \
             --output-file=irealstudio-macos \
             --output-dir=dist \
             --assume-yes-for-downloads \
