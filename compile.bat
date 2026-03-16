@@ -2,7 +2,12 @@
 :: compile.bat – Build IReal Studio for Windows using Nuitka (standalone mode).
 ::
 :: Usage:
-::   compile.bat
+::   compile.bat [--console]
+::
+:: Options:
+::   --console   Build with a visible console window (useful for debugging
+::               startup crashes – shows Python tracebacks in a terminal).
+::               Without this flag the app runs silently as a GUI application.
 ::
 :: Requirements:
 ::   uv must be installed (https://github.com/astral-sh/uv)
@@ -19,6 +24,18 @@ setlocal EnableDelayedExpansion
 :: ── configuration ──────────────────────────────────────────────────────────
 set DIST_DIR=dist\irealstudio-windows
 set ARCHIVE=dist\irealstudio-windows.zip
+:: ────────────────────────────────────────────────────────────────────────────
+
+:: ── parse arguments ─────────────────────────────────────────────────────────
+:: Pass --console to build with a visible console window for debugging.
+:: Without --console the app runs silently (no console window).
+set CONSOLE_MODE=disable
+:parse_args
+if "%~1"=="--console" (
+    set CONSOLE_MODE=force
+    shift
+    goto parse_args
+)
 :: ────────────────────────────────────────────────────────────────────────────
 
 echo.
@@ -43,6 +60,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Resolve the accessible_output3 lib directory so Nuitka can bundle the DLLs
+:: (NVDA/JAWS/ZoomText etc.) at the path load_library() expects at runtime:
+::   <exe_dir>\accessible_output3\lib\<dll>
+for /f "tokens=*" %%i in ('uv run python -c "import os,accessible_output3; print(os.path.join(os.path.dirname(accessible_output3.__file__),'lib'))"') do set AO3_LIB=%%i
+if not defined AO3_LIB (
+    echo ERROR: Could not resolve accessible_output3 lib path.
+    exit /b 1
+)
+if not exist "!AO3_LIB!" (
+    echo ERROR: accessible_output3 lib directory not found: !AO3_LIB!
+    exit /b 1
+)
+
 :: Remove previous build artifacts so the output is clean
 echo [2/4] Cleaning previous build output...
 if exist dist\main.dist   rmdir /s /q dist\main.dist
@@ -55,10 +85,12 @@ uv run python -m nuitka ^
     --mode=standalone ^
     --output-file=irealstudio.exe ^
     --output-dir=dist ^
-    --windows-console-mode=disable ^
+    --windows-console-mode=!CONSOLE_MODE! ^
     --assume-yes-for-downloads ^
     --follow-imports ^
     --include-data-dir=locales=locales ^
+    "--include-data-dir=!AO3_LIB!=accessible_output3/lib" ^
+    --include-module=mido.backends.rtmidi ^
     --nofollow-import-to=unittest ^
     --nofollow-import-to=doctest ^
     --nofollow-import-to=pdb ^
@@ -68,6 +100,15 @@ uv run python -m nuitka ^
 
 if errorlevel 1 (
     echo ERROR: Nuitka build failed.
+    exit /b 1
+)
+
+:: Nuitka's --include-data-dir can silently skip DLLs on Windows.
+:: Copy the accessible_output3 DLLs explicitly so they are always present.
+if not exist "dist\main.dist\accessible_output3\lib" md "dist\main.dist\accessible_output3\lib"
+xcopy /Y /Q "!AO3_LIB!\*.*" "dist\main.dist\accessible_output3\lib\"
+if errorlevel 1 (
+    echo ERROR: Failed to copy accessible_output3 DLLs.
     exit /b 1
 )
 

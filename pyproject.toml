@@ -48,6 +48,16 @@ follow-imports = true
 # Include localisation files so translations work in the distributed build
 include-data-dir = ["locales:locales"]
 
+# Include all data files (e.g. DLLs) from packages that use them at runtime.
+# compile.bat / compile.sh resolve the accessible_output3 lib path at build
+# time and pass it via --include-data-dir for reliability.  The entry below
+# is a best-effort fallback for direct `python -m nuitka` invocations.
+include-package-data = ["accessible_output3"]
+
+# mido selects its MIDI backend by string at runtime ("mido.backends.rtmidi"),
+# so Nuitka cannot discover it via static analysis.  Force-include it here.
+include-module = ["mido.backends.rtmidi"]
+
 # Reduce bloat by excluding test frameworks and unused stdlib modules
 nofollow-import-to = [
     "unittest",

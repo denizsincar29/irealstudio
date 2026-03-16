@@ -58,6 +58,14 @@ fi
 info "[1/4] Installing dependencies with uv..."
 uv sync --all-groups
 
+# Resolve the accessible_output3 lib directory so Nuitka bundles the
+# screen-reader DLLs at the path load_library() looks for at runtime:
+#   <exe_dir>/accessible_output3/lib/<dll>
+AO3_LIB=$(uv run python -c \
+    "import os,accessible_output3; \
+     print(os.path.join(os.path.dirname(accessible_output3.__file__),'lib'))")
+[[ -d "$AO3_LIB" ]] || error "Could not resolve accessible_output3 lib path: $AO3_LIB"
+
 # ── determine output names ────────────────────────────────────────────────────
 if [[ "$OS" == "Darwin" ]]; then
     OUTPUT_FILE="irealstudio-macos"
@@ -99,6 +107,8 @@ if $ONEFILE; then
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
+        --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \
@@ -114,6 +124,8 @@ else
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
+        --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \
         --nofollow-import-to=doctest \
         --nofollow-import-to=pdb \

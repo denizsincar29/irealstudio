@@ -83,6 +83,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Get accessible_output3 lib path
+        id: ao3_path
+        shell: bash
+        run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
         with:
@@ -96,8 +101,23 @@ jobs:
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
-          # Include localisation (.mo) files so translations work in the build
-          include-data-dir: locales=locales
+          # mido loads its rtmidi backend dynamically by string; Nuitka won't
+          # auto-discover it, so we force-include it here.
+          include-module: mido.backends.rtmidi
+          # Include localisation (.mo) files and screen-reader DLLs from
+          # accessible_output3 so that NVDA/JAWS/ZoomText integration works.
+          include-data-dir: |
+            locales=locales
+            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
+
+      - name: Copy accessible_output3 DLLs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Nuitka's --include-data-dir can silently skip DLLs; copy explicitly.
+          $dest = "dist\main.dist\accessible_output3\lib"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item "${{ steps.ao3_path.outputs.lib_path }}\*" -Destination $dest -Force
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
@@ -146,6 +166,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Get accessible_output3 lib path
+        id: ao3_path
+        shell: bash
+        run: uv run python -c "import os,accessible_output3; p=os.path.join(os.path.dirname(accessible_output3.__file__),'lib'); print('lib_path='+p.replace('\\\\','/'))" >> "$GITHUB_OUTPUT"
+
       - name: Build executable
         uses: Nuitka/Nuitka-Action@v1.4
         with:
@@ -157,8 +182,14 @@ jobs:
           windows-console-mode: disable
           assume-yes-for-downloads: true
           quiet: true
-          # Embed localisation (.mo) files inside the single macOS binary
-          include-data-dir: locales=locales
+          # mido loads its rtmidi backend dynamically by string; force-include it.
+          include-module: mido.backends.rtmidi
+          # Embed localisation (.mo) files and screen-reader DLL directory
+          # inside the single macOS binary (DLLs are Windows-only but bundling
+          # keeps the build config symmetric and harmless on macOS).
+          include-data-dir: |
+            locales=locales
+            ${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
