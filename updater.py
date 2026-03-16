@@ -255,7 +255,7 @@ def apply_update_and_restart(
     """Replace the running installation with *new_content_dir* and restart.
 
     On **Windows**: cannot replace files that are in use, so a small
-    PowerShell script is written to a temp location, launched, and the app
+    batch script is written to a temp location, launched, and the app
     exits.  The script waits for the current process to exit, copies the new
     files over the installation directory, starts the application again, and
     deletes both the temp script and the temp download directory.  All steps
@@ -280,7 +280,7 @@ def apply_update_and_restart(
 
     .. note::
         On Windows this function raises :class:`SystemExit` to let the
-        caller exit the application so the PowerShell script can run.
+        caller exit the application so the batch script can run.
     """
     if not _IS_COMPILED:
         raise RuntimeError(
@@ -297,71 +297,58 @@ def apply_update_and_restart(
     )
 
     if system == 'Windows':
-        # Write a PowerShell script that:
+        # Write a batch script that:
         #   1. Waits for this process to exit
         #   2. Copies the new files over the installation directory
-        #   3. Logs the result to irealstudio.log
-        #   4. Starts the application
-        #   5. Cleans up the temp download dir and itself
+        #   3. Starts the application
+        #   4. Cleans up the temp download dir and itself
         import subprocess
         pid = os.getpid()
-        # Absolute path to log file so the PS1 script can write to it even
-        # after the working directory may change.
-        log_file_abs = str(Path('irealstudio.log').resolve())
 
-        # Use utf-8-sig (BOM) so PowerShell reads it correctly on any codepage.
+        # Use the system ANSI/OEM codepage so cmd.exe can read paths that
+        # contain non-ASCII characters (e.g. from a user profile directory).
+        # 'mbcs' resolves to the current Windows ANSI codepage at runtime.
         with tempfile.NamedTemporaryFile(
-            mode='w', suffix='_irealstudio_update.ps1',
-            delete=False, encoding='utf-8-sig',
-        ) as ps_file:
-            ps_path = ps_file.name
-            # Escape paths for PowerShell double-quoted strings.
-            def _ps_esc(p: str) -> str:
-                return p.replace('`', '``').replace('"', '`"').replace('$', '`$')
-
-            src = _ps_esc(str(new_content_dir))
-            dst = _ps_esc(str(current_dir))
-            exe = _ps_esc(str(current_exe))
-            log = _ps_esc(log_file_abs)
-            tmp_dir_str = _ps_esc(str(cleanup_dir)) if cleanup_dir else None
+            mode='w', suffix='_irealstudio_update.bat',
+            delete=False, encoding='mbcs',
+        ) as bat_file:
+            bat_path = bat_file.name
+            # Batch quoting: wrap paths in double quotes; no special escaping
+            # needed for the characters that appear in typical Windows paths.
+            src = str(new_content_dir)
+            dst = str(current_dir)
+            exe = str(current_exe)
             lines = [
-                '# IReal Studio auto-update helper\r\n',
-                # Helper function to append a timestamped line to the log file,
-                # matching the Python log format: "HH:mm:ss LEVEL <message>".
-                # The $level parameter defaults to "INFO " (5 chars, padded to
-                # match Python's %-5s levelname format).
-                'function Write-UpdateLog($msg, $level = "INFO ") {\r\n',
-                '    $ts = Get-Date -Format "HH:mm:ss"\r\n',
-                f'    Add-Content -Path "{log}" -Value "$ts $level [updater] $msg" -Encoding UTF8\r\n',
-                '}\r\n',
-                f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}\r\n',
-                'Start-Sleep -Seconds 2\r\n',
-                'Write-UpdateLog "Windows update helper started; copying files"\r\n',
-                # robocopy returns 0-7 for success (8+ = error). Redirect
-                # stdout/stderr to $null to suppress console output.
-                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS > $null 2>&1\r\n',
-                '$rc = $LASTEXITCODE\r\n',
-                'if ($rc -le 7) {\r\n',
-                '    Write-UpdateLog "Files copied successfully (robocopy exit code $rc)"\r\n',
-                '    Write-UpdateLog "Starting updated application"\r\n',
-                f'    Start-Process -FilePath "{exe}"\r\n',
-                '} else {\r\n',
-                '    Write-UpdateLog "robocopy failed with exit code $rc — update not applied" "ERROR"\r\n',
-                '}\r\n',
+                '@echo off\r\n',
+                # Wait until the main process exits.
+                f':waitloop\r\n',
+                f'tasklist /FI "PID eq {pid}" 2>nul | find /I " {pid} " >nul\r\n',
+                f'if not errorlevel 1 (\r\n',
+                f'    timeout /t 1 /nobreak >nul\r\n',
+                f'    goto waitloop\r\n',
+                f')\r\n',
+                # Brief pause after process exit to let file locks / AV scanners
+                # release handles before robocopy starts.
+                f'timeout /t 2 /nobreak >nul\r\n',
+                # robocopy exit codes 0-7 indicate success (8+ = error).
+                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS >nul 2>&1\r\n',
+                f'if %errorlevel% leq 7 (\r\n',
+                f'    start "" "{exe}"\r\n',
             ]
-            if tmp_dir_str:
-                lines.append(
-                    f'Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path "{tmp_dir_str}"\r\n'
-                )
-            lines.append(
-                'Remove-Item -Force -ErrorAction SilentlyContinue -Path $MyInvocation.MyCommand.Path\r\n'
-            )
-            ps_file.write(''.join(lines))
+            if cleanup_dir:
+                # Only remove the temp download dir on a successful copy.
+                lines.append(f'    rmdir /s /q "{cleanup_dir}"\r\n')
+            lines += [
+                f')\r\n',
+                # Spawn a separate cmd process to delete the script file so
+                # the running batch file can be removed while it is still active.
+                f'start /b cmd /c del /f /q "%~f0"\r\n',
+            ]
+            bat_file.write(''.join(lines))
 
-        _logger.info("Launching update helper script: %s", ps_path)
+        _logger.info("Launching update helper script: %s", bat_path)
         subprocess.Popen(  # noqa: S603
-            ['powershell', '-NonInteractive', '-WindowStyle', 'Hidden',
-             '-ExecutionPolicy', 'Bypass', '-File', ps_path],
+            ['cmd', '/c', bat_path],
             creationflags=getattr(subprocess, 'DETACHED_PROCESS', 8)
             | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200),
             close_fds=True,
