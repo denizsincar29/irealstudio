@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Callable
 
 from version import VERSION
+from i18n import _
 
 # True when running inside a Nuitka-compiled binary, False when running from source.
 try:
@@ -446,14 +447,14 @@ def check_for_updates_async(
         if data is None:
             _logger.warning("Update check: could not reach GitHub.")
             if on_error:
-                on_error("Could not reach GitHub to check for updates.")
+                on_error(_("Could not reach GitHub to check for updates."))
             return
         tag = data.get('tag_name', '')
         if not tag:
-            msg = data.get('message', 'GitHub API did not return a release tag.')
+            msg = data.get('message', _('GitHub API did not return a release tag.'))
             _logger.warning("Update check: unexpected response: %s", msg)
             if on_error:
-                on_error(f"Update check failed: {msg}")
+                on_error(_("Update check failed: {msg}").format(msg=msg))
             return
         latest = _parse_version(tag)
         current = _current_version()
@@ -499,8 +500,8 @@ def check_for_updates_sync(
     data = fetch_latest_release()
     if data is None:
         wx.MessageBox(
-            "Could not reach GitHub. Please check your internet connection.",
-            "Update Check Failed",
+            _("Could not reach GitHub. Please check your internet connection."),
+            _("Update Check Failed"),
             wx.OK | wx.ICON_WARNING,
             parent_window,
         )
@@ -508,10 +509,10 @@ def check_for_updates_sync(
 
     tag = data.get('tag_name', '')
     if not tag:
-        api_msg = data.get('message', 'GitHub API did not return a release tag.')
+        api_msg = data.get('message', _('GitHub API did not return a release tag.'))
         wx.MessageBox(
-            f"Update check failed: {api_msg}",
-            "Update Check Failed",
+            _("Update check failed: {msg}").format(msg=api_msg),
+            _("Update Check Failed"),
             wx.OK | wx.ICON_WARNING,
             parent_window,
         )
@@ -523,8 +524,8 @@ def check_for_updates_sync(
         url = data.get('html_url', _RELEASES_PAGE)
         body = data.get('body', '').strip()
         message = (
-            f"A new version is available: {tag}\n"
-            f"(current: v{VERSION})\n\n"
+            _("A new version is available: {tag}\n(current: v{current})\n\n")
+            .format(tag=tag, current=VERSION)
         )
         if body:
             # Show at most 400 chars of release notes
@@ -533,14 +534,14 @@ def check_for_updates_sync(
         can_auto_install_flag = can_auto_install(data)
 
         if can_auto_install_flag:
-            message += "Download and install the update now?"
+            message += _("Download and install the update now?")
         else:
-            message += "Open the releases page to download?"
+            message += _("Open the releases page to download?")
 
         dlg = wx.MessageDialog(
             parent_window,
             message,
-            "Update Available",
+            _("Update Available"),
             wx.YES_NO | wx.YES_DEFAULT | wx.ICON_INFORMATION,
         )
         if dlg.ShowModal() == wx.ID_YES:
@@ -552,8 +553,8 @@ def check_for_updates_sync(
     else:
         if not silent_if_current:
             wx.MessageBox(
-                f"You are running the latest version (v{VERSION}).",
-                "No Updates Found",
+                _("You are running the latest version (v{version}).").format(version=VERSION),
+                _("No Updates Found"),
                 wx.OK | wx.ICON_INFORMATION,
                 parent_window,
             )
@@ -572,13 +573,13 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
     """
     import wx
 
-    tag = release_data.get('tag_name', 'new version')
+    tag = release_data.get('tag_name', _('new version'))
     asset = _find_platform_asset(release_data.get('assets', []))
     total_size: int = asset.get('size', 0) if asset else 0
 
     progress = wx.ProgressDialog(
-        "Downloading Update",
-        f"Downloading {tag}...",
+        _("Downloading Update"),
+        _("Downloading {tag}...").format(tag=tag),
         maximum=max(total_size, 1),
         parent=parent_window,
         style=wx.PD_APP_MODAL | wx.PD_AUTO_HIDE | wx.PD_ELAPSED_TIME,
@@ -606,11 +607,11 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
         progress.Destroy()
         asset_path: Path | None = result['asset_path']
         if result['error'] or asset_path is None:
-            err_msg = result['error'] or 'no asset found'
+            err_msg = result['error'] or _('no asset found')
             _logger.error("Update download failed: %s", err_msg)
             wx.MessageBox(
-                f"Download failed: {err_msg}",
-                "Update Failed",
+                _("Download failed: {error}").format(error=err_msg),
+                _("Update Failed"),
                 wx.OK | wx.ICON_ERROR,
                 parent_window,
             )
@@ -621,17 +622,17 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
         if new_dir is None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             wx.MessageBox(
-                "Failed to extract the downloaded update.",
-                "Update Failed",
+                _("Failed to extract the downloaded update."),
+                _("Update Failed"),
                 wx.OK | wx.ICON_ERROR,
                 parent_window,
             )
             return
         # Notify the user that the update is about to be applied.
         wx.MessageBox(
-            "The update has been downloaded and will now be applied.\n"
-            "The application will restart automatically.",
-            "Applying Update",
+            _("The update has been downloaded and will now be applied.\n"
+              "The application will restart automatically."),
+            _("Applying Update"),
             wx.OK | wx.ICON_INFORMATION,
             parent_window,
         )
@@ -652,8 +653,8 @@ def _run_download_and_install(parent_window, release_data: dict) -> None:
             _logger.error("Failed to apply update: %s", exc)
             shutil.rmtree(tmp_dir, ignore_errors=True)
             wx.MessageBox(
-                f"Failed to apply update: {exc}",
-                "Update Failed",
+                _("Failed to apply update: {error}").format(error=exc),
+                _("Update Failed"),
                 wx.OK | wx.ICON_ERROR,
                 parent_window,
             )
