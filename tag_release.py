@@ -3,9 +3,11 @@
 
 Usage::
 
-    uv run python tag_release.py
+    uv run python tag_release.py            # interactive full release
+    uv run python tag_release.py prepare    # agent: prepare draft (no tag/push)
+    uv run python tag_release.py auto       # human: finalize draft (tag + push)
 
-The script:
+Interactive full release:
 1. Checks that there are no uncommitted or untracked changes.
 2. Pulls the latest changes from origin.
 3. Displays the last release tag and suggests next semver bumps (patch/minor/major).
@@ -19,8 +21,21 @@ The script:
 10. Updates ``version.py`` with the new version number.
 11. Commits ``news.md``, ``changelog.md``, and ``version.py``.
 12. Creates and pushes the git tag.
+
+``prepare`` mode (for automated agents / Copilot):
+  Same steps 1–10 as above, then saves ``.release_draft.json`` with the
+  version and changelog, and commits all four files.  Does NOT create a
+  git tag or push anything.  Run ``auto`` afterwards to finalize.
+
+``auto`` mode (for the human, after the agent ran ``prepare``):
+  1. Checks clean working tree and pulls latest.
+  2. Reads ``.release_draft.json`` written by ``prepare``.
+  3. Creates an annotated git tag from the stored version.
+  4. Deletes ``.release_draft.json`` and commits the removal.
+  5. Pushes the commit and the tag.
 """
 
+import json
 import sys
 import re
 import time
@@ -28,6 +43,9 @@ from datetime import date
 from pathlib import Path
 
 import git
+
+# Temporary file used to hand off prepared release data from ``prepare`` to ``auto``.
+_DRAFT_FILE = Path('.release_draft.json')
 
 
 def _check_clean_tree(repo: git.Repo) -> None:
@@ -153,19 +171,41 @@ def _suggest_next_versions(last: tuple[int, ...]) -> dict[str, str]:
     }
 
 
-def main() -> None:
-    repo = git.Repo('.')
-    _check_clean_tree(repo)
-    _pull_latest(repo)
+def _save_draft(version_tag: str, changelog: str) -> None:
+    """Persist release data to *_DRAFT_FILE* so ``auto`` can read it later."""
+    _DRAFT_FILE.write_text(
+        json.dumps({'version': version_tag, 'changelog': changelog}, indent=2),
+        encoding='utf-8',
+    )
+    print(f"Saved release draft to {_DRAFT_FILE}")
 
-    existing_tags = _get_existing_tags(repo)
-    last = _last_version_tag(existing_tags)
+
+def _load_draft() -> tuple[str, str]:
+    """Load the draft written by ``prepare``.  Exits with an error if missing."""
+    if not _DRAFT_FILE.exists():
+        print(
+            f"ERROR: No release draft found ({_DRAFT_FILE}).\n"
+            "Run 'uv run tag_release.py prepare' first."
+        )
+        sys.exit(1)
+    data = json.loads(_DRAFT_FILE.read_text(encoding='utf-8'))
+    return data['version'], data['changelog']
+
+
+def _prompt_version(existing_tags: list[str], last: tuple[int, ...]) -> tuple[str, tuple[int, ...]]:
+    """Interactively prompt for a valid, new-enough version.
+
+    Returns ``(version_tag, parsed)`` where *version_tag* is normalised to
+    lowercase ``v`` prefix.
+    """
     last_str = 'v{}.{}.{}'.format(*last) if last != (0, 0, 0) else '(none)'
     suggestions = _suggest_next_versions(last)
     print(f"Last release: {last_str}")
-    print(f"  Suggested bumps:  patch → {suggestions['patch']}  |  minor → {suggestions['minor']}  |  major → {suggestions['major']}")
-
-    # Ask for version (user does NOT need to type the 'v' prefix)
+    print(
+        f"  Suggested bumps:  patch → {suggestions['patch']}"
+        f"  |  minor → {suggestions['minor']}"
+        f"  |  major → {suggestions['major']}"
+    )
     while True:
         raw = input("Enter version (e.g. 1.0.0): ").strip()
         if not raw:
@@ -175,22 +215,100 @@ def main() -> None:
         if parsed is None:
             print(f"  Invalid format '{raw}'. Use x.y.z (e.g. 1.2.3).")
             continue
-        # Always normalise to lowercase 'v' prefix
         version_tag = 'v{}.{}.{}'.format(*parsed)
-        break
+        if version_tag in existing_tags:
+            print(f"ERROR: Tag '{version_tag}' already exists.")
+            sys.exit(1)
+        if parsed <= last:
+            print(
+                f"ERROR: Version {version_tag} is not higher than the last tag "
+                f"{'v{}.{}.{}'.format(*last)}."
+            )
+            sys.exit(1)
+        return version_tag, parsed
 
-    # Check tag doesn't already exist
+
+def prepare() -> None:
+    """Prepare a release draft (agent / Copilot mode).
+
+    Writes release files and a draft JSON, commits them, but does NOT tag or push.
+    A human then runs ``auto`` to finalize.
+    """
+    repo = git.Repo('.')
+    _check_clean_tree(repo)
+    _pull_latest(repo)
+
+    existing_tags = _get_existing_tags(repo)
+    last = _last_version_tag(existing_tags)
+    version_tag, _ = _prompt_version(existing_tags, last)
+
+    changelog = _read_multiline_changelog()
+    if not changelog.strip():
+        print("ERROR: Changelog cannot be empty.")
+        sys.exit(1)
+
+    _write_news(version_tag, changelog)
+    _update_version_py(version_tag)
+    _save_draft(version_tag, changelog)
+
+    repo.index.add(['news.md', 'changelog.md', 'version.py', str(_DRAFT_FILE)])
+    repo.index.commit(f'chore: prepare release {version_tag}')
+    print(f"Committed release draft for {version_tag}.")
+    print("Run 'uv run tag_release.py auto' to tag and push.")
+
+
+def auto() -> None:
+    """Finalize a release prepared by ``prepare`` (human mode).
+
+    Reads ``.release_draft.json`` written by ``prepare``, creates the annotated
+    git tag, removes the draft file, and pushes everything to origin.
+    """
+    repo = git.Repo('.')
+    _check_clean_tree(repo)
+    _pull_latest(repo)
+
+    version_tag, _ = _load_draft()
+    parsed = _parse_version(version_tag)
+
+    existing_tags = _get_existing_tags(repo)
     if version_tag in existing_tags:
         print(f"ERROR: Tag '{version_tag}' already exists.")
         sys.exit(1)
-
-    # Check version is higher than the last tag
-    if parsed <= last:
-        last_str = 'v{}.{}.{}'.format(*last)
+    last = _last_version_tag(existing_tags)
+    if parsed is not None and parsed <= last:
         print(
-            f"ERROR: Version {version_tag} is not higher than the last tag {last_str}."
+            f"ERROR: Version {version_tag} is not higher than the last tag "
+            f"{'v{}.{}.{}'.format(*last)}."
         )
         sys.exit(1)
+
+    # Create the annotated tag
+    repo.create_tag(version_tag, message=f'Release {version_tag}')
+    print(f"Created tag {version_tag}")
+
+    # Remove the draft file and commit
+    _DRAFT_FILE.unlink()
+    repo.index.remove([str(_DRAFT_FILE)])
+    repo.index.commit(f'chore: finalize release {version_tag}')
+    print("Removed draft and committed.")
+
+    # Push commit and tag
+    print("Pushing commit and tag…")
+    origin = repo.remotes.origin
+    origin.push()
+    origin.push(version_tag)
+    print(f"Done! Release {version_tag} is on its way.")
+
+
+def main() -> None:
+    """Interactive full release (default when no subcommand is given)."""
+    repo = git.Repo('.')
+    _check_clean_tree(repo)
+    _pull_latest(repo)
+
+    existing_tags = _get_existing_tags(repo)
+    last = _last_version_tag(existing_tags)
+    version_tag, _ = _prompt_version(existing_tags, last)
 
     changelog = _read_multiline_changelog()
     if not changelog.strip():
@@ -218,4 +336,15 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    _COMMANDS = {'prepare': prepare, 'auto': auto}
+    _cmd = sys.argv[1] if len(sys.argv) > 1 else None
+    if _cmd in _COMMANDS:
+        _COMMANDS[_cmd]()
+    elif _cmd is None:
+        main()
+    else:
+        print(
+            f"ERROR: Unknown command '{_cmd}'.\n"
+            "Valid commands: prepare, auto (or no argument for interactive release)."
+        )
+        sys.exit(1)
