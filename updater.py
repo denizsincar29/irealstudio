@@ -305,9 +305,12 @@ def apply_update_and_restart(
         import subprocess
         pid = os.getpid()
 
+        # Use the system ANSI/OEM codepage so cmd.exe can read paths that
+        # contain non-ASCII characters (e.g. from a user profile directory).
+        # 'mbcs' resolves to the current Windows ANSI codepage at runtime.
         with tempfile.NamedTemporaryFile(
             mode='w', suffix='_irealstudio_update.bat',
-            delete=False, encoding='utf-8',
+            delete=False, encoding='mbcs',
         ) as bat_file:
             bat_path = bat_file.name
             # Batch quoting: wrap paths in double quotes; no special escaping
@@ -324,17 +327,23 @@ def apply_update_and_restart(
                 f'    timeout /t 1 /nobreak >nul\r\n',
                 f'    goto waitloop\r\n',
                 f')\r\n',
+                # Brief pause after process exit to let file locks / AV scanners
+                # release handles before robocopy starts.
+                f'timeout /t 2 /nobreak >nul\r\n',
                 # robocopy exit codes 0-7 indicate success (8+ = error).
                 f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS >nul 2>&1\r\n',
                 f'if %errorlevel% leq 7 (\r\n',
                 f'    start "" "{exe}"\r\n',
-                f')\r\n',
             ]
             if cleanup_dir:
-                lines.append(f'rmdir /s /q "{cleanup_dir}"\r\n')
-            # Spawn a separate cmd process to delete the script file so
-            # the running batch file can be removed while it is still active.
-            lines.append(f'start /b cmd /c del /f /q "%~f0"\r\n')
+                # Only remove the temp download dir on a successful copy.
+                lines.append(f'    rmdir /s /q "{cleanup_dir}"\r\n')
+            lines += [
+                f')\r\n',
+                # Spawn a separate cmd process to delete the script file so
+                # the running batch file can be removed while it is still active.
+                f'start /b cmd /c del /f /q "%~f0"\r\n',
+            ]
             bat_file.write(''.join(lines))
 
         _logger.info("Launching update helper script: %s", bat_path)
