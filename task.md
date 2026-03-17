@@ -22,3 +22,11 @@ If you edit a chord in the repeating part, not volta, it will be edited in both 
 
 In python representation, first 8 measures are written out with chords, on measures 1:1 and 8:4 there are repeat open and close signs, on measure 6 first volta mark. It automatically calculates that next 6 measures are the same as first, so there chords are not written out in the array, but in the view they are shown. And measures 15 and 16 are written out with volta2 chords, measure 15 has volta 2 mark.
 Make a feature to make up to 4 repeats. Endings are not necessary.
+
+# Post-merge beta-test checklist
+1. **Plain repeat (no volta):** Create chords in bars 1–8, press `[` at bar 1 and `]` at bar 8, verify right-arrow from bar 8 jumps back to bar 1 and export keeps a normal repeat without N1/N2.
+2. **Volta on repeat:** For the same 1–8 repeat, press `V` at bar 7 and verify bar 8 jumps to bar 17, up/down navigation reaches hidden/repeat-2 measures, and speech announces ending 1 / ending 2 correctly.
+3. **Transpose:** Select a chord range and use `Ctrl+T`; then run transpose with no selection to transpose whole song and key signature. Verify enharmonic spelling and playback/export.
+4. **MIDI compensation per device:** Set different compensation values for at least two MIDI outputs, switch devices, restart app, and verify each device restores its saved value.
+5. **Fine label clarity:** Open Insert → Section Mark and confirm menu label is `Fine (end mark)` in English and localized text in Russian.
+6. **Russian i18n coverage:** Run app in Russian and check new strings (repeat/volta feedback, transpose dialog, updater error paths, shortcut help text) are translated and not fuzzy/English.

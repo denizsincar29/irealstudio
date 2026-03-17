@@ -231,6 +231,21 @@ class KeysMixin:
         elif key == 'v' and not ctrl and not shift:
             self.add_volta()
 
+        # [ key – mark repeat start
+        elif key == '[' and not ctrl and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self.set_repeat_start()
+
+        # ] key – mark repeat end
+        elif key == ']' and not ctrl and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self.set_repeat_end()
+
+        # Ctrl+T – transpose
+        elif ctrl and key == 't' and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self._on_transpose()
+
         # D key – debug: speak beat offset during recording/pre-count/playback
         elif key == 'd' and not ctrl and not shift:
             if self._recorder.state != AppState.IDLE:

@@ -52,6 +52,7 @@ _CMD_INSERT_SM_F        = 5018
 _CMD_INSERT_VOLTA       = 5020
 _CMD_INSERT_NC          = 5021
 _CMD_INSERT_BASS        = 5023
+_CMD_TRANSPOSE          = 5024  # Transpose dialog
 _CMD_RECORD_START             = 6001
 _CMD_RECORD_PLAY              = 6002
 _CMD_RECORD_STOP              = 6003

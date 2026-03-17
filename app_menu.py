@@ -14,7 +14,7 @@ from commands import (
     _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
     _CMD_INSERT_SM_D, _CMD_INSERT_SM_V, _CMD_INSERT_SM_I,
     _CMD_INSERT_SM_S, _CMD_INSERT_SM_Q, _CMD_INSERT_SM_F,
-    _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS,
+    _CMD_INSERT_VOLTA, _CMD_INSERT_NC, _CMD_INSERT_BASS, _CMD_TRANSPOSE,
     _CMD_RECORD_START, _CMD_RECORD_PLAY, _CMD_RECORD_STOP,
     _CMD_RECORD_MODE_OVERDUB, _CMD_RECORD_MODE_OVERWRITE, _CMD_RECORD_OVERWRITE_WHOLE,
     _CMD_SETTINGS_PROJECT, _CMD_SETTINGS_UPDATE,
@@ -27,7 +27,7 @@ from commands import (
     _MIDI_DEVICE_BASE, _MIDI_OUT_DEVICE_BASE, _SOUND_OUT_DEVICE_BASE,
     RECORDING_MODE_OVERDUB, RECORDING_MODE_OVERWRITE,
 )
-from i18n import _, set_language, get_language
+from i18n import _, ngettext, set_language, get_language
 
 
 class MenuMixin:
@@ -172,9 +172,18 @@ class MenuMixin:
         idx = event.GetId() - _MIDI_OUT_DEVICE_BASE
         names = self._midi.get_output_names()
         if 0 <= idx < len(names):
+            # Save the current compensation for the old output device before switching.
+            old_name = self._midi.midi_output_name
+            if old_name:
+                self._midi_device_compensation[old_name] = self.midi_compensation_ms
             self._midi.open_output_by_name(names[idx])
+            # Load per-device compensation for the new output device.
+            new_name = names[idx]
+            if new_name in self._midi_device_compensation:
+                self.midi_compensation_ms = self._midi_device_compensation[new_name]
+            self._sync_compensation_to_recorder()
             self._refresh_midi_out_devices()
-            self.speak(_("MIDI output: {name}").format(name=names[idx]))
+            self.speak(_("MIDI output: {name}").format(name=new_name))
             self._save_app_settings()
 
     def _on_menu_sound_out_refresh(self, _event: wx.CommandEvent) -> None:
@@ -309,6 +318,41 @@ class MenuMixin:
             self._save_app_settings()
             self.speak(_("Metronome settings saved"))
 
+    def _on_transpose(self) -> None:
+        """Show the Transpose dialog and apply transposition to the progression."""
+        from dialogs import transpose_dialog
+        result = transpose_dialog(parent=self._frame)
+        if result is None:
+            return
+        raw_semitones = int(result.get('semitones', 0))
+        if raw_semitones % 12 == 0:
+            return
+        semitone_abs = abs(raw_semitones) % 12
+        semitones = semitone_abs if raw_semitones > 0 else -semitone_abs
+        sel_items = self._chords_in_selection()
+        self._push_undo()
+        if sel_items:
+            sel_positions = [item.position for item in sel_items]
+            self.progression.transpose(semitones, positions=sel_positions)
+            self.speak(
+                ngettext(
+                    "Transposed selection by {n} semitone",
+                    "Transposed selection by {n} semitones",
+                    abs(semitones),
+                ).format(n=semitones)
+            )
+        else:
+            self.progression.transpose(semitones)
+            self.speak(
+                ngettext(
+                    "Transposed by {n} semitone, new key: {key}",
+                    "Transposed by {n} semitones, new key: {key}",
+                    abs(semitones),
+                ).format(n=semitones, key=self.progression.key)
+            )
+        self._mark_dirty()
+        self._schedule_display_update()
+
     # ------------------------------------------------------------------
     # Menu building
     # ------------------------------------------------------------------
@@ -339,6 +383,8 @@ class MenuMixin:
         edit_menu.Append(_CMD_EDIT_CUT,   _("Cu&t") + "\tCtrl+X")
         edit_menu.Append(_CMD_EDIT_COPY,  _("&Copy") + "\tCtrl+C")
         edit_menu.Append(_CMD_EDIT_PASTE, _("&Paste") + "\tCtrl+V")
+        edit_menu.AppendSeparator()
+        edit_menu.Append(_CMD_TRANSPOSE,  _("&Transpose...") + "\tCtrl+T")
         menu_bar.Append(edit_menu, _("&Edit"))
 
         # --- Insert ---
@@ -357,7 +403,7 @@ class MenuMixin:
         sm_menu.Append(_CMD_INSERT_SM_I, _("&Intro") + "\tCtrl+Shift+I")
         sm_menu.Append(_CMD_INSERT_SM_S, _("&Segno") + "\tCtrl+Shift+S")
         sm_menu.Append(_CMD_INSERT_SM_Q, _("&Coda") + "\tCtrl+Shift+Q")
-        sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine") + "\tCtrl+Shift+F")
+        sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine (end mark)") + "\tCtrl+Shift+F")
         insert_menu.AppendSubMenu(sm_menu, _("&Section Mark"))
 
         insert_menu.Append(_CMD_INSERT_VOLTA, _("&Volta / Ending") + "\tV")
@@ -480,6 +526,8 @@ class MenuMixin:
                          id=_CMD_EDIT_COPY)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.paste_chord(),
                          id=_CMD_EDIT_PASTE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self._on_transpose(),
+                         id=_CMD_TRANSPOSE)
         # Insert
         self._frame.Bind(wx.EVT_MENU, lambda e: self._insert_chord_from_menu(),
                          id=_CMD_INSERT_CHORD)

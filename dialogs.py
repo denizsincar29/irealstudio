@@ -20,6 +20,50 @@ BPM_MIN = 40
 BPM_MAX = 240
 _BPM_PREVIEW_BARS = 2   # bars of metronome played as a preview
 
+# ---------------------------------------------------------------------------
+# Key selector helpers
+# ---------------------------------------------------------------------------
+# 12 chromatic root notes displayed in dialogs (flat spelling for consistency).
+KEY_ROOT_NOTES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+KEY_MODES = ['major', 'minor']
+
+# Map flat-spelled root → iReal Pro minor key string (some use sharp spelling).
+_MINOR_KEY_MAP: dict[str, str] = {
+    'C': 'C-', 'Db': 'C#-', 'D': 'D-', 'Eb': 'Eb-', 'E': 'E-', 'F': 'F-',
+    'Gb': 'F#-', 'G': 'G-', 'Ab': 'G#-', 'A': 'A-', 'Bb': 'Bb-', 'B': 'B-',
+}
+# Reverse map: iReal Pro minor key → flat-spelled root for display.
+_MINOR_KEY_TO_ROOT: dict[str, str] = {v: k for k, v in _MINOR_KEY_MAP.items()}
+
+
+def key_to_root_mode(key: str) -> tuple[str, str]:
+    """Parse an iReal Pro key string into (root, mode).
+
+    Examples::
+
+        key_to_root_mode('C')   → ('C', 'major')
+        key_to_root_mode('A-')  → ('A', 'minor')
+        key_to_root_mode('C#-') → ('Db', 'minor')  # display uses flat spelling
+    """
+    if key.endswith('-'):
+        root = _MINOR_KEY_TO_ROOT.get(key, key[:-1])
+        return root, 'minor'
+    return key, 'major'
+
+
+def root_mode_to_key(root: str, mode: str) -> str:
+    """Build an iReal Pro key string from *root* and *mode*.
+
+    Examples::
+
+        root_mode_to_key('C', 'major')  → 'C'
+        root_mode_to_key('A', 'minor')  → 'A-'
+        root_mode_to_key('Db', 'minor') → 'C#-'
+    """
+    if mode == 'minor':
+        return _MINOR_KEY_MAP.get(root, root + '-')
+    return root
+
 
 def prompt_input(title: str, prompt: str, default: str = '',
                  parent=None) -> str | None:
@@ -79,22 +123,29 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                 result[key] = val if val else default
             except (KeyboardInterrupt, EOFError):
                 return None
-        # Key: show numbered list
-        from pyrealpro import KEY_SIGNATURES
-        print("Key (enter number or name):")
-        for idx, k in enumerate(KEY_SIGNATURES, 1):
-            print(f"  {idx}: {k}")
+        # Key: ask for root and mode separately
+        print(_("Key root (C, Db, D, Eb, E, F, Gb, G, Ab, A, Bb, B):"))
+        for idx, r in enumerate(KEY_ROOT_NOTES, 1):
+            print(f"  {idx}: {r}")
+        default_root, default_mode = key_to_root_mode(default_key)
         try:
-            raw = input(f"[{default_key}]: ").strip()
+            raw = input(f"[{default_root}]: ").strip()
             if raw.isdigit():
                 idx = int(raw) - 1
-                result['key'] = KEY_SIGNATURES[idx] if 0 <= idx < len(KEY_SIGNATURES) else default_key
-            elif raw in KEY_SIGNATURES:
-                result['key'] = raw
+                root = KEY_ROOT_NOTES[idx] if 0 <= idx < len(KEY_ROOT_NOTES) else default_root
+            elif raw in KEY_ROOT_NOTES:
+                root = raw
             else:
-                result['key'] = default_key
+                root = default_root
         except (KeyboardInterrupt, EOFError):
             return None
+        print(_("Mode (major/minor):"))
+        try:
+            raw_mode = input(f"[{default_mode}]: ").strip().lower()
+            mode = 'minor' if raw_mode in ('minor', 'm', '2', 'мин', 'минор') else 'major'
+        except (KeyboardInterrupt, EOFError):
+            return None
+        result['key'] = root_mode_to_key(root, mode)
         # Style: show numbered list
         from pyrealpro import STYLES_ALL
         print("Style (enter number or name):")
@@ -115,15 +166,17 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
 
     try:
         import wx
-        from pyrealpro import STYLES_ALL, KEY_SIGNATURES
+        from pyrealpro import STYLES_ALL
+
+        _default_root, _default_mode = key_to_root_mode(default_key)
 
         class _NewProjectDlg(wx.Dialog):
             def __init__(self, parent_wnd):
                 super().__init__(parent_wnd, title=_("New Project"),
                                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
 
-                # Grid rows: text fields + key row + style row
-                grid = wx.FlexGridSizer(rows=len(text_fields) + 2, cols=2, vgap=6, hgap=8)
+                # Grid rows: text fields + key-root row + key-mode row + style row
+                grid = wx.FlexGridSizer(rows=len(text_fields) + 3, cols=2, vgap=6, hgap=8)
                 grid.AddGrowableCol(1, 1)
                 self._ctrls: dict[str, wx.Control] = {}
 
@@ -134,14 +187,22 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                     self._ctrls[key] = ctrl
                     grid.Add(ctrl, flag=wx.EXPAND)
 
-                # Key: wx.Choice with all valid iReal Pro key signatures
+                # Key root: wx.Choice with 12 chromatic roots
                 grid.Add(wx.StaticText(self, label=_('Key:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
-                key_choice = wx.Choice(self, choices=KEY_SIGNATURES)
-                key_sel = KEY_SIGNATURES.index(default_key) if default_key in KEY_SIGNATURES else 0
-                key_choice.SetSelection(key_sel)
-                self._ctrls['key'] = key_choice
-                grid.Add(key_choice, flag=wx.EXPAND)
+                key_root_choice = wx.Choice(self, choices=KEY_ROOT_NOTES)
+                root_sel = KEY_ROOT_NOTES.index(_default_root) if _default_root in KEY_ROOT_NOTES else 0
+                key_root_choice.SetSelection(root_sel)
+                self._key_root_choice = key_root_choice
+                grid.Add(key_root_choice, flag=wx.EXPAND)
+
+                # Key mode: wx.Choice (Major / Minor)
+                grid.Add(wx.StaticText(self, label=_('Mode:')),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                key_mode_choice = wx.Choice(self, choices=[_('major'), _('minor')])
+                key_mode_choice.SetSelection(1 if _default_mode == 'minor' else 0)
+                self._key_mode_choice = key_mode_choice
+                grid.Add(key_mode_choice, flag=wx.EXPAND)
 
                 # Style: wx.Choice (accessible listbox-style dropdown)
                 grid.Add(wx.StaticText(self, label=_('Style:')),
@@ -257,6 +318,11 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                         result[k] = ctrl.GetString(ctrl.GetSelection())
                     else:
                         result[k] = ctrl.GetValue()
+                # Assemble the iReal Pro key from root + mode selectors.
+                root = self._key_root_choice.GetString(self._key_root_choice.GetSelection())
+                mode_idx = self._key_mode_choice.GetSelection()
+                mode = 'minor' if mode_idx == 1 else 'major'
+                result['key'] = root_mode_to_key(root, mode)
                 return result
 
         dlg = _NewProjectDlg(parent)
@@ -300,21 +366,29 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                 result[key] = val if val else default
             except (KeyboardInterrupt, EOFError):
                 return None
-        from pyrealpro import KEY_SIGNATURES
-        print("Key (enter number or name):")
-        for idx, k in enumerate(KEY_SIGNATURES, 1):
-            print(f"  {idx}: {k}")
+        # Key root + mode (replaces combined KEY_SIGNATURES list)
+        print(_("Key root (C, Db, D, Eb, E, F, Gb, G, Ab, A, Bb, B):"))
+        for idx, r in enumerate(KEY_ROOT_NOTES, 1):
+            print(f"  {idx}: {r}")
+        default_root, default_mode = key_to_root_mode(default_key)
         try:
-            raw = input(f"[{default_key}]: ").strip()
+            raw = input(f"[{default_root}]: ").strip()
             if raw.isdigit():
                 idx = int(raw) - 1
-                result['key'] = KEY_SIGNATURES[idx] if 0 <= idx < len(KEY_SIGNATURES) else default_key
-            elif raw in KEY_SIGNATURES:
-                result['key'] = raw
+                root = KEY_ROOT_NOTES[idx] if 0 <= idx < len(KEY_ROOT_NOTES) else default_root
+            elif raw in KEY_ROOT_NOTES:
+                root = raw
             else:
-                result['key'] = default_key
+                root = default_root
         except (KeyboardInterrupt, EOFError):
             return None
+        print(_("Mode (major/minor):"))
+        try:
+            raw_mode = input(f"[{default_mode}]: ").strip().lower()
+            mode = 'minor' if raw_mode in ('minor', 'm', '2', 'мин', 'минор') else 'major'
+        except (KeyboardInterrupt, EOFError):
+            return None
+        result['key'] = root_mode_to_key(root, mode)
         from pyrealpro import STYLES_ALL
         print("Style (enter number or name):")
         for idx, s in enumerate(STYLES_ALL, 1):
@@ -334,14 +408,16 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
 
     try:
         import wx
-        from pyrealpro import STYLES_ALL, KEY_SIGNATURES
+        from pyrealpro import STYLES_ALL
+
+        _default_root, _default_mode = key_to_root_mode(default_key)
 
         class _ProjectSettingsDlg(wx.Dialog):
             def __init__(self, parent_wnd):
                 super().__init__(parent_wnd, title=_("Project Settings"),
                                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
 
-                grid = wx.FlexGridSizer(rows=len(text_fields) + 2, cols=2, vgap=6, hgap=8)
+                grid = wx.FlexGridSizer(rows=len(text_fields) + 3, cols=2, vgap=6, hgap=8)
                 grid.AddGrowableCol(1, 1)
                 self._ctrls: dict[str, wx.Control] = {}
 
@@ -352,13 +428,22 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                     self._ctrls[key] = ctrl
                     grid.Add(ctrl, flag=wx.EXPAND)
 
+                # Key root: wx.Choice with 12 chromatic roots
                 grid.Add(wx.StaticText(self, label=_('Key:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
-                key_choice = wx.Choice(self, choices=KEY_SIGNATURES)
-                key_sel = KEY_SIGNATURES.index(default_key) if default_key in KEY_SIGNATURES else 0
-                key_choice.SetSelection(key_sel)
-                self._ctrls['key'] = key_choice
-                grid.Add(key_choice, flag=wx.EXPAND)
+                key_root_choice = wx.Choice(self, choices=KEY_ROOT_NOTES)
+                root_sel = KEY_ROOT_NOTES.index(_default_root) if _default_root in KEY_ROOT_NOTES else 0
+                key_root_choice.SetSelection(root_sel)
+                self._key_root_choice = key_root_choice
+                grid.Add(key_root_choice, flag=wx.EXPAND)
+
+                # Key mode: wx.Choice (Major / Minor)
+                grid.Add(wx.StaticText(self, label=_('Mode:')),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                key_mode_choice = wx.Choice(self, choices=[_('major'), _('minor')])
+                key_mode_choice.SetSelection(1 if _default_mode == 'minor' else 0)
+                self._key_mode_choice = key_mode_choice
+                grid.Add(key_mode_choice, flag=wx.EXPAND)
 
                 grid.Add(wx.StaticText(self, label=_('Style:')),
                          flag=wx.ALIGN_CENTER_VERTICAL)
@@ -473,6 +558,11 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
                         result[k] = ctrl.GetString(ctrl.GetSelection())
                     else:
                         result[k] = ctrl.GetValue()
+                # Assemble the iReal Pro key from root + mode selectors.
+                root = self._key_root_choice.GetString(self._key_root_choice.GetSelection())
+                mode_idx = self._key_mode_choice.GetSelection()
+                mode = 'minor' if mode_idx == 1 else 'major'
+                result['key'] = root_mode_to_key(root, mode)
                 return result
 
         dlg = _ProjectSettingsDlg(parent)
@@ -483,7 +573,54 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
         return None
 
 
-def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
+def transpose_dialog(parent=None) -> dict | None:
+    """Show a Transpose dialog where the user picks a number of semitones (-11 … +11).
+
+    Returns a dict with ``{'semitones': int}`` on OK, or ``None`` if cancelled.
+    """
+    if not _IS_WINDOWS:
+        try:
+            raw = input(_("Transpose by how many semitones (negative = down): ")).strip()
+            semitones = int(raw) if raw else 0
+            return {'semitones': semitones}
+        except (KeyboardInterrupt, EOFError, ValueError):
+            return None
+
+    try:
+        import wx
+
+        class _TransposeDlg(wx.Dialog):
+            def __init__(self, parent_wnd):
+                super().__init__(parent_wnd, title=_("Transpose"),
+                                 style=wx.DEFAULT_DIALOG_STYLE)
+                grid = wx.FlexGridSizer(rows=1, cols=2, vgap=6, hgap=8)
+                grid.AddGrowableCol(1, 1)
+                grid.Add(wx.StaticText(self, label=_("Semitones:")),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                self._spin = wx.SpinCtrl(self, min=-11, max=11, initial=0)
+                grid.Add(self._spin, flag=wx.EXPAND)
+
+                outer = wx.BoxSizer(wx.VERTICAL)
+                outer.Add(grid, proportion=0,
+                          flag=wx.EXPAND | wx.ALL, border=12)
+                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          border=12)
+                self.SetSizerAndFit(outer)
+                self._spin.SetFocus()
+
+            def get_semitones(self) -> int:
+                return self._spin.GetValue()
+
+        dlg = _TransposeDlg(parent)
+        semitones = dlg.get_semitones() if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        return {'semitones': semitones} if semitones is not None else None
+    except Exception:
+        return None
+
+
+def insert_chord_dialog(parent=None, default='C') -> str | None:
     """
     Show a chord-entry dialog that lets the user type a chord name directly
     or build one from root + quality + alteration selectors.
@@ -526,7 +663,7 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
         'm':     [],
         '7':     ['b9', '9', '#9', 'b5', '#11', 'b13', '13'],
         'maj7':  ['9', '#11', '13'],
-        'm7':    ['9', '#11', '13'],
+        'm7':    ['9', '11', '13'],
         'm7b5':  ['b9', '9'],
         'dim':   [],
         'dim7':  [],
@@ -545,7 +682,7 @@ def insert_chord_dialog(parent=None, default: str = 'C') -> str | None:
         '13':    [],
         'aug7':  [],
     }
-    ALL_EXTS = ['b9', '9', '#9', 'b5', '#11', 'b13', '13']
+    ALL_EXTS = ['b9', '9', '#9', 'b5', '11', '#11', 'b13', '13']
 
     if not _IS_WINDOWS:
         print(f"Enter chord name [{default}]: ", end='', flush=True)

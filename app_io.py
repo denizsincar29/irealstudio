@@ -55,6 +55,7 @@ Editing
   Ctrl+Return           Insert chord (dialog)
   F2                    Edit chord in place (dialog pre-filled with current chord)
   N                     Toggle No Chord (N.C.)
+  Ctrl+T                Transpose (dialog)
 
 Section Marks (Ctrl+Shift+letter)
   Ctrl+Shift+A/B/C/D    Section A / B / C / D
@@ -62,10 +63,14 @@ Section Marks (Ctrl+Shift+letter)
   Ctrl+Shift+I          Intro
   Ctrl+Shift+S          Segno
   Ctrl+Shift+Q          Coda
-  Ctrl+Shift+F          Fine
+  Ctrl+Shift+F          Fine (end mark)
+
+Repeat Brackets & Volta
+  [                     Mark repeat start
+  ]                     Mark repeat end (creates normal repeat)
+  V                     Optional: add volta / ending bracket
 
 Other
-  V                     Add volta / ending bracket
   / + (A–G)             Add bass note (slash chord)
   P                     Speak full position
   D                     Beat offset (debug)

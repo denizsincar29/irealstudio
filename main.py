@@ -394,8 +394,16 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # Latency compensation (ms) for audio and MIDI metronomes
         self.audio_compensation_ms: int = AUDIO_METRO_COMPENSATION_MS
         self.midi_compensation_ms: int = MIDI_METRO_COMPENSATION_MS
+        # Per-device MIDI latency compensation (device_name → ms).
+        # When a MIDI output is selected, its device-specific value is loaded into
+        # midi_compensation_ms.  On save, the current value is written back.
+        self._midi_device_compensation: dict[str, int] = {}
         # Last chord committed during recording (used by smart metronome)
         self._smart_metro_last_chord: "Chord | None" = None
+        # Pending repeat-start/end for volta bracket creation.
+        # [ → _pending_repeat_start; ] → _pending_repeat_end; V → create bracket
+        self._pending_repeat_start: int | None = None
+        self._pending_repeat_end:   int | None = None
 
         # Unsaved-changes tracking
         self._is_dirty: bool = False
@@ -697,6 +705,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
     def _mark_dirty(self) -> None:
         self._is_dirty = True
 
+    def _clear_pending_repeat_markers(self) -> None:
+        self._pending_repeat_start = None
+        self._pending_repeat_end = None
+
     def undo(self) -> None:
         if not self._undo_stack:
             self.speak(_('Nothing to undo'))
@@ -708,6 +720,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             min(self.cursor.measure, max(self.progression.last_measure(), 1)),
             1, self.progression.time_signature,
         )
+        self._clear_pending_repeat_markers()
         self._mark_dirty()
         self.speak(_('Undo'))
 
@@ -718,6 +731,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._undo_stack.append(self.progression.to_json())
         snapshot = self._redo_stack.pop()
         self.progression = ChordProgression.from_json(snapshot)
+        self._clear_pending_repeat_markers()
         self._mark_dirty()
         self.speak(_('Redo'))
 
@@ -887,6 +901,18 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.audio_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(settings['audio_compensation_ms'])))
         if 'midi_compensation_ms' in settings:
             self.midi_compensation_ms = max(0, min(MAX_COMPENSATION_MS, int(settings['midi_compensation_ms'])))
+        if 'midi_device_compensation' in settings:
+            raw = settings['midi_device_compensation']
+            if isinstance(raw, dict):
+                self._midi_device_compensation = {
+                    str(k): max(0, min(MAX_COMPENSATION_MS, int(v)))
+                    for k, v in raw.items()
+                    if isinstance(v, (int, float))
+                }
+        # Load per-device compensation for the currently selected MIDI output.
+        dev_name = self._midi.midi_output_name
+        if dev_name and dev_name in self._midi_device_compensation:
+            self.midi_compensation_ms = self._midi_device_compensation[dev_name]
 
     def _save_app_settings(self) -> None:
         """Persist current device selections and language to the config file."""
@@ -897,6 +923,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
                 if dev_id == current_out:
                     audio_name = dev_name
                     break
+        # Persist the current MIDI compensation for the active output device.
+        midi_out_name = self._midi.midi_output_name
+        if midi_out_name:
+            self._midi_device_compensation[midi_out_name] = self.midi_compensation_ms
         settings = {
             'language': get_language(),
             'midi_input_device': self._midi.midi_input_name,
@@ -912,6 +942,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'midi_metro_smart': self.midi_metro_smart,
             'audio_compensation_ms': self.audio_compensation_ms,
             'midi_compensation_ms': self.midi_compensation_ms,
+            'midi_device_compensation': dict(self._midi_device_compensation),
         }
         _save_settings_file(settings)
 
@@ -1228,9 +1259,50 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._mark_dirty()
         self.speak(target.chord_name_spoken())
 
-    def add_volta(self) -> None:
+    def set_repeat_start(self) -> None:
+        """Mark the current measure as repeat start ([ bracket)."""
+        self._pending_repeat_start = self.cursor.measure
+        self._pending_repeat_end   = None   # reset if re-marking start
+        self.speak(_("Repeat start set at measure {n}").format(n=self._pending_repeat_start))
+
+    def set_repeat_end(self) -> None:
+        """Mark the current measure as repeat end (] bracket)."""
+        if self._pending_repeat_start is None:
+            self.speak(_("Set repeat start first with ["))
+            return
+        if self.cursor.measure <= self._pending_repeat_start:
+            self.speak(_("Repeat end must be after repeat start"))
+            return
+        self._pending_repeat_end = self.cursor.measure
         self._push_undo()
-        msg = self.progression.add_volta_start(self.cursor.measure)
+        msg = self.progression.add_repeat_bracket(
+            self._pending_repeat_start,
+            self._pending_repeat_end,
+        )
+        self._mark_dirty()
+        self.speak(
+            _("{msg}. If you need endings, move to ending 1 and press V.").format(msg=msg)
+        )
+
+    def add_volta(self) -> None:
+        """Insert a repeat bracket / volta mark.
+
+        * If explicit repeat-start ([) and repeat-end (]) are pending, create
+          the bracket using those markers (new workflow).
+        * Otherwise fall back to the legacy section-mark-based auto-detection.
+        """
+        self._push_undo()
+        if self._pending_repeat_start is not None and self._pending_repeat_end is not None:
+            msg = self.progression.add_volta_bracket(
+                self._pending_repeat_start,
+                self._pending_repeat_end,
+                self.cursor.measure,
+            )
+            # Clear the pending markers after a bracket is created.
+            self._pending_repeat_start = None
+            self._pending_repeat_end   = None
+        else:
+            msg = self.progression.add_volta_start(self.cursor.measure)
         self._mark_dirty()
         self.speak(msg)
 

@@ -471,6 +471,10 @@ class VoltaBracket:
     def is_complete(self) -> bool:
         return self.ending1_end > 0 and self.ending2_start > 0
 
+    def is_repeat_only(self) -> bool:
+        """Return True when this bracket represents a plain repeat (no endings)."""
+        return self.is_complete() and self.ending1_start == self.ending1_end + 1
+
     def hidden_range(self) -> tuple[int, int] | None:
         """Return the (start, end) measure range that is hidden between endings."""
         if not self.is_complete():
@@ -881,6 +885,48 @@ class ProgressionItem:
         return cls(chord, pos, d.get('bass_note', ''))
 
 
+# ---------------------------------------------------------------------------
+# Transpose helpers (module-level so they can be used independently)
+# ---------------------------------------------------------------------------
+
+def _transpose_note_name(note: str, semitones: int, note_names: list[str]) -> str:
+    """Return *note* transposed by *semitones* using *note_names* for spelling."""
+    if note not in _NOTE_TO_PC:
+        return note
+    new_pc = (_NOTE_TO_PC[note] + semitones) % 12
+    return note_names[new_pc]
+
+
+def _transpose_chord_name(name: str, semitones: int, note_names: list[str]) -> str:
+    """Return chord *name* transposed by *semitones*, preserving quality.
+
+    Only the root and optional bass note are transposed; the quality string
+    is kept unchanged.  *note_names* controls accidental spelling (use
+    ``NOTE_NAMES`` for flats, ``NOTE_NAMES_SHARP`` for sharps).
+    """
+    semitones = semitones % 12
+    if semitones == 0:
+        return name
+    # Find root prefix.
+    root = ''
+    for r in _ALL_ROOTS:
+        if name.startswith(r):
+            root = r
+            break
+    if not root:
+        return name  # unrecognised; return unchanged
+    quality_and_bass = name[len(root):]
+    new_root = _transpose_note_name(root, semitones, note_names)
+    # Handle bass note (slash chord).
+    if '/' in quality_and_bass:
+        slash_idx = quality_and_bass.index('/')
+        quality = quality_and_bass[:slash_idx]
+        bass = quality_and_bass[slash_idx + 1:]
+        new_bass = _transpose_note_name(bass, semitones, note_names)
+        return f"{new_root}{quality}/{new_bass}"
+    return f"{new_root}{quality_and_bass}"
+
+
 @dataclass
 class ChordProgression:
     title: str
@@ -1050,6 +1096,83 @@ class ChordProgression:
             ).format(n=cleared)
         return msg
 
+    def add_volta_bracket(self, repeat_start: int, repeat_end: int, volta_start: int) -> str:
+        """Create a repeat bracket using explicit measure numbers.
+
+        Unlike :meth:`add_volta_start`, this method does NOT rely on section
+        marks to infer boundaries.  All three parameters must be provided:
+
+        * *repeat_start* – the measure where ``[`` was pressed (repeat open).
+        * *repeat_end*   – the measure where ``]`` was pressed (repeat close,
+          last measure of ending 1).
+        * *volta_start*  – the first measure of ending 1 (where ``V`` was pressed).
+
+        The hidden range (repeated body) and ending-2 start are derived
+        automatically::
+
+            body_length   = volta_start - repeat_start
+            ending1_end   = repeat_end
+            ending2_start = repeat_end + body_length + 1
+
+        Returns a human-readable status message.
+        """
+        if not (repeat_start < volta_start <= repeat_end):
+            return _("Invalid volta markers: repeat_start {rs}, volta {vs}, repeat_end {re}").format(
+                rs=repeat_start, vs=volta_start, re=repeat_end)
+
+        body_length   = volta_start - repeat_start
+        ending1_end   = repeat_end
+        ending2_start = repeat_end + body_length + 1
+
+        # Replace any existing bracket that starts at the same repeat_start
+        self.volta_brackets = [vb for vb in self.volta_brackets
+                                if vb.repeat_start != repeat_start]
+
+        vb = VoltaBracket(
+            repeat_start=repeat_start,
+            ending1_start=volta_start,
+            ending1_end=ending1_end,
+            ending2_start=ending2_start,
+        )
+        self.volta_brackets.append(vb)
+
+        hidden = vb.hidden_range()
+        cleared = 0
+        if hidden:
+            cleared = self.delete_chords_in_measure_range(hidden[0], hidden[1])
+
+        msg = _("Repeat from measure {repeat_start}, ending 1: {e1_start}–{e1_end}, ending 2 starts at measure {e2_start}").format(
+            repeat_start=repeat_start, e1_start=volta_start,
+            e1_end=ending1_end, e2_start=ending2_start)
+        if cleared:
+            msg += ngettext(
+                " ({n} hidden chord removed)",
+                " ({n} hidden chords removed)",
+                cleared,
+            ).format(n=cleared)
+        return msg
+
+    def add_repeat_bracket(self, repeat_start: int, repeat_end: int) -> str:
+        """Create a normal repeat (no volta endings required)."""
+        if repeat_end <= repeat_start:
+            return _("Repeat end must be after repeat start")
+
+        self.volta_brackets = [vb for vb in self.volta_brackets
+                               if vb.repeat_start != repeat_start]
+
+        # Represent plain repeat in existing structure:
+        # - ending1_start = repeat_end + 1 (no N1 marker in written measures)
+        # - ending1_end   = repeat_end      (closing brace location)
+        # - ending2_start = repeat_start    (jump back target)
+        vb = VoltaBracket(
+            repeat_start=repeat_start,
+            ending1_start=repeat_end + 1,
+            ending1_end=repeat_end,
+            ending2_start=repeat_start,
+        )
+        self.volta_brackets.append(vb)
+        return _("Repeat set: {start}–{end}").format(start=repeat_start, end=repeat_end)
+
     def _find_section_start(self, measure: int) -> int:
         """Find the measure where the current section starts (for repeat bracket placement)."""
         marks_before = [s.measure for s in self.section_marks if s.measure <= measure]
@@ -1112,7 +1235,7 @@ class ChordProgression:
         At ending2_start jumps back to ending1_end.
         """
         for vb in self.volta_brackets:
-            if vb.is_complete() and measure == vb.ending2_start:
+            if vb.is_complete() and not vb.is_repeat_only() and measure == vb.ending2_start:
                 return vb.ending1_end
         prev_m = measure - 1
         if prev_m < 1:
@@ -1140,8 +1263,9 @@ class ChordProgression:
             marks.add(sm.measure)
         for vb in self.volta_brackets:
             marks.add(vb.repeat_start)
-            marks.add(vb.ending1_start)
-            if vb.is_complete():
+            if not vb.is_repeat_only():
+                marks.add(vb.ending1_start)
+            if vb.is_complete() and not vb.is_repeat_only():
                 marks.add(vb.ending2_start)
         return sorted(marks)
 
@@ -1297,6 +1421,8 @@ class ChordProgression:
             # Determine ending marker
             ending = ''
             for vb in self.volta_brackets:
+                if vb.is_repeat_only():
+                    continue
                 if measure_num == vb.ending1_start:
                     ending = 'N1'
                     break
@@ -1341,6 +1467,59 @@ class ChordProgression:
         return song.url()
 
     # -----------------------------------------------------------------------
+    # Transpose helpers
+    # -----------------------------------------------------------------------
+
+    def transpose_chord_name(self, name: str, semitones: int,
+                              note_names: list[str] | None = None) -> str:
+        """Return *name* transposed by *semitones* (positive = up, negative = down).
+
+        *note_names* controls accidental spelling; defaults to the key's preferred
+        spelling (``get_note_names_for_key(self.key)``).  Only the root and, when
+        present, the bass note are transposed; the chord quality is preserved.
+        """
+        names = note_names if note_names is not None else get_note_names_for_key(self.key)
+        return _transpose_chord_name(name, semitones, names)
+
+    def transpose_key(self, semitones: int) -> str:
+        """Return the progression's key transposed by *semitones*.
+
+        The returned string is a valid iReal Pro key signature.  If the transposed
+        root falls on an enharmonic, the flat spelling is chosen (matching iReal
+        Pro's major-key convention).
+        """
+        from dialogs import key_to_root_mode, root_mode_to_key  # lazy import
+        root, mode = key_to_root_mode(self.key)
+        if root in NOTE_NAMES:
+            pc = NOTE_NAMES.index(root)
+        else:  # sharp root (e.g. C# from C#-)
+            pc = NOTE_NAMES_SHARP.index(root) if root in NOTE_NAMES_SHARP else 0
+        new_pc = (pc + semitones) % 12
+        new_root = NOTE_NAMES[new_pc]  # prefer flat spelling for key root
+        return root_mode_to_key(new_root, mode)
+
+    def transpose(self, semitones: int,
+                  positions: list["Position"] | None = None) -> None:
+        """Transpose chords in-place by *semitones*.
+
+        If *positions* is given, only the chords at those positions are transposed;
+        otherwise the whole progression (including the key signature) is transposed.
+        """
+        semitones = semitones % 12 or 0  # keep positive, modulo 12
+        if semitones == 0:
+            return
+        note_names = get_note_names_for_key(self.key)
+        whole = positions is None
+        pos_set = None if whole else set(positions)
+        for item in self.items:
+            if whole or item.position in pos_set:
+                item.chord = Chord(_transpose_chord_name(item.chord.name, semitones, note_names))
+                if item.bass_note:
+                    item.bass_note = _transpose_note_name(item.bass_note, semitones, note_names)
+        if whole:
+            self.key = self.transpose_key(semitones)
+
+    # -----------------------------------------------------------------------
     # List-like interface
     # -----------------------------------------------------------------------
 
@@ -1359,11 +1538,6 @@ class ChordProgression:
 
     def __iter__(self):
         return iter(self.items)
-
-
-# ---------------------------------------------------------------------------
-# MIDI chord voicing
-# ---------------------------------------------------------------------------
 
 # MIDI note range for the root note (E1=28, Bb2=46)
 _VOICE_ROOT_LOW  = 28   # E1
