@@ -337,13 +337,20 @@ class Recorder:
                     self._click(True, target_time=beat_logical)
             else:
                 if progression.is_in_virtual_range(logical_measure):
-                    # Off-beat in virtual territory: pass resolved chords to
-                    # the MIDI smart metronome callback.
+                    # Off-beat in virtual territory: resolve to the primary
+                    # measure and play back the chords just as beat-1 does.
                     primary_m = progression.resolve_virtual_measure(logical_measure)
                     chords_here = progression.find_chords_at_position(
                         Position(primary_m, logical_beat, progression.time_signature))
                     self._click(False, chords_here if chords_here else None,
                                 target_time=beat_logical)
+                    if chords_here:
+                        self._speak(chords_here[0].chord_name_spoken())
+                    if chords_here and self._on_playback_chord is not None:
+                        try:
+                            self._on_playback_chord(chords_here[0].chord.name)
+                        except Exception:
+                            _logger.error("on_playback_chord callback raised", exc_info=True)
                 else:
                     self._click(False, target_time=beat_logical)
 

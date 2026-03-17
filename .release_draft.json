@@ -1,4 +1,0 @@
-{
-  "version": "v0.2.0",
-  "changelog": "- Repeat workflow: `[` + `]` creates normal repeats; `V` adds optional volta endings.\n- Added transpose dialog (`Ctrl+T`) for selection or full song/key.\n- Added per-device MIDI latency compensation persistence/restoration.\n- Clarified section mark label to \"Fine (end mark)\".\n- Added/fixed Russian translations for new UI and updater strings."
-}
