@@ -16,8 +16,9 @@ Behaviour is determined automatically from the current git branch:
 
 * **any other branch** – draft-only release.  The version is taken from the
   argument (or interactively), ``news.md``, ``changelog.md``, and
-  ``version.py`` are committed, but NO tag or push happens.  Merge the branch
-  into main and re-run to finalise.
+  ``version.py`` are updated on disk but **not committed**.  Commit them
+  manually (or let the Copilot agent commit via its report_progress step),
+  then merge the branch into main and re-run to finalise.
 
 **Workflow for Copilot / automation:**
 
@@ -29,7 +30,8 @@ Behaviour is determined automatically from the current git branch:
    - Prepends ``## v0.2.1 - <today>`` to ``news.md`` if that header is not
      already present (the file content is otherwise untouched).
    - Updates ``changelog.md`` by prepending the versioned ``news.md`` block.
-   - Commits ``version.py``, ``news.md``, and ``changelog.md``.
+   - Commits ``version.py``, ``news.md``, and ``changelog.md`` (on main; on
+     other branches the files are updated but not committed automatically).
 4. After merging to main, run ``uv run python tag_release.py`` (no argument).
    The script detects that ``version.py`` is ahead of the last git tag and
    immediately creates and pushes the release tag — no further prompts.
@@ -45,7 +47,7 @@ Interactive steps (no VERSION argument, non-main branch):
 7. Checks the new version is strictly higher than the last tag.
 8. Reads ``news.md`` for the release body (must be non-empty).
 9. Updates ``news.md``, ``changelog.md``, and ``version.py``.
-10. Commits all three files.
+10. Updates ``news.md``, ``changelog.md``, and ``version.py`` on disk.
 """
 
 import sys
@@ -171,19 +173,31 @@ def _read_news_md() -> str:
 
 
 def _ensure_news_header(version_tag: str, content: str) -> str:
-    """Ensure ``news.md`` starts with the ``## vX.Y.Z - DATE`` header.
+    """Ensure ``news.md`` starts with the correct ``## vX.Y.Z - DATE`` header.
 
     *content* is the already-read text of ``news.md`` (from :func:`_read_news_md`).
-    If the first non-empty line already begins with ``## `` it is assumed to
-    carry a version header and the file is left untouched.
-    Otherwise the header is prepended and the file is rewritten.
+
+    * If the first non-empty line is any markdown heading (starts with ``#``),
+      the heading must contain *version_tag*.  If it does, the file is left
+      untouched.  If it contains a different version, the script exits with an
+      error — the user must clear ``news.md`` or remove the existing header
+      before running this script for a new version.
+    * If no heading is present, ``## vX.Y.Z - DATE`` is prepended and the file
+      is rewritten.
 
     Returns the (possibly updated) full content of ``news.md``.
     """
     first_line = next((ln for ln in content.splitlines() if ln.strip()), '')
-    if first_line.startswith('## '):
-        # Header already present — leave news.md as-is
-        return content
+    if first_line.startswith('#'):
+        if version_tag in first_line:
+            # Correct version header already present — leave news.md as-is
+            return content
+        print(
+            f"ERROR: news.md already has a version header that does not match {version_tag}:\n"
+            f"  {first_line}\n"
+            "Clear news.md or remove the existing header before running this script."
+        )
+        sys.exit(1)
     today = date.today().isoformat()
     header = f'## {version_tag} - {today}'
     updated = f'{header}\n\n{content}'
@@ -326,7 +340,7 @@ def main(version_arg: str | None = None) -> None:
 
     * **main branch** – full release (interactive, or finalize if version.py is
       already ahead of the last tag).
-    * **any other branch** – draft-only (commit files; no tag or push).
+    * **any other branch** – draft-only (update files on disk; no commit, tag, or push).
 
     Parameters
     ----------
@@ -396,12 +410,13 @@ def main(version_arg: str | None = None) -> None:
         version_tag = _resolve_version(existing_tags, last, version_arg)
         _prepare_release_files(version_tag)
 
-        # Draft only: commit files but no tag or push
-        repo.index.add(['news.md', 'changelog.md', 'version.py'])
-        repo.index.commit(f'chore: prepare release {version_tag}')
-        print(f"Committed release draft for {version_tag}.")
-        print(f"Note: not on main branch (current: {branch!r}). No tag or push.")
-        print("Merge/switch to main and re-run to finalize.")
+        # Draft only: files are updated but NOT committed here.
+        # Commit them manually (e.g. via `git add` + `git commit`) or let the
+        # Copilot agent commit them via its report_progress step.
+        print(f"Release draft prepared for {version_tag}.")
+        print(f"  Updated: news.md, changelog.md, version.py")
+        print(f"Note: not on main branch (current: {branch!r}). No commit, tag, or push.")
+        print("Commit the changed files, merge to main, and re-run to finalize.")
 
 
 if __name__ == '__main__':
