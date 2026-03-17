@@ -1178,11 +1178,17 @@ class App(MenuMixin, KeysMixin, IOMixin):
                         if vc and virtual_m >= vc[0]:
                             self.cursor = Position(virtual_m, prv_primary.position.beat, ts)
                         else:
-                            # Previous chord maps before the virtual block; exit.
-                            self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                            # Previous chord maps before the virtual block; exit to the
+                            # last real chord before the virtual range start.
+                            prv = self.progression.find_last_chord_to_left(self.cursor)
+                            self.cursor = (prv.position if prv
+                                           else Position(max(1, self.cursor.measure - 1), 1, ts))
                     else:
-                        # No previous chord in the primary body; exit virtual.
-                        self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                        # No previous chord in the primary body; exit virtual to the
+                        # last real chord before the virtual range start.
+                        prv = self.progression.find_last_chord_to_left(self.cursor)
+                        self.cursor = (prv.position if prv
+                                       else Position(max(1, self.cursor.measure - 1), 1, ts))
                 else:
                     prv = self.progression.find_last_chord_to_left(self.cursor)
                     if prv:

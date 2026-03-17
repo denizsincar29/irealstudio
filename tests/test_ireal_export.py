@@ -539,8 +539,56 @@ class TestRepeatNavigation(unittest.TestCase):
         # After repeat: None
         self.assertIsNone(prog.get_virtual_context(17))
 
+    # --- virtual-aware find_last_chord_to_left ---
 
-class TestNoteDeduplication(unittest.TestCase):
+    def _plain_prog_beat3(self) -> ChordProgression:
+        """Plain repeat where the last chord before the virtual range is at beat 3."""
+        prog = make_prog()
+        for m in range(1, 6):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_chord_by_name('G7', 6, 3)  # last chord at bar 6, beat 3
+        prog.add_repeat_bracket(1, 8)        # bars 7-8 are empty; virtual range 9-16
+        return prog
+
+    def test_find_last_chord_exits_virtual_to_correct_beat(self):
+        """Navigating left from virtual bar 9 (start) should land on bar 6 beat 3, not beat 1."""
+        prog = self._plain_prog_beat3()
+        ts = prog.time_signature
+        # Virtual bar 9 maps to primary bar 1; no primary chord before (1,1)
+        # → falls back to last real chord before the virtual range start.
+        prv = prog.find_last_chord_to_left(Position(9, 1, ts))
+        self.assertIsNotNone(prv)
+        self.assertEqual(prv.position.measure, 6)
+        self.assertEqual(prv.position.beat, 3)
+
+    def test_find_last_chord_inside_virtual_uses_primary_body(self):
+        """In the middle of the virtual range the previous chord should come from the primary body."""
+        prog = self._plain_prog_beat3()
+        ts = prog.time_signature
+        # Virtual bar 11 = primary bar 3.  Last chord before primary (3,2) is Cmaj7 at (3,1).
+        prv = prog.find_last_chord_to_left(Position(11, 2, ts))
+        self.assertIsNotNone(prv)
+        self.assertEqual(prv.position.measure, 3)
+        self.assertEqual(prv.position.beat, 1)
+
+    def test_find_last_chord_virtual_no_prior_primary_falls_back(self):
+        """Virtual bar 9 beat 1 → primary bar 1 beat 1 has nothing before it → real fallback."""
+        prog = self._plain_prog_beat3()
+        ts = prog.time_signature
+        prv = prog.find_last_chord_to_left(Position(9, 1, ts))
+        # The returned item is a stored item (primary position unchanged).
+        self.assertIsNotNone(prv)
+        self.assertFalse(prog.is_in_virtual_range(prv.position.measure))
+
+    def test_find_last_chord_non_virtual_unchanged(self):
+        """Non-virtual positions keep the original behaviour."""
+        prog = self._plain_prog_beat3()
+        ts = prog.time_signature
+        prv = prog.find_last_chord_to_left(Position(5, 1, ts))
+        self.assertIsNotNone(prv)
+        self.assertEqual(prv.position.measure, 4)
+
+
     """Tests for duplicate note removal before chord detection (Bug 3)."""
 
     def test_dedup_removes_octave_duplicates(self):
