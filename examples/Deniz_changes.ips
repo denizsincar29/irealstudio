@@ -1,0 +1,303 @@
+{
+  "title": "Deniz changes",
+  "key": "Bb",
+  "style": "Medium Swing",
+  "bpm": 240,
+  "composer": "Sincar Deniz Abdullahovich",
+  "time_signature": "4/4",
+  "total_measures": 32,
+  "items": [
+    {
+      "chord": "Bbmaj7",
+      "measure": 1,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7b9",
+      "measure": 1,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 2,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7(b913)",
+      "measure": 2,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7",
+      "measure": 3,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7(b9)",
+      "measure": 3,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 4,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7(b913)",
+      "measure": 4,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bb6",
+      "measure": 5,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7b5",
+      "measure": 5,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Ebmaj7(9)",
+      "measure": 6,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Edim7",
+      "measure": 6,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7",
+      "measure": 7,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7(b9)",
+      "measure": 7,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 8,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7(b913)",
+      "measure": 8,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Fsus4C",
+      "measure": 15,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7b9C",
+      "measure": 15,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bb6C",
+      "measure": 16,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "D7sus4",
+      "measure": 17,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "D7(b9)",
+      "measure": 18,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7sus4(13)",
+      "measure": 19,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7(b913)",
+      "measure": 20,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 21,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dbdim7",
+      "measure": 22,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7",
+      "measure": 23,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dbmaj7",
+      "measure": 23,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Gbmaj7",
+      "measure": 24,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bmaj7",
+      "measure": 24,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bbmaj7",
+      "measure": 25,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7b9",
+      "measure": 25,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 26,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7(b913)",
+      "measure": 26,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7",
+      "measure": 27,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "G7(b9)",
+      "measure": 27,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Cm7(9)",
+      "measure": 28,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7(b913)",
+      "measure": 28,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bb6",
+      "measure": 29,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Dm7b5",
+      "measure": 29,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Ebmaj7(9)",
+      "measure": 30,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "Edim7",
+      "measure": 30,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Fsus4C",
+      "measure": 31,
+      "beat": 1,
+      "bass_note": ""
+    },
+    {
+      "chord": "F7b9C",
+      "measure": 31,
+      "beat": 3,
+      "bass_note": ""
+    },
+    {
+      "chord": "Bb6C",
+      "measure": 32,
+      "beat": 1,
+      "bass_note": ""
+    }
+  ],
+  "section_marks": [
+    {
+      "measure": 1,
+      "mark": "*A"
+    },
+    {
+      "measure": 9,
+      "mark": "*A"
+    },
+    {
+      "measure": 17,
+      "mark": "*B"
+    },
+    {
+      "measure": 25,
+      "mark": "*A"
+    }
+  ],
+  "volta_brackets": [
+    {
+      "repeat_start": 1,
+      "ending1_start": 7,
+      "ending1_end": 8,
+      "ending2_start": 15,
+      "num_repeats": 2
+    }
+  ],
+  "no_chord_measures": []
+}
