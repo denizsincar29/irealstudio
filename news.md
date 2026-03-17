@@ -1,5 +1,3 @@
-# v0.2.0 Release Notes
-
 ## v0.2.0 - 2026-03-17
 
 - Repeat workflow: `[` + `]` creates normal repeats; `V` adds optional volta endings.
