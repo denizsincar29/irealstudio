@@ -57,7 +57,7 @@ LOG_RING_SIZE = 100       # entries kept in the in-memory ring buffer
 LOG_SPEAK_RECENT = 5      # entries spoken by Ctrl+L
 
 # Safety cap for navigation loops (prevents infinite loops in degenerate progressions)
-_MAX_NAV_ITERATIONS = 1000
+
 
 _log_ring: collections.deque[str] = collections.deque(maxlen=LOG_RING_SIZE)
 
@@ -525,7 +525,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         measure = total_beat_0 // beats_per_measure + 1
         beat = total_beat_0 % beats_per_measure + 1
 
-        if self.progression.is_in_hidden_range(measure):
+        if self.progression.is_in_virtual_range(measure):
             return
 
         self._push_undo()
@@ -743,7 +743,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
     # ------------------------------------------------------------------
 
     def copy_chord(self) -> None:
-        chords = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat,
+                                    self.progression.time_signature))
+        chords = self.progression.find_chords_at_position(lookup_pos)
         if chords:
             self._clipboard = chords[0].chord.name
             self.speak(_('Copied {name}').format(name=chords[0].chord.name))
@@ -751,11 +755,15 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.speak(_('No chord at cursor'))
 
     def cut_chord(self) -> None:
-        chords = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat,
+                                    self.progression.time_signature))
+        chords = self.progression.find_chords_at_position(lookup_pos)
         if chords:
             self._clipboard = chords[0].chord.name
             self._push_undo()
-            self.progression.delete_chord_at(self.cursor)
+            self.progression.delete_chord_at(lookup_pos)
             self._mark_dirty()
             self.speak(_('Cut {name}').format(name=self._clipboard))
         else:
@@ -765,10 +773,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if self._clipboard is None:
             self.speak(_('Clipboard is empty'))
             return
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
         self._push_undo()
         self.progression.add_chord_by_name(
             self._clipboard,
-            self.cursor.measure, self.cursor.beat,
+            real_m, self.cursor.beat,
         )
         self._mark_dirty()
         self.speak(_('Pasted {name}').format(name=self._clipboard))
@@ -778,7 +787,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
     # ------------------------------------------------------------------
 
     def toggle_no_chord(self) -> None:
-        m = self.cursor.measure
+        m = self.progression.resolve_virtual_measure(self.cursor.measure)
         if self.progression.is_no_chord(m):
             self._push_undo()
             self.progression.remove_no_chord(m)
@@ -1088,56 +1097,81 @@ class App(MenuMixin, KeysMixin, IOMixin):
                 new_m = self.progression.navigate_left_from_measure(self.cursor.measure)
             self.cursor = Position(new_m, 1, ts)
         elif by_beat:
+            # Navigation is strictly linear: every beat including virtual
+            # territory is reachable with plain by-beat movement.
             if direction == 'right':
-                new_pos = self.cursor + 1
+                self.cursor = self.cursor + 1
             else:
-                new_pos = self.cursor - 1
-            # In primary mode, skip over virtual/hidden territory
-            new_m = self.progression.primary_skip_past_virtual(
-                self.cursor.measure, new_pos.measure)
-            if new_m != new_pos.measure:
-                if direction == 'right':
-                    self.cursor = Position(new_m, 1, ts)
-                else:
-                    # new_m is after_repeat; navigate_left_from_measure(new_m+1)
-                    # gives us the last primary measure before the virtual block.
-                    self.cursor = Position(
-                        self.progression.navigate_left_from_measure(new_m + 1),
-                        ts.numerator, ts)
-            else:
-                self.cursor = new_pos
+                self.cursor = self.cursor - 1
         else:
+            # By-chord navigation.  In virtual territory (no stored chords) we
+            # degrade to by-measure steps so every bar remains reachable.
             if direction == 'right':
-                nxt = self.progression.find_next_chord_to_right(self.cursor)
-                if nxt:
-                    adj_m = self.progression.primary_skip_past_virtual(
-                        self.cursor.measure, nxt.position.measure)
-                    if adj_m != nxt.position.measure:
-                        self.cursor = Position(adj_m, 1, ts)
-                    elif not self.progression.is_in_hidden_range(nxt.position.measure):
-                        self.cursor = nxt.position
-                    else:
-                        new_m = nxt.position.measure
-                        for _ in range(_MAX_NAV_ITERATIONS):  # safety cap
-                            if not self.progression.is_in_hidden_range(new_m):
+                if self.progression.is_in_virtual_range(self.cursor.measure):
+                    # Virtual bar: advance one measure (no stored chords here)
+                    self.cursor = Position(self.cursor.measure + 1, 1, ts)
+                else:
+                    nxt = self.progression.find_next_chord_to_right(self.cursor)
+                    if nxt:
+                        # Enter virtual territory before the next stored chord
+                        # if any virtual territory lies between cursor and it.
+                        virtual_entry = None
+                        for vb in self.progression.volta_brackets:
+                            if not vb.is_complete():
+                                continue
+                            # Volta hidden body [ending1_end+1, ending2_start-1]
+                            vs = vb.ending1_end + 1
+                            hidden_end = vb.ending2_start - 1
+                            if (vs <= hidden_end
+                                    and self.cursor.measure < vs
+                                    <= nxt.position.measure):
+                                virtual_entry = vs
                                 break
-                            new_m = self.progression.navigate_right_from_measure(new_m)
-                        search = Position(max(new_m - 1, 1), ts.numerator, ts)
-                        visible = self.progression.find_next_chord_to_right(search)
-                        self.cursor = visible.position if visible else Position(new_m, 1, ts)
+                            # Plain repeat virtual range
+                            if vb.is_repeat_only():
+                                vr = vb.plain_virtual_range()
+                                if (vr
+                                        and self.cursor.measure < vr[0]
+                                        <= nxt.position.measure):
+                                    virtual_entry = vr[0]
+                                    break
+                        if virtual_entry is not None:
+                            self.cursor = Position(virtual_entry, 1, ts)
+                        else:
+                            self.cursor = nxt.position
             else:
-                prv = self.progression.find_last_chord_to_left(self.cursor)
-                if prv and not self.progression.is_in_hidden_range(prv.position.measure):
-                    self.cursor = prv.position
-                elif prv:
-                    new_m = prv.position.measure
-                    for _ in range(_MAX_NAV_ITERATIONS):  # safety cap
-                        if not self.progression.is_in_hidden_range(new_m):
-                            break
-                        new_m = self.progression.navigate_left_from_measure(new_m)
-                    search = Position(new_m + 1, 1, ts)
-                    visible = self.progression.find_last_chord_to_left(search)
-                    self.cursor = visible.position if visible else Position(new_m, 1, ts)
+                if self.progression.is_in_virtual_range(self.cursor.measure):
+                    # Virtual bar: step back one measure
+                    self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                else:
+                    prv = self.progression.find_last_chord_to_left(self.cursor)
+                    if prv:
+                        # Enter virtual territory before the previous stored chord
+                        # if any virtual territory lies between it and the cursor.
+                        virtual_exit = None
+                        for vb in self.progression.volta_brackets:
+                            if not vb.is_complete():
+                                continue
+                            # Volta hidden body
+                            vs = vb.ending1_end + 1
+                            hidden_end = vb.ending2_start - 1
+                            if (vs <= hidden_end
+                                    and prv.position.measure < vs
+                                    <= self.cursor.measure):
+                                virtual_exit = hidden_end
+                                break
+                            # Plain repeat virtual range
+                            if vb.is_repeat_only():
+                                vr = vb.plain_virtual_range()
+                                if (vr
+                                        and prv.position.measure < vr[0]
+                                        <= self.cursor.measure):
+                                    virtual_exit = vr[1]
+                                    break
+                        if virtual_exit is not None:
+                            self.cursor = Position(virtual_exit, 1, ts)
+                        else:
+                            self.cursor = prv.position
         new_measure = self.cursor.measure
         if new_measure != old_measure:
             old_section = self.progression.get_section_at_measure(old_measure)
@@ -1366,20 +1400,24 @@ class App(MenuMixin, KeysMixin, IOMixin):
 
     def delete_at_cursor(self) -> None:
         """Delete the chord, section mark, or volta bracket at the cursor."""
-        chords_here = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        ts = self.progression.time_signature
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat, ts))
+        chords_here = self.progression.find_chords_at_position(lookup_pos)
         if chords_here:
-            prev_item = self.progression.find_last_chord_to_left(self.cursor)
+            prev_item = self.progression.find_last_chord_to_left(lookup_pos)
             self._push_undo()
-            self.progression.delete_chord_at(self.cursor)
+            self.progression.delete_chord_at(lookup_pos)
             self._mark_dirty()
             if prev_item:
                 self.cursor = prev_item.position
             else:
-                self.cursor = Position(1, 1, self.progression.time_signature)
+                self.cursor = Position(1, 1, ts)
             self.speak(_('Deleted'))
             self._announce_position()
         else:
-            m = self.cursor.measure
+            m = real_m
             deleted = []
             if self.progression.get_section_mark(m):
                 self._push_undo()

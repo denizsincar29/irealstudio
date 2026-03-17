@@ -464,8 +464,14 @@ class IOMixin:
 
         Opens the chord-entry dialog pre-filled with the current chord name.
         Does nothing (speaks an error) when no chord is present at the cursor.
+        If the cursor is in virtual territory the edit is applied to the
+        underlying primary (stored) position.
         """
-        chords_here = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        ts = self.progression.time_signature
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat, ts))
+        chords_here = self.progression.find_chords_at_position(lookup_pos)
         if not chords_here:
             self.speak(_("No chord to edit"))
             return
@@ -475,7 +481,7 @@ class IOMixin:
             self._push_undo()
             # Preserve the existing bass/slash note so F2 doesn't silently drop it.
             self.progression.add_chord_by_name(
-                name, self.cursor.measure, self.cursor.beat,
+                name, lookup_pos.measure, lookup_pos.beat,
                 bass_note=item.bass_note,
             )
             self._mark_dirty()

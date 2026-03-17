@@ -1387,49 +1387,31 @@ class ChordProgression:
                 return after
         return candidate_measure
 
-    def navigate_right_from_measure(self, measure: int) -> int:
-        """Return the next measure to navigate to (by-measure step).
+    def is_in_virtual_range(self, measure: int) -> bool:
+        """Return True if *measure* falls in any virtual territory.
 
-        In **primary mode** (cursor not in virtual territory): at the end of
-        ending 1 (``ending1_end``) jump straight to ``after_repeat_measure()``,
-        skipping the entire virtual/hidden territory.
-        In **virtual mode** (cursor in virtual territory): advance naturally and
-        skip over the plain-hidden sub-ranges of *other* brackets only.
+        Virtual territory consists of the hidden body between volta endings
+        (:meth:`is_in_hidden_range`) and the plain-repeat virtual copies
+        (:meth:`_is_plain_virtual`).  Ending-2 bars are *real* stored bars
+        and therefore return ``False``.
         """
-        # In primary mode jump over the complete virtual territory
-        if self.get_virtual_context(measure) is None:
-            for vb in self.volta_brackets:
-                if vb.is_complete() and measure == vb.ending1_end:
-                    return vb.after_repeat_measure()
-        # Advance naturally, skipping the hidden body of volta brackets
-        next_m = measure + 1
-        while self.is_in_hidden_range(next_m):
-            next_m += 1
-        return next_m
+        return self.is_in_hidden_range(measure) or self._is_plain_virtual(measure)
+
+    def navigate_right_from_measure(self, measure: int) -> int:
+        """Return the next measure to navigate to (single step right).
+
+        Navigation is now strictly linear — every bar including virtual
+        territory is reachable with plain left/right movement.
+        """
+        return measure + 1
 
     def navigate_left_from_measure(self, measure: int) -> int:
-        """Return the previous measure to navigate to (by-measure step).
+        """Return the previous measure to navigate to (single step left).
 
-        In **virtual mode** (cursor in virtual territory): step back naturally
-        but clamp at the virtual context start so the cursor cannot cross back
-        into primary territory via simple left-navigation.
-        In **primary mode**: skip over hidden ranges and plain virtual ranges.
+        Navigation is now strictly linear — every bar including virtual
+        territory is reachable with plain left/right movement.
         """
-        ctx = self.get_virtual_context(measure)
-        prev_m = measure - 1
-        if prev_m < 1:
-            return 1
-        if ctx is not None:
-            # Virtual mode: allow going into the hidden body but clamp at
-            # the start of the virtual context (don't cross back to primary).
-            context_start = ctx[0]
-            return max(context_start, prev_m)
-        # Primary mode: skip over any hidden or plain-virtual ranges
-        while self.is_in_hidden_range(prev_m) or self._is_plain_virtual(prev_m):
-            if prev_m < 1:
-                return 1
-            prev_m -= 1
-        return max(1, prev_m)
+        return max(1, measure - 1)
 
     def _is_plain_virtual(self, measure: int) -> bool:
         """Return True if *measure* falls inside a plain repeat's virtual range."""

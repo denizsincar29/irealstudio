@@ -277,7 +277,7 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         self.assertNotIn('N2', body)
         self.assertTrue(prog.volta_brackets[0].is_repeat_only())
 
-    def test_plain_repeat_navigation_jumps_past_repeat(self):
+    def test_plain_repeat_navigation_enters_virtual(self):
         prog = make_prog()
         for m in range(1, 9):
             prog.add_chord_by_name('Cmaj7', m, 1)
@@ -285,8 +285,8 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         vb = prog.volta_brackets[0]
         # 2 repeats of 8 bars → after_repeat = 17
         self.assertEqual(vb.after_repeat_measure(), 17)
-        # Primary navigation at ending1_end should jump straight to after_repeat
-        self.assertEqual(prog.navigate_right_from_measure(8), 17)
+        # Navigation is now linear: step from bar 8 goes to bar 9 (virtual)
+        self.assertEqual(prog.navigate_right_from_measure(8), 9)
 
     def test_explicit_volta_hidden_range_and_navigation(self):
         prog = make_prog()
@@ -302,9 +302,8 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         self.assertFalse(prog.is_in_hidden_range(15))
         # after_repeat: ending2_start(15) + ending_length(2) = 17
         self.assertEqual(vb.after_repeat_measure(), 17)
-        # Primary navigation at ending1_end must jump to after_repeat (skip volta2)
-        self.assertEqual(prog.navigate_right_from_measure(8), 17)
-        # From volta2 (virtual territory) left must NOT cross back to primary
+        # Navigation is now linear: bar 8 → 9, bar 15 → 14
+        self.assertEqual(prog.navigate_right_from_measure(8), 9)
         self.assertEqual(prog.navigate_left_from_measure(15), 14)
 
         body = url_body(prog)
@@ -392,24 +391,23 @@ class TestHiddenRangeNavigation(unittest.TestCase):
         self.assertFalse(prog.is_in_hidden_range(vb.ending2_start))
         self.assertFalse(prog.is_in_hidden_range(vb.repeat_start))
 
-    def test_navigate_right_jumps_to_after_repeat(self):
+    def test_navigate_right_enters_virtual_territory(self):
         prog = self._prog_with_volta()
         vb = prog.volta_brackets[0]
-        # Primary mode: from ending1_end should jump to after_repeat, not ending2_start
+        # Navigation is linear: from ending1_end go to the next bar (hidden body start)
         dest = prog.navigate_right_from_measure(vb.ending1_end)
-        self.assertEqual(dest, vb.after_repeat_measure())
-        self.assertNotEqual(dest, vb.ending2_start)
+        self.assertEqual(dest, vb.ending1_end + 1)
 
-    def test_navigate_left_in_virtual_clamps_at_context_start(self):
+    def test_navigate_left_steps_linearly_in_virtual(self):
         prog = self._prog_with_volta()
         vb = prog.volta_brackets[0]
-        # From ending2_start (virtual territory) left goes to prev measure, not ending1_end
+        # From ending2_start: step back one bar (into hidden body)
         dest = prog.navigate_left_from_measure(vb.ending2_start)
         self.assertEqual(dest, vb.ending2_start - 1)  # 14
-        # From context start (hidden body start) left is clamped: does not cross to primary
+        # From hidden body start: step back one bar (into primary territory)
         context_start = vb.ending1_end + 1  # 9
         dest = prog.navigate_left_from_measure(context_start)
-        self.assertEqual(dest, context_start)  # clamped
+        self.assertEqual(dest, context_start - 1)  # 8, crosses back to primary
 
 
 class TestRepeatNavigation(unittest.TestCase):
@@ -462,8 +460,8 @@ class TestRepeatNavigation(unittest.TestCase):
 
     def test_plain_navigate_left_from_after_repeat_primary(self):
         prog = self._plain_prog()
-        # Bar 17 is primary; going left skips virtual range [9,16] → lands at 8
-        self.assertEqual(prog.navigate_left_from_measure(17), 8)
+        # Navigation is linear: bar 17 → 16 (into the plain virtual range)
+        self.assertEqual(prog.navigate_left_from_measure(17), 16)
 
     def test_plain_resolve_virtual(self):
         prog = self._plain_prog()

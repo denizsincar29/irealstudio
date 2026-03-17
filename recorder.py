@@ -305,10 +305,25 @@ class Recorder:
             self._last_beat_time = beat_logical
 
             if logical_beat == 1:
-                if progression.is_in_hidden_range(logical_measure):
+                if progression.is_in_virtual_range(logical_measure):
+                    # Repeating section: announce once and play back the chords
+                    # from the resolved primary position so the MIDI smart
+                    # metronome and chord-playback callback remain active.
                     if not _announced_hidden:
                         self._speak("Repeating, chords not recorded")
                         _announced_hidden = True
+                    primary_m = progression.resolve_virtual_measure(logical_measure)
+                    chords_here = progression.find_chords_at_position(
+                        Position(primary_m, 1, progression.time_signature))
+                    self._click(True, chords_here if chords_here else None,
+                                target_time=beat_logical)
+                    if chords_here:
+                        self._speak(chords_here[0].chord_name_spoken())
+                    if chords_here and self._on_playback_chord is not None:
+                        try:
+                            self._on_playback_chord(chords_here[0].chord.name)
+                        except Exception:
+                            _logger.error("on_playback_chord callback raised", exc_info=True)
                 else:
                     _announced_hidden = False
                     for vb in progression.volta_brackets:
@@ -319,9 +334,18 @@ class Recorder:
                         ):
                             self._speak("Ending 2")
                             _announced_ending2.add(logical_measure)
-                self._click(True, target_time=beat_logical)
+                    self._click(True, target_time=beat_logical)
             else:
-                self._click(False, target_time=beat_logical)
+                if progression.is_in_virtual_range(logical_measure):
+                    # Off-beat in virtual territory: pass resolved chords to
+                    # the MIDI smart metronome callback.
+                    primary_m = progression.resolve_virtual_measure(logical_measure)
+                    chords_here = progression.find_chords_at_position(
+                        Position(primary_m, logical_beat, progression.time_signature))
+                    self._click(False, chords_here if chords_here else None,
+                                target_time=beat_logical)
+                else:
+                    self._click(False, target_time=beat_logical)
 
             beat_count += 1
             # Fire the click comp_s before the logical beat time so the sound
@@ -379,7 +403,9 @@ class Recorder:
         last_m = max(progression.last_measure(), progression.total_measures, 1)
         for vb in progression.volta_brackets:
             if vb.is_complete():
-                last_m = max(last_m, vb.ending2_start)
+                # Include the full virtual territory (hidden body + ending 2 or
+                # all plain-repeat copies) in the playback range.
+                last_m = max(last_m, vb.after_repeat_measure() - 1)
 
         # Latency compensation (see _precount_and_record for rationale).
         comp_s = self._get_clamped_compensation(interval)
@@ -404,7 +430,12 @@ class Recorder:
             # Record the logical beat time for beat_offset_ms() queries.
             self._last_beat_time = beat_logical
 
-            chords_here = progression.find_chords_at_position(cur)
+            # Resolve virtual measures (hidden body / plain repeat copies) to
+            # their stored primary counterpart so chords are looked up correctly.
+            real_m = progression.resolve_virtual_measure(cur.measure)
+            lookup_cur = (cur if real_m == cur.measure
+                          else Position(real_m, cur.beat, progression.time_signature))
+            chords_here = progression.find_chords_at_position(lookup_cur)
             if chords_here:
                 self._speak(chords_here[0].chord_name_spoken())
 
