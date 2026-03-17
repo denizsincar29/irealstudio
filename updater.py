@@ -48,6 +48,7 @@ _GITHUB_API_URL = (
     'https://api.github.com/repos/denizsincar29/irealstudio/releases/latest'
 )
 _RELEASES_PAGE = 'https://github.com/denizsincar29/irealstudio/releases/latest'
+_RELEASE_NOTES_PREVIEW_CHARS = 2000
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
@@ -528,8 +529,11 @@ def check_for_updates_sync(
             .format(tag=tag, current=VERSION)
         )
         if body:
-            # Show at most 400 chars of release notes
-            message += body[:400] + ('…' if len(body) > 400 else '') + '\n\n'
+            message += (
+                body[:_RELEASE_NOTES_PREVIEW_CHARS]
+                + ('…' if len(body) > _RELEASE_NOTES_PREVIEW_CHARS else '')
+                + '\n\n'
+            )
 
         can_auto_install_flag = can_auto_install(data)
 

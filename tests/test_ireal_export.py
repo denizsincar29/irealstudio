@@ -823,6 +823,30 @@ class TestChordRecognition(unittest.TestCase):
         name = self._chord(['G', 'C', 'D', 'F'])
         self.assertEqual('G7sus4', name)
 
+    def test_rule3_major_third_with_4th_is_not_sus4(self):
+        """C7 with a 4th color tone must not be reclassified as C7sus4."""
+        name = self._chord(['C', 'E', 'F', 'G', 'Bb'])
+        self.assertEqual('C7', name)
+
+    # ------------------------------------------------------------------ #
+    # Minor 11th chords (4th treated as natural 11 when minor 3rd present) #
+    # ------------------------------------------------------------------ #
+
+    def test_minor_7_natural_11(self):
+        """Cm7(11): minor 3rd + b7 + 4th (natural 11), no 9th."""
+        name = self._chord(['C', 'Eb', 'G', 'Bb', 'F'])
+        self.assertEqual('Cm7(11)', name)
+
+    def test_minor_11(self):
+        """Cm11: minor 3rd + b7 + 9th + 4th (natural 11)."""
+        name = self._chord(['C', 'Eb', 'G', 'Bb', 'D', 'F'])
+        self.assertEqual('Cm11', name)
+
+    def test_minor_with_4th_is_not_sus4(self):
+        """A minor chord with a natural 11th must NOT be treated as sus4."""
+        name = self._chord(['D', 'F', 'A', 'C', 'G'])
+        self.assertEqual('Dm7(11)', name)
+
 
 class TestIRealChordTranslation(unittest.TestCase):
     """Tests that chord names are correctly translated to iReal Pro canonical form."""
@@ -930,6 +954,14 @@ class TestIRealChordTranslation(unittest.TestCase):
     def test_mM7_with_9(self):
         """AmM7(9) minor-major 9 must translate to A-^9."""
         self.assertEqual('A-^9', self._ireal('AmM7(9)'))
+
+    def test_m7_natural_11_to_dash11(self):
+        """Cm7(11) (minor 7 with natural 11) must translate to C-11."""
+        self.assertEqual('C-11', self._ireal('Cm7(11)'))
+
+    def test_m11_to_dash11(self):
+        """Cm11 (minor 11 with 9th) must translate to C-11."""
+        self.assertEqual('C-11', self._ireal('Cm11'))
 
 
 class TestSharpKeyRecognition(unittest.TestCase):
@@ -1271,6 +1303,14 @@ class TestChordSpokenName(unittest.TestCase):
     def test_maj7_b5_spoken(self):
         """Cmaj7b5: major 7 flat 5."""
         self.assertEqual('C major 7 flat 5', self._spoken('Cmaj7b5'))
+
+    def test_m7_natural_11_spoken(self):
+        """Cm7(11): minor 7 eleven."""
+        self.assertEqual('C minor 7 eleven', self._spoken('Cm7(11)'))
+
+    def test_m11_spoken(self):
+        """Cm11: minor 11."""
+        self.assertEqual('C minor 11', self._spoken('Cm11'))
 
 
 class TestGetSectionAtMeasure(unittest.TestCase):

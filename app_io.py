@@ -98,6 +98,8 @@ class IOMixin:
             f.write(self.progression.to_json())
         self._current_file = path
         self._is_dirty = False
+        # Persist the new last_file so the correct project is restored on next launch.
+        self._save_app_settings()
 
     def save(self) -> None:
         """Save to the current file; prompt for a path if none is set yet."""
@@ -229,6 +231,8 @@ class IOMixin:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._clear_selection()
+        # Clear last_file so next launch also shows the new project dialog.
+        self._save_app_settings()
         self.speak(_("New project: {title}").format(title=self.progression.title))
 
     def export_ireal(self) -> None:

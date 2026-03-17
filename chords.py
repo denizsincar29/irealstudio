@@ -119,8 +119,9 @@ def _identify_chord_name(notes: list[str]) -> str | None:
     flat5   = has_tritone and not sharp11
 
     # --- Validation rule 3 ---
-    # If perfect 4th is present, chord is sus4 (no thirds in sus4)
-    sus4 = has_4th
+    # If perfect 4th is present and there is no 3rd at all → sus4.
+    # If a minor or major 3rd is present, the 4th is treated as an added/11th tone.
+    sus4 = has_4th and not has_min3 and not has_maj3
 
     # ================================================================
     # Chord-type identification
@@ -164,6 +165,9 @@ def _identify_chord_name(notes: list[str]) -> str | None:
         if has_maj7:
             base = root + 'mM7'
         elif has_b7:
+            # Minor 11th: minor 3rd + b7 + natural 9th + natural 11th (4th)
+            if has_4th and has_nat9:
+                return root + 'm11'
             base = root + 'm7'
         elif has_aug5:
             return root + 'm#5'
@@ -172,6 +176,8 @@ def _identify_chord_name(notes: list[str]) -> str | None:
         exts = []
         if has_nat9:
             exts.append('9')
+        if has_4th:
+            exts.append('11')
         if sharp11:
             exts.append('#11')
         if has_6th:
@@ -568,6 +574,7 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('m7b5(b9)', 'h9'),   # closest valid: half-dim 9; b9 not representable in iReal Pro
     ('m7b5(9)', 'h9'),
     ('m7(9)',   '-9'),
+    ('m7(11)',  '-11'),
     ('m7(#11)', '-11'),
     ('m7(13)',  'min13'),   # iReal Pro uses 'min13' consistently (same as m13)
     ('m7',      '-7'),
@@ -658,6 +665,7 @@ _SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
     ('m7b5(b9)',      'half diminished flat 9'),
     ('m7b5(9)',       'half diminished 9'),
     ('m7(9)',         'minor 9'),
+    ('m7(11)',        'minor 7 eleven'),
     ('m7(#11)',       'minor 7 sharp 11'),
     ('m7(13)',        'minor 13'),
     ('m7',            'minor 7'),

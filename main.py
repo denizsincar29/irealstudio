@@ -416,6 +416,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
 
         # Tracks whether a progression was loaded at startup (used for welcome message)
         self._loaded_at_startup: bool = False
+        # Last file path read from settings (populated by _apply_saved_settings).
+        self._settings_last_file: str = ''
 
         # Menu items that may need to be checked/unchecked at runtime
         self._overdub_item = None
@@ -476,12 +478,24 @@ class App(MenuMixin, KeysMixin, IOMixin):
                     self.speak(_('Loaded {title}').format(title=self.progression.title))
                 except Exception as e:
                     self.speak(_('Could not load {name}: {e}').format(name=cli_path.name, e=e))
-        # Auto-load the last saved project file so the user's work is restored.
+        # Restore the last project opened by the user (saved in settings).
+        elif self._settings_last_file and Path(self._settings_last_file).exists():
+            try:
+                last_path = Path(self._settings_last_file)
+                with open(last_path, encoding='utf-8') as f:
+                    self.progression = ChordProgression.from_json(f.read())
+                self._apply_loaded_progression(last_path)
+                self._loaded_at_startup = True
+                self.speak(_('Loaded {title}').format(title=self.progression.title))
+            except Exception as e:
+                self.speak(_('Could not load {name}: {e}').format(
+                    name=Path(self._settings_last_file).name, e=e))
+        # Backward-compatibility: auto-load progression.ips if it exists.
         elif Path(SAVE_FILE).exists():
             try:
                 with open(SAVE_FILE, encoding='utf-8') as f:
                     self.progression = ChordProgression.from_json(f.read())
-                self._apply_loaded_progression(Path(SAVE_FILE))
+                self._apply_loaded_progression(Path(SAVE_FILE).resolve())
                 self._loaded_at_startup = True
                 self.speak(_('Loaded {title}').format(title=self.progression.title))
             except Exception as e:
@@ -505,6 +519,9 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self.cursor = Position(1, 1, self.progression.time_signature)
         self.recording_bpm = self.progression.bpm
         self._clear_selection()
+        # Persist the new last_file immediately so that even if the app is
+        # terminated unexpectedly the correct file is re-opened on next launch.
+        self._save_app_settings()
 
     # ------------------------------------------------------------------
     # MIDI chord callbacks
@@ -883,6 +900,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if saved_lang:
             set_language(saved_lang)
 
+        # Remember the last opened file for use in __init__'s startup sequence.
+        last_file = settings.get('last_file', '')
+        if last_file:
+            self._settings_last_file = last_file
+
         midi_in = settings.get('midi_input_device', '')
         if midi_in:
             names = self._midi.get_input_names()
@@ -979,6 +1001,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             'audio_compensation_ms': self.audio_compensation_ms,
             'midi_compensation_ms': self.midi_compensation_ms,
             'midi_device_compensation': dict(self._midi_device_compensation),
+            'last_file': str(self._current_file) if self._current_file else '',
         }
         _save_settings_file(settings)
 
@@ -1778,7 +1801,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.speak(_('IReal Studio ready. {title}. Press R to record.').format(
                 title=self.progression.title))
         else:
-            self.speak(_('IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file.'))
+            self.speak(_('IReal Studio ready. New Project will open automatically. Press Ctrl+O to open a file.'))
 
         self._frame = wx.Frame(None, title="IReal Studio", size=(580, 420))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))
@@ -1820,6 +1843,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # the Show() activation messages; otherwise the OS may redirect focus to
         # the first focusable child (ChordGridPanel) before our SetFocus() fires.
         wx.CallAfter(panel.SetFocus)
+        # If no project was loaded at startup, open the New Project dialog
+        # automatically so the user can set up their session right away.
+        if not self._loaded_at_startup:
+            wx.CallAfter(self.new_project)
 
         self._schedule_display_update()
         self._start_background_update_check()
