@@ -589,6 +589,7 @@ class TestRepeatNavigation(unittest.TestCase):
         self.assertEqual(prv.position.measure, 4)
 
 
+class TestNoteDeduplication(unittest.TestCase):
     """Tests for duplicate note removal before chord detection (Bug 3)."""
 
     def test_dedup_removes_octave_duplicates(self):
