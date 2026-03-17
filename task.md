@@ -13,4 +13,16 @@ Here are the prioritized tasks for refinement and correction, focusing on Virtua
 
     *   **In-Recording Playback Glitch:**
         *   During recording with a metronome, upon reaching a virtual area, the program plays back the previously recorded repeat. However, chords within this virtual area are *only audibly played on the first beat* during this "in-recording playback" mode.
-        *   The standard playback mode however works correctly, playing all chords in the virtual area as expected.
+*   **Note:** Normal, non-recording playback correctly plays all chords on their respective beats in all areas. This single playback discrepancy in virtual areas during recording is likely a core issue.
+
+2.  **Russian Translation Corrections:**
+
+    *   Review all Russian translations and update the following terms across the application:
+        *   Change "Метка раздела" to "Метка части".
+        *   Change "функция" to "тип аккорда".
+```
+
+
+## Release tag script
+Change release_tag.py to not make a draft json, but write news.md and changelog.md and change version.py. And the script checks version.py and the last tag, and if version is greater than the last tag, it understands that it is a draft and right away publishes the release. If not, it asks for version and changelog entry and than, as now, drafts or publishes the release depending on the branch.
+
