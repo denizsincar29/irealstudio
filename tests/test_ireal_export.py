@@ -261,6 +261,49 @@ class TestVoltaBrackets(unittest.TestCase):
         self.assertEqual(len(prog.volta_brackets), 1)
 
 
+class TestExplicitRepeatWorkflow(unittest.TestCase):
+    """Tests for explicit [ ] repeat and explicit V volta APIs."""
+
+    def test_plain_repeat_export_has_no_n1_n2(self):
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_repeat_bracket(1, 8)
+
+        body = url_body(prog)
+        self.assertIn('{', body)
+        self.assertIn('}', body)
+        self.assertNotIn('N1', body)
+        self.assertNotIn('N2', body)
+        self.assertTrue(prog.volta_brackets[0].is_repeat_only())
+
+    def test_plain_repeat_navigation_jumps_back_to_start(self):
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_repeat_bracket(1, 8)
+        self.assertEqual(prog.navigate_right_from_measure(8), 1)
+
+    def test_explicit_volta_hidden_range_and_navigation(self):
+        prog = make_prog()
+        for m in range(1, 17):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_volta_bracket(1, 8, 7)
+
+        vb = prog.volta_brackets[0]
+        self.assertFalse(vb.is_repeat_only())
+        self.assertEqual(vb.hidden_range(), (9, 14))
+        self.assertTrue(prog.is_in_hidden_range(9))
+        self.assertFalse(prog.is_in_hidden_range(8))
+        self.assertFalse(prog.is_in_hidden_range(15))
+        self.assertEqual(prog.navigate_right_from_measure(8), 15)
+        self.assertEqual(prog.navigate_left_from_measure(15), 8)
+
+        body = url_body(prog)
+        self.assertIn('N1', body)
+        self.assertIn('N2', body)
+
+
 class TestJsonRoundTrip(unittest.TestCase):
     """Tests that serialisation / deserialisation preserves all data."""
 
@@ -1470,6 +1513,28 @@ class TestChordRootPcAndIsSus(unittest.TestCase):
 
     def test_not_sus_maj7(self):
         self.assertFalse(Chord('Dmaj7').is_sus)
+
+
+class TestTransposeHelpers(unittest.TestCase):
+    """Tests for chord/key transposition helper methods."""
+
+    def test_transpose_chord_name_handles_slash_chords(self):
+        prog = make_prog(key='C')
+        self.assertEqual(prog.transpose_chord_name('C/E', 2), 'D/F#')
+
+    def test_transpose_whole_progression_updates_major_key(self):
+        prog = make_prog(key='C')
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        prog.transpose(1)
+        self.assertEqual(prog.key, 'Db')
+        self.assertEqual(prog.items[0].chord.name, 'C#maj7')
+
+    def test_transpose_whole_progression_updates_minor_key(self):
+        prog = make_prog(key='C-')
+        prog.add_chord_by_name('Cm7', 1, 1)
+        prog.transpose(2)
+        self.assertEqual(prog.key, 'D-')
+        self.assertEqual(prog.items[0].chord.name, 'Dm7')
 
 
 if __name__ == '__main__':

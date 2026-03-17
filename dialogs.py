@@ -618,6 +618,9 @@ def transpose_dialog(parent=None) -> dict | None:
         return {'semitones': semitones} if semitones is not None else None
     except Exception:
         return None
+
+
+def insert_chord_dialog(parent=None, default='C') -> str | None:
     """
     Show a chord-entry dialog that lets the user type a chord name directly
     or build one from root + quality + alteration selectors.

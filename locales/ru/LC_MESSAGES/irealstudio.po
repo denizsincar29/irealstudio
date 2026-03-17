@@ -583,6 +583,12 @@ msgstr "Тактовый размер:"
 msgid "Key:"
 msgstr "Тональность:"
 
+msgid "Mode:"
+msgstr "Лад:"
+
+msgid "major"
+msgstr "мажор"
+
 msgid "Style:"
 msgstr "Стиль:"
 
@@ -597,6 +603,9 @@ msgstr "Функция:"
 
 msgid "Type a chord name directly, or choose root/quality above."
 msgstr "Введите название аккорда или выберите тонику и функцию выше."
+
+msgid "Type a chord name directly, or choose root/quality/alterations above."
+msgstr "Введите название аккорда или выберите тонику, функцию и альтерации выше."
 
 # --- menu items ---
 msgid "&New Project"
@@ -1063,8 +1072,8 @@ msgstr[1] "Транспонировано на {n} полутона, новая 
 msgstr[2] "Транспонировано на {n} полутонов, новая тональность: {key}"
 
 # --- Transpose menu item ---
-msgid "&Transpose...\tCtrl+T"
-msgstr "&Транспонировать...\tCtrl+T"
+msgid "&Transpose..."
+msgstr "&Транспонировать..."
 
 # --- repeat / volta ---
 msgid "Repeat start set at measure {n}"

@@ -324,9 +324,11 @@ class MenuMixin:
         result = transpose_dialog(parent=self._frame)
         if result is None:
             return
-        semitones = result.get('semitones', 0)
-        if semitones == 0:
+        raw_semitones = int(result.get('semitones', 0))
+        if raw_semitones % 12 == 0:
             return
+        semitone_abs = abs(raw_semitones) % 12
+        semitones = semitone_abs if raw_semitones > 0 else -semitone_abs
         sel_items = self._chords_in_selection()
         self._push_undo()
         if sel_items:

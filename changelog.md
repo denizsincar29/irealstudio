@@ -15,7 +15,7 @@ Fixed autoupdater
 ## v0.1.8 - 2026-03-16
 
 - Fixed app compilation.
-- Fixed Github workflow.
+- Fixed GitHub workflow.
 
 ## v0.1.7 - 2026-03-16
 

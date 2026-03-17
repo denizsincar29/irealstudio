@@ -1488,7 +1488,7 @@ class ChordProgression:
         root falls on an enharmonic, the flat spelling is chosen (matching iReal
         Pro's major-key convention).
         """
-        from dialogs import key_to_root_mode, root_mode_to_key, KEY_ROOT_NOTES  # lazy import
+        from dialogs import key_to_root_mode, root_mode_to_key  # lazy import
         root, mode = key_to_root_mode(self.key)
         if root in NOTE_NAMES:
             pc = NOTE_NAMES.index(root)

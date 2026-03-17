@@ -705,6 +705,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
     def _mark_dirty(self) -> None:
         self._is_dirty = True
 
+    def _clear_pending_repeat_markers(self) -> None:
+        self._pending_repeat_start = None
+        self._pending_repeat_end = None
+
     def undo(self) -> None:
         if not self._undo_stack:
             self.speak(_('Nothing to undo'))
@@ -716,6 +720,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             min(self.cursor.measure, max(self.progression.last_measure(), 1)),
             1, self.progression.time_signature,
         )
+        self._clear_pending_repeat_markers()
         self._mark_dirty()
         self.speak(_('Undo'))
 
@@ -726,6 +731,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._undo_stack.append(self.progression.to_json())
         snapshot = self._redo_stack.pop()
         self.progression = ChordProgression.from_json(snapshot)
+        self._clear_pending_repeat_markers()
         self._mark_dirty()
         self.speak(_('Redo'))
 
