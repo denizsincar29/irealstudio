@@ -56,6 +56,9 @@ LOG_FILE = "irealstudio.log"
 LOG_RING_SIZE = 100       # entries kept in the in-memory ring buffer
 LOG_SPEAK_RECENT = 5      # entries spoken by Ctrl+L
 
+# Safety cap for navigation loops (prevents infinite loops in degenerate progressions)
+_MAX_NAV_ITERATIONS = 1000
+
 _log_ring: collections.deque[str] = collections.deque(maxlen=LOG_RING_SIZE)
 
 
@@ -1086,30 +1089,49 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.cursor = Position(new_m, 1, ts)
         elif by_beat:
             if direction == 'right':
-                self.cursor = self.cursor + 1
+                new_pos = self.cursor + 1
             else:
-                self.cursor = self.cursor - 1
+                new_pos = self.cursor - 1
+            # In primary mode, skip over virtual/hidden territory
+            new_m = self.progression.primary_skip_past_virtual(
+                self.cursor.measure, new_pos.measure)
+            if new_m != new_pos.measure:
+                if direction == 'right':
+                    self.cursor = Position(new_m, 1, ts)
+                else:
+                    # new_m is after_repeat; navigate_left_from_measure(new_m+1)
+                    # gives us the last primary measure before the virtual block.
+                    self.cursor = Position(
+                        self.progression.navigate_left_from_measure(new_m + 1),
+                        ts.numerator, ts)
+            else:
+                self.cursor = new_pos
         else:
             if direction == 'right':
                 nxt = self.progression.find_next_chord_to_right(self.cursor)
-                if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
-                    self.cursor = nxt.position
-                elif nxt:
-                    new_m = nxt.position.measure
-                    for _ in range(1000):
-                        if not self.progression.is_in_hidden_range(new_m):
-                            break
-                        new_m = self.progression.navigate_right_from_measure(new_m)
-                    search = Position(max(new_m - 1, 1), ts.numerator, ts)
-                    visible = self.progression.find_next_chord_to_right(search)
-                    self.cursor = visible.position if visible else Position(new_m, 1, ts)
+                if nxt:
+                    adj_m = self.progression.primary_skip_past_virtual(
+                        self.cursor.measure, nxt.position.measure)
+                    if adj_m != nxt.position.measure:
+                        self.cursor = Position(adj_m, 1, ts)
+                    elif not self.progression.is_in_hidden_range(nxt.position.measure):
+                        self.cursor = nxt.position
+                    else:
+                        new_m = nxt.position.measure
+                        for _ in range(_MAX_NAV_ITERATIONS):  # safety cap
+                            if not self.progression.is_in_hidden_range(new_m):
+                                break
+                            new_m = self.progression.navigate_right_from_measure(new_m)
+                        search = Position(max(new_m - 1, 1), ts.numerator, ts)
+                        visible = self.progression.find_next_chord_to_right(search)
+                        self.cursor = visible.position if visible else Position(new_m, 1, ts)
             else:
                 prv = self.progression.find_last_chord_to_left(self.cursor)
                 if prv and not self.progression.is_in_hidden_range(prv.position.measure):
                     self.cursor = prv.position
                 elif prv:
                     new_m = prv.position.measure
-                    for _ in range(1000):
+                    for _ in range(_MAX_NAV_ITERATIONS):  # safety cap
                         if not self.progression.is_in_hidden_range(new_m):
                             break
                         new_m = self.progression.navigate_left_from_measure(new_m)
@@ -1123,6 +1145,23 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self._announce_position(announce_section=new_section != old_section)
         else:
             self._announce_position(announce_section=False)
+        self._maybe_play_chord_on_nav()
+
+    def navigate_repeat(self, direction: str) -> None:
+        """Move the cursor up or down between repeats.
+
+        *direction* must be ``'down'`` (next repeat) or ``'up'`` (previous
+        repeat).  The cursor stays at the same beat within the measure.
+        """
+        ts = self.progression.time_signature
+        if direction == 'down':
+            dest = self.progression.navigate_down_from_measure(self.cursor.measure)
+        else:
+            dest = self.progression.navigate_up_from_measure(self.cursor.measure)
+        if dest is None:
+            return
+        self.cursor = Position(dest, self.cursor.beat, ts)
+        self._announce_position(announce_section=False)
         self._maybe_play_chord_on_nav()
 
     def navigate_home(self) -> None:
@@ -1201,14 +1240,33 @@ class App(MenuMixin, KeysMixin, IOMixin):
 
     def _announce_position(self, announce_section: bool = False) -> None:
         parts: list = []
+        m = self.cursor.measure
         if announce_section:
-            sm = self.progression.get_section_at_measure(self.cursor.measure)
+            sm = self.progression.get_section_at_measure(m)
             if sm:
                 parts.append(self._section_name(sm))
-        chords_here = self.progression.find_chords_at_position(self.cursor)
+        # Chord lookup: resolve virtual measures to their real counterpart
+        real_m = self.progression.resolve_virtual_measure(m)
+        lookup_pos = (self.cursor if real_m == m
+                      else Position(real_m, self.cursor.beat,
+                                    self.progression.time_signature))
+        chords_here = self.progression.find_chords_at_position(lookup_pos)
         if chords_here:
             parts.append(chords_here[0].chord_name_spoken())
-        parts.append(_('bar {m} beat {b}').format(m=self.cursor.measure, b=self.cursor.beat))
+        parts.append(_('bar {m} beat {b}').format(m=m, b=self.cursor.beat))
+        # Annotate repeat context for virtual territory
+        repeat_num = self.progression.get_repeat_num_for_measure(m)
+        if repeat_num > 0:
+            # Check whether we are in ending 2 specifically
+            in_ending2 = any(
+                vb.is_complete() and not vb.is_repeat_only()
+                and vb.ending2_start <= m < vb.after_repeat_measure()
+                for vb in self.progression.volta_brackets
+            )
+            if in_ending2:
+                parts.append(_('ending 2'))
+            else:
+                parts.append(_('repeat {n}').format(n=repeat_num + 1))
         self.speak(' '.join(parts))
 
     def _announce_position_verbose(self) -> None:

@@ -456,6 +456,9 @@ msgstr "Первая вольта"
 msgid "ending 2"
 msgstr "Вторая вольта"
 
+msgid "repeat {n}"
+msgstr "повторение {n}"
+
 # --- log ---
 msgid "Log is empty"
 msgstr "Журнал пуст"

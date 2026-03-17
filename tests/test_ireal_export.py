@@ -277,12 +277,16 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         self.assertNotIn('N2', body)
         self.assertTrue(prog.volta_brackets[0].is_repeat_only())
 
-    def test_plain_repeat_navigation_jumps_back_to_start(self):
+    def test_plain_repeat_navigation_jumps_past_repeat(self):
         prog = make_prog()
         for m in range(1, 9):
             prog.add_chord_by_name('Cmaj7', m, 1)
         prog.add_repeat_bracket(1, 8)
-        self.assertEqual(prog.navigate_right_from_measure(8), 1)
+        vb = prog.volta_brackets[0]
+        # 2 repeats of 8 bars → after_repeat = 17
+        self.assertEqual(vb.after_repeat_measure(), 17)
+        # Primary navigation at ending1_end should jump straight to after_repeat
+        self.assertEqual(prog.navigate_right_from_measure(8), 17)
 
     def test_explicit_volta_hidden_range_and_navigation(self):
         prog = make_prog()
@@ -296,8 +300,12 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         self.assertTrue(prog.is_in_hidden_range(9))
         self.assertFalse(prog.is_in_hidden_range(8))
         self.assertFalse(prog.is_in_hidden_range(15))
-        self.assertEqual(prog.navigate_right_from_measure(8), 15)
-        self.assertEqual(prog.navigate_left_from_measure(15), 8)
+        # after_repeat: ending2_start(15) + ending_length(2) = 17
+        self.assertEqual(vb.after_repeat_measure(), 17)
+        # Primary navigation at ending1_end must jump to after_repeat (skip volta2)
+        self.assertEqual(prog.navigate_right_from_measure(8), 17)
+        # From volta2 (virtual territory) left must NOT cross back to primary
+        self.assertEqual(prog.navigate_left_from_measure(15), 14)
 
         body = url_body(prog)
         self.assertIn('N1', body)
@@ -384,19 +392,154 @@ class TestHiddenRangeNavigation(unittest.TestCase):
         self.assertFalse(prog.is_in_hidden_range(vb.ending2_start))
         self.assertFalse(prog.is_in_hidden_range(vb.repeat_start))
 
-    def test_navigate_right_skips_hidden(self):
+    def test_navigate_right_jumps_to_after_repeat(self):
         prog = self._prog_with_volta()
         vb = prog.volta_brackets[0]
-        # From ending1_end, navigation should jump to ending2_start
+        # Primary mode: from ending1_end should jump to after_repeat, not ending2_start
         dest = prog.navigate_right_from_measure(vb.ending1_end)
-        self.assertEqual(dest, vb.ending2_start)
+        self.assertEqual(dest, vb.after_repeat_measure())
+        self.assertNotEqual(dest, vb.ending2_start)
 
-    def test_navigate_left_skips_hidden(self):
+    def test_navigate_left_in_virtual_clamps_at_context_start(self):
         prog = self._prog_with_volta()
         vb = prog.volta_brackets[0]
-        # From ending2_start, navigation should jump back to ending1_end
+        # From ending2_start (virtual territory) left goes to prev measure, not ending1_end
         dest = prog.navigate_left_from_measure(vb.ending2_start)
-        self.assertEqual(dest, vb.ending1_end)
+        self.assertEqual(dest, vb.ending2_start - 1)  # 14
+        # From context start (hidden body start) left is clamped: does not cross to primary
+        context_start = vb.ending1_end + 1  # 9
+        dest = prog.navigate_left_from_measure(context_start)
+        self.assertEqual(dest, context_start)  # clamped
+
+
+class TestRepeatNavigation(unittest.TestCase):
+    """Tests for down/up repeat navigation and virtual measure helpers."""
+
+    def _plain_prog(self) -> ChordProgression:
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_repeat_bracket(1, 8)  # body_length=8, 2 repeats
+        return prog
+
+    def _volta_prog(self) -> ChordProgression:
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        for m in range(15, 17):
+            prog.add_chord_by_name('G7', m, 1)
+        prog.add_volta_bracket(1, 8, 7)
+        return prog
+
+    # --- plain repeat ---
+
+    def test_plain_after_repeat_measure(self):
+        prog = self._plain_prog()
+        vb = prog.volta_brackets[0]
+        self.assertEqual(vb.after_repeat_measure(), 17)
+
+    def test_plain_plain_virtual_range(self):
+        prog = self._plain_prog()
+        vb = prog.volta_brackets[0]
+        self.assertEqual(vb.plain_virtual_range(), (9, 16))
+
+    def test_plain_navigate_down_primary_body(self):
+        prog = self._plain_prog()
+        self.assertEqual(prog.navigate_down_from_measure(4), 12)
+
+    def test_plain_navigate_down_from_last_copy(self):
+        prog = self._plain_prog()
+        # Already in last virtual copy (measure 12 is in [9,16]); next would be 20 ≥ 17 → None
+        self.assertIsNone(prog.navigate_down_from_measure(12))
+
+    def test_plain_navigate_up_from_virtual(self):
+        prog = self._plain_prog()
+        self.assertEqual(prog.navigate_up_from_measure(12), 4)
+
+    def test_plain_navigate_up_from_primary(self):
+        prog = self._plain_prog()
+        self.assertIsNone(prog.navigate_up_from_measure(4))
+
+    def test_plain_navigate_left_from_after_repeat_primary(self):
+        prog = self._plain_prog()
+        # Bar 17 is primary; going left skips virtual range [9,16] → lands at 8
+        self.assertEqual(prog.navigate_left_from_measure(17), 8)
+
+    def test_plain_resolve_virtual(self):
+        prog = self._plain_prog()
+        # Bar 9 → bar 1, bar 16 → bar 8
+        self.assertEqual(prog.resolve_virtual_measure(9), 1)
+        self.assertEqual(prog.resolve_virtual_measure(16), 8)
+        self.assertEqual(prog.resolve_virtual_measure(5), 5)  # primary: unchanged
+
+    def test_plain_get_repeat_num(self):
+        prog = self._plain_prog()
+        self.assertEqual(prog.get_repeat_num_for_measure(4), 0)   # primary
+        self.assertEqual(prog.get_repeat_num_for_measure(12), 1)  # virtual copy 1
+
+    def test_plain_primary_skip_past_virtual(self):
+        prog = self._plain_prog()
+        # From primary (8), candidate in virtual (9) → skip to after_repeat (17)
+        self.assertEqual(prog.primary_skip_past_virtual(8, 9), 17)
+        # From virtual (12), candidate still in virtual (13) → no skip
+        self.assertEqual(prog.primary_skip_past_virtual(12, 13), 13)
+
+    # --- volta repeat ---
+
+    def test_volta_after_repeat_measure(self):
+        prog = self._volta_prog()
+        vb = prog.volta_brackets[0]
+        # ending2_start=15, ending_length=2 → 17
+        self.assertEqual(vb.after_repeat_measure(), 17)
+
+    def test_volta_navigate_down_body(self):
+        prog = self._volta_prog()
+        # Bar 4 in body → bar 4 + total_length(8) = 12 (hidden)
+        self.assertEqual(prog.navigate_down_from_measure(4), 12)
+
+    def test_volta_navigate_down_ending1(self):
+        prog = self._volta_prog()
+        # Ending 1 starts at 7; bar 7 → bar 15 (ending 2 start)
+        self.assertEqual(prog.navigate_down_from_measure(7), 15)
+
+    def test_volta_navigate_down_already_in_repeat2(self):
+        prog = self._volta_prog()
+        self.assertIsNone(prog.navigate_down_from_measure(15))
+
+    def test_volta_navigate_up_hidden(self):
+        prog = self._volta_prog()
+        # Hidden body start=9, total_length=8 → 9-8=1
+        self.assertEqual(prog.navigate_up_from_measure(9), 1)
+
+    def test_volta_navigate_up_ending2(self):
+        prog = self._volta_prog()
+        # Bar 15 (ending 2 start) → bar 7 (ending 1 start)
+        self.assertEqual(prog.navigate_up_from_measure(15), 7)
+
+    def test_volta_resolve_hidden(self):
+        prog = self._volta_prog()
+        # Bar 9 (hidden) → bar 1; bar 14 → bar 6
+        self.assertEqual(prog.resolve_virtual_measure(9), 1)
+        self.assertEqual(prog.resolve_virtual_measure(14), 6)
+
+    def test_volta_get_repeat_num_primary(self):
+        prog = self._volta_prog()
+        self.assertEqual(prog.get_repeat_num_for_measure(4), 0)
+
+    def test_volta_get_repeat_num_virtual(self):
+        prog = self._volta_prog()
+        self.assertEqual(prog.get_repeat_num_for_measure(12), 1)
+        self.assertEqual(prog.get_repeat_num_for_measure(15), 1)
+
+    def test_volta_get_virtual_context(self):
+        prog = self._volta_prog()
+        # Primary: None
+        self.assertIsNone(prog.get_virtual_context(8))
+        # Virtual territory [9,16]: returns (9, 16)
+        self.assertEqual(prog.get_virtual_context(9), (9, 16))
+        self.assertEqual(prog.get_virtual_context(15), (9, 16))
+        # After repeat: None
+        self.assertIsNone(prog.get_virtual_context(17))
 
 
 class TestNoteDeduplication(unittest.TestCase):
