@@ -1,5 +1,5 @@
 # Task
-1. Cm7 can have normal 11, but not sharp 11. Can you make detection of C minor 11? So it has minor third, fifth, seventh, optional ninth and 11. If there is no third, than it's sus.
-2. When you select some cords and copy them, only the last cord is copied. This is a bug.
-3. When pressing R while recording, it says "already active" instead of stopping the recording. This is a bug. Space also must stop the recording.
-4. When you first open the app, the last project must be opened. If no last project, show new project dialog right away.
+1. When exiting, send all notes off to prevent hanging notes.
+2. There are some major issues on how IReal pro format is exported. Read [IReal pro format specification](https://www.irealpro.com/ireal-pro-custom-chord-chart-protocol) and fix the export.
+3. Why sometimes the word unknown comes in composer name? Fix it. E.g. when composer name is "Sincar Deniz Abdullahovich", it shows "Unknown Sincar Deniz Abdullahovich".
+4. Make a debug export feature where if you specify file type .txt, it will export non url encoded url without any html.
