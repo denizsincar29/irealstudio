@@ -462,11 +462,17 @@ class VoltaBracket:
     Measures ending1_end+1 .. ending2_start-1 are 'hidden' (empty in the
     ChordProgression object) – they represent the body of the repeated section
     and are NOT written to iReal Pro output.
+
+    For plain repeats (is_repeat_only), *num_repeats* controls how many times
+    the body plays (2–4).  The virtual copies are in the range
+    [ending1_end+1, after_repeat_measure()-1]; they are reachable via linear
+    (Ctrl/Alt+left/right, by-beat) navigation and the Down/Up arrow repeat-jump.
     """
     repeat_start: int       # first measure of the repeated section (where { goes)
     ending1_start: int      # first measure of ending 1  (N1)
     ending1_end: int = 0    # last measure of ending 1   (where } goes); 0 = not set
     ending2_start: int = 0  # first measure of ending 2  (N2); 0 = not set
+    num_repeats: int = 2    # total times the body plays (2–4; plain repeats only)
 
     def is_complete(self) -> bool:
         return self.ending1_end > 0 and self.ending2_start > 0
@@ -476,7 +482,12 @@ class VoltaBracket:
         return self.is_complete() and self.ending1_start == self.ending1_end + 1
 
     def hidden_range(self) -> tuple[int, int] | None:
-        """Return the (start, end) measure range that is hidden between endings."""
+        """Return the (start, end) measure range that is hidden between endings.
+
+        For volta brackets this is the body copy between ending 1 and ending 2.
+        Plain repeats have no hidden range in this sense (virtual copies are
+        tracked separately via :meth:`plain_virtual_range`).
+        """
         if not self.is_complete():
             return None
         # measures between end of ending 1 and start of ending 2
@@ -486,21 +497,51 @@ class VoltaBracket:
             return None
         return hidden_start, hidden_end
 
+    def after_repeat_measure(self) -> int:
+        """Return the first measure *after* the entire repeat structure.
+
+        For a plain repeat this is ``ending1_end + 1 + body_length * (num_repeats - 1)``.
+        For a volta bracket it is ``ending2_start + ending_length``.
+        """
+        if self.is_repeat_only():
+            body_length = self.ending1_end - self.repeat_start + 1
+            return self.ending1_end + 1 + body_length * (self.num_repeats - 1)
+        else:
+            ending_length = self.ending1_end - self.ending1_start + 1
+            return self.ending2_start + ending_length
+
+    def plain_virtual_range(self) -> tuple[int, int] | None:
+        """For plain repeats, return the (start, end) of all virtual copies.
+
+        Virtual copies are measures that are navigated via Down-arrow only and
+        are never written to the iReal Pro URL.  Returns *None* for volta
+        brackets or when num_repeats < 2.
+        """
+        if not self.is_repeat_only() or self.num_repeats < 2:
+            return None
+        body_length = self.ending1_end - self.repeat_start + 1
+        start = self.ending1_end + 1
+        end = self.ending1_end + body_length * (self.num_repeats - 1)
+        return start, end
+
     def to_dict(self) -> dict:
         return {
             'repeat_start': self.repeat_start,
             'ending1_start': self.ending1_start,
             'ending1_end': self.ending1_end,
             'ending2_start': self.ending2_start,
+            'num_repeats': self.num_repeats,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> VoltaBracket:
+        num_repeats = max(2, min(4, d.get('num_repeats', 2)))  # clamp to valid range 2–4
         return cls(
             d['repeat_start'],
             d['ending1_start'],
             d.get('ending1_end', 0),
             d.get('ending2_start', 0),
+            num_repeats,
         )
 
 
@@ -1215,34 +1256,179 @@ class ChordProgression:
     # Navigation helpers
     # -----------------------------------------------------------------------
 
-    def navigate_right_from_measure(self, measure: int) -> int:
-        """
-        Given a measure, return the next measure to navigate to.
-        Skips hidden ranges; at end of ending 1 jumps to ending 2.
+    def get_virtual_context(self, measure: int) -> tuple[int, int] | None:
+        """Return ``(start, end)`` of the virtual territory containing *measure*.
+
+        Virtual territory spans from ``ending1_end + 1`` up to (but not
+        including) ``after_repeat_measure()``.  For a **volta** bracket this
+        includes the hidden body *and* the second-ending measures; for a
+        **plain** repeat it covers all virtual copies of the body.
+
+        .. note::
+            This is a superset of :meth:`is_in_virtual_range`: ending-2
+            measures are included here (they are part of the virtual span of
+            the overall repeat structure) even though they are *stored* in the
+            chord array and therefore returned as ``False`` by
+            ``is_in_virtual_range()``.
+
+        Returns *None* when *measure* is in primary (non-virtual) territory.
         """
         for vb in self.volta_brackets:
-            if vb.is_complete() and measure == vb.ending1_end:
-                return vb.ending2_start
-        # Skip hidden ranges
-        next_m = measure + 1
-        while self.is_in_hidden_range(next_m):
-            next_m += 1
-        return next_m
+            if not vb.is_complete():
+                continue
+            after = vb.after_repeat_measure()
+            virtual_start = vb.ending1_end + 1
+            if virtual_start <= measure < after:
+                return virtual_start, after - 1
+        return None
+
+    def navigate_down_from_measure(self, measure: int) -> int | None:
+        """Return the equivalent measure in the *next* repeat, or *None*.
+
+        For plain repeats the body shifts by one ``body_length``.
+        For volta brackets the body maps to the hidden copy; ending 1 maps to
+        ending 2.  Already in the last repeat → returns *None*.
+        """
+        for vb in self.volta_brackets:
+            if not vb.is_complete():
+                continue
+            after = vb.after_repeat_measure()
+            if vb.is_repeat_only():
+                body_length = vb.ending1_end - vb.repeat_start + 1
+                if vb.repeat_start <= measure < after:
+                    dest = measure + body_length
+                    if dest < after:
+                        return dest
+            else:
+                total_length = vb.ending1_end - vb.repeat_start + 1
+                # Primary body → hidden body
+                if vb.repeat_start <= measure < vb.ending1_start:
+                    return measure + total_length
+                # Ending 1 → ending 2
+                if vb.ending1_start <= measure <= vb.ending1_end:
+                    return measure - vb.ending1_start + vb.ending2_start
+        return None
+
+    def navigate_up_from_measure(self, measure: int) -> int | None:
+        """Return the equivalent measure in the *previous* repeat, or *None*.
+
+        Inverse of :meth:`navigate_down_from_measure`.  Only applies when
+        *measure* is in virtual territory.
+        """
+        for vb in self.volta_brackets:
+            if not vb.is_complete():
+                continue
+            if vb.is_repeat_only():
+                body_length = vb.ending1_end - vb.repeat_start + 1
+                vr = vb.plain_virtual_range()
+                if vr and vr[0] <= measure <= vr[1]:
+                    return measure - body_length
+            else:
+                total_length = vb.ending1_end - vb.repeat_start + 1
+                hidden_start = vb.ending1_end + 1
+                hidden_end = vb.ending2_start - 1
+                # Hidden body → primary body
+                if hidden_start <= measure <= hidden_end:
+                    return measure - total_length
+                # Ending 2 → ending 1
+                ending2_end = vb.after_repeat_measure() - 1
+                if vb.ending2_start <= measure <= ending2_end:
+                    return measure - vb.ending2_start + vb.ending1_start
+        return None
+
+    def resolve_virtual_measure(self, measure: int) -> int:
+        """Map a virtual/hidden measure to its real (stored) counterpart.
+
+        Used when looking up chords at a virtual position so that the chords
+        stored for the primary repeat body are returned.
+        """
+        for vb in self.volta_brackets:
+            if not vb.is_complete():
+                continue
+            if vb.is_repeat_only():
+                body_length = vb.ending1_end - vb.repeat_start + 1
+                vr = vb.plain_virtual_range()
+                if vr and vr[0] <= measure <= vr[1]:
+                    return vb.repeat_start + (measure - vb.repeat_start) % body_length
+            else:
+                total_length = vb.ending1_end - vb.repeat_start + 1
+                hidden_start = vb.ending1_end + 1
+                hidden_end = vb.ending2_start - 1
+                if hidden_start <= measure <= hidden_end:
+                    return measure - total_length
+        return measure
+
+    def get_repeat_num_for_measure(self, measure: int) -> int:
+        """Return the 0-indexed repeat number (0 = primary, 1 = repeat 2, …)."""
+        for vb in self.volta_brackets:
+            if not vb.is_complete():
+                continue
+            if vb.is_repeat_only():
+                body_length = vb.ending1_end - vb.repeat_start + 1
+                if vb.repeat_start <= measure <= vb.ending1_end:
+                    return 0
+                vr = vb.plain_virtual_range()
+                if vr and vr[0] <= measure <= vr[1]:
+                    return (measure - vb.repeat_start) // body_length
+            else:
+                if vb.repeat_start <= measure <= vb.ending1_end:
+                    return 0
+                after = vb.after_repeat_measure()
+                if vb.ending1_end + 1 <= measure < after:
+                    return 1
+        return 0
+
+    def primary_skip_past_virtual(self, cursor_measure: int, candidate_measure: int) -> int:
+        """In primary navigation mode, if *candidate_measure* falls inside
+        virtual territory, return ``after_repeat_measure()`` instead.
+
+        When the cursor is already in virtual territory the candidate is
+        returned unchanged (we allow natural navigation within repeats).
+        """
+        if self.get_virtual_context(cursor_measure) is not None:
+            return candidate_measure  # already in virtual: no skip
+        for vb in self.volta_brackets:
+            if not vb.is_complete():
+                continue
+            after = vb.after_repeat_measure()
+            if vb.ending1_end + 1 <= candidate_measure < after:
+                return after
+        return candidate_measure
+
+    def is_in_virtual_range(self, measure: int) -> bool:
+        """Return True if *measure* falls in any virtual territory.
+
+        Virtual territory consists of the hidden body between volta endings
+        (:meth:`is_in_hidden_range`) and the plain-repeat virtual copies
+        (:meth:`_is_plain_virtual`).  Ending-2 bars are *real* stored bars
+        and therefore return ``False``.
+        """
+        return self.is_in_hidden_range(measure) or self._is_plain_virtual(measure)
+
+    def navigate_right_from_measure(self, measure: int) -> int:
+        """Return the next measure to navigate to (single step right).
+
+        Navigation is now strictly linear — every bar including virtual
+        territory is reachable with plain left/right movement.
+        """
+        return measure + 1
 
     def navigate_left_from_measure(self, measure: int) -> int:
+        """Return the previous measure to navigate to (single step left).
+
+        Navigation is now strictly linear — every bar including virtual
+        territory is reachable with plain left/right movement.
         """
-        Given a measure, return the previous measure to navigate to.
-        At ending2_start jumps back to ending1_end.
-        """
+        return max(1, measure - 1)
+
+    def _is_plain_virtual(self, measure: int) -> bool:
+        """Return True if *measure* falls inside a plain repeat's virtual range."""
         for vb in self.volta_brackets:
-            if vb.is_complete() and not vb.is_repeat_only() and measure == vb.ending2_start:
-                return vb.ending1_end
-        prev_m = measure - 1
-        if prev_m < 1:
-            return 1
-        while self.is_in_hidden_range(prev_m):
-            prev_m -= 1
-        return max(1, prev_m)
+            if vb.is_repeat_only():
+                vr = vb.plain_virtual_range()
+                if vr and vr[0] <= measure <= vr[1]:
+                    return True
+        return False
 
     def last_measure(self) -> int:
         """Return the last measure that has content (chords or section marks)."""

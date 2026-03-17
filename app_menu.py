@@ -403,7 +403,8 @@ class MenuMixin:
         sm_menu.Append(_CMD_INSERT_SM_I, _("&Intro") + "\tCtrl+Shift+I")
         sm_menu.Append(_CMD_INSERT_SM_S, _("&Segno") + "\tCtrl+Shift+S")
         sm_menu.Append(_CMD_INSERT_SM_Q, _("&Coda") + "\tCtrl+Shift+Q")
-        sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine (end mark)") + "\tCtrl+Shift+F")
+        # Fine (end mark) is commented out pending clarification of its iReal Pro semantics
+        # sm_menu.Append(_CMD_INSERT_SM_F, _("&Fine (end mark)") + "\tCtrl+Shift+F")
         insert_menu.AppendSubMenu(sm_menu, _("&Section Mark"))
 
         insert_menu.Append(_CMD_INSERT_VOLTA, _("&Volta / Ending") + "\tV")
@@ -549,8 +550,9 @@ class MenuMixin:
                          id=_CMD_INSERT_SM_S)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('q'),
                          id=_CMD_INSERT_SM_Q)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('f'),
-                         id=_CMD_INSERT_SM_F)
+        # Fine binding commented out along with menu item
+        # self._frame.Bind(wx.EVT_MENU, lambda e: self.add_section_mark('f'),
+        #                  id=_CMD_INSERT_SM_F)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.add_volta(),
                          id=_CMD_INSERT_VOLTA)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.toggle_no_chord(),

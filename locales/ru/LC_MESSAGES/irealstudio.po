@@ -456,6 +456,9 @@ msgstr "Первая вольта"
 msgid "ending 2"
 msgstr "Вторая вольта"
 
+msgid "repeat {n}"
+msgstr "повторение {n}"
+
 # --- log ---
 msgid "Log is empty"
 msgstr "Журнал пуст"
@@ -1110,3 +1113,81 @@ msgstr "Повтор задан: {start}–{end}"
 
 msgid "{msg}. If you need endings, move to ending 1 and press V."
 msgstr "{msg}. Если нужны окончания, перейдите к окончанию 1 и нажмите V."
+
+# --- chord edit menu item ---
+msgid "&Edit Chord..."
+msgstr "&Редактировать аккорд..."
+
+# --- chord edit feedback ---
+msgid "No chord to edit"
+msgstr "Нет аккорда для редактирования"
+
+msgid "Edited {name}"
+msgstr "Аккорд отредактирован: {name}"
+
+# --- chord insertion dialog ---
+msgid "Alterations:"
+msgstr "Альтерации:"
+
+# --- CLI prompts (key / mode selection) ---
+msgid "Key root (C, Db, D, Eb, E, F, Gb, G, Ab, A, Bb, B):"
+msgstr "Тоника (C, Db, D, Eb, E, F, Gb, G, Ab, A, Bb, B):"
+
+msgid "Mode (major/minor):"
+msgstr "Лад (major/minor):"
+
+# --- updater dialogs ---
+msgid "Update Check Failed"
+msgstr "Ошибка проверки обновлений"
+
+msgid "Update Failed"
+msgstr "Ошибка обновления"
+
+msgid "No Updates Found"
+msgstr "Обновлений не найдено"
+
+msgid "Could not reach GitHub. Please check your internet connection."
+msgstr "Не удалось подключиться к GitHub. Проверьте интернет-соединение."
+
+msgid ""
+"A new version is available: {tag}\n"
+"(current: v{current})\n"
+"\n"
+msgstr ""
+"Доступна новая версия: {tag}\n"
+"(текущая: v{current})\n"
+"\n"
+
+msgid "Download and install the update now?"
+msgstr "Загрузить и установить обновление сейчас?"
+
+msgid "Open the releases page to download?"
+msgstr "Открыть страницу загрузок?"
+
+msgid "You are running the latest version (v{version})."
+msgstr "У вас установлена последняя версия (v{version})."
+
+msgid "Downloading Update"
+msgstr "Загрузка обновления"
+
+msgid "Downloading {tag}..."
+msgstr "Загрузка {tag}..."
+
+msgid "Download failed: {error}"
+msgstr "Ошибка загрузки: {error}"
+
+msgid "Failed to extract the downloaded update."
+msgstr "Не удалось распаковать загруженное обновление."
+
+msgid ""
+"The update has been downloaded and will now be applied.\n"
+"The application will restart automatically."
+msgstr ""
+"Обновление загружено и будет применено.\n"
+"Приложение перезапустится автоматически."
+
+msgid "Applying Update"
+msgstr "Применение обновления"
+
+msgid "Failed to apply update: {error}"
+msgstr "Не удалось применить обновление: {error}"

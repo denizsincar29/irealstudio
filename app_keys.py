@@ -120,6 +120,15 @@ class KeysMixin:
                 else:
                     self._clear_selection()
                     self.navigate('right', by_measure=ctrl, by_beat=alt)
+        # Up/Down – navigate between repeats (enter/exit virtual territory)
+        elif key == 'down':
+            if self._recorder.state == AppState.IDLE and not shift and not ctrl and not alt:
+                self._clear_selection()
+                self.navigate_repeat('down')
+        elif key == 'up':
+            if self._recorder.state == AppState.IDLE and not shift and not ctrl and not alt:
+                self._clear_selection()
+                self.navigate_repeat('up')
         elif key == 'home' and ctrl:
             if self._recorder.state == AppState.IDLE:
                 self._clear_selection()
