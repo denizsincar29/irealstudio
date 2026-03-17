@@ -91,14 +91,18 @@ CI builds are triggered on `v*` tag pushes via `.github/workflows/release.yml`.
 Use `tag_release.py` (not git commands directly):
 
 ```bash
-# On a feature branch: prepare a draft (updates version.py, news.md, changelog.md; commits; no push)
-uv run python tag_release.py
+# 1. Write release notes into news.md (plain bullet points; no version header needed)
+# 2. On a feature branch: draft the release (updates version.py, news.md, changelog.md; commits; no push)
+uv run python tag_release.py 0.3.0
 
-# After merging to main: finalize (detects version.py > last tag → tags + pushes immediately)
+# 3. After merging to main: finalize (detects version.py > last tag → tags + pushes immediately)
 uv run python tag_release.py
 ```
 
-`version.py` is the state carrier between draft and finalize — no `.release_draft.json` file.
+**How it works:**
+- `tag_release.py VERSION` reads `news.md`, prepends `## vVERSION - DATE` if the header is missing, updates `changelog.md` and `version.py`, then commits. On a non-main branch nothing is pushed (draft). On main it also creates and pushes the tag.
+- `tag_release.py` with no argument on main: if `version.py > last tag`, finalizes immediately. Otherwise prompts interactively.
+- `news.md` is used as the GitHub Release body by the CI workflow — keep it up to date.
 
 ## Translations (Russian)
 
