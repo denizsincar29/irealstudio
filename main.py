@@ -371,8 +371,11 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._undo_stack: list[str] = []
         self._redo_stack: list[str] = []
 
-        # Clipboard (chord name string for cut/copy/paste)
+        # Clipboard (chord name string for cut/copy/paste of a single chord, or a
+        # list of {'measure_offset', 'beat', 'chord', 'bass_note'} dicts for a
+        # multi-chord selection paste)
         self._clipboard: str | None = None
+        self._selection_clipboard: list[dict] | None = None
 
         # Selection state: anchor + active end (both Positions or None)
         self._sel_anchor: Position | None = None
@@ -750,6 +753,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         chords = self.progression.find_chords_at_position(lookup_pos)
         if chords:
             self._clipboard = chords[0].chord.name
+            self._selection_clipboard = None
             self.speak(_('Copied {name}').format(name=chords[0].chord.name))
         else:
             self.speak(_('No chord at cursor'))
@@ -762,6 +766,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
         chords = self.progression.find_chords_at_position(lookup_pos)
         if chords:
             self._clipboard = chords[0].chord.name
+            self._selection_clipboard = None
             self._push_undo()
             self.progression.delete_chord_at(lookup_pos)
             self._mark_dirty()
@@ -770,17 +775,36 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.speak(_('No chord at cursor'))
 
     def paste_chord(self) -> None:
-        if self._clipboard is None:
+        if self._selection_clipboard is not None:
+            # Multi-chord paste: place chords using beat_from_start offsets so
+            # the first chord lands exactly at the cursor position and all
+            # others maintain their relative rhythmic distances.
+            ts = self.progression.time_signature
+            cursor_bfs = self.cursor.beat_from_start
+            self._push_undo()
+            for entry in self._selection_clipboard:
+                target_pos = self.cursor.new_from_beat_from_start(
+                    cursor_bfs + entry['bfs_offset']
+                )
+                real_m = self.progression.resolve_virtual_measure(target_pos.measure)
+                self.progression.add_chord_by_name(
+                    entry['chord'], real_m, target_pos.beat,
+                    entry.get('bass_note', ''),
+                )
+            self._mark_dirty()
+            n = len(self._selection_clipboard)
+            self.speak(ngettext('Pasted {n} chord', 'Pasted {n} chords', n).format(n=n))
+        elif self._clipboard is not None:
+            real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+            self._push_undo()
+            self.progression.add_chord_by_name(
+                self._clipboard,
+                real_m, self.cursor.beat,
+            )
+            self._mark_dirty()
+            self.speak(_('Pasted {name}').format(name=self._clipboard))
+        else:
             self.speak(_('Clipboard is empty'))
-            return
-        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
-        self._push_undo()
-        self.progression.add_chord_by_name(
-            self._clipboard,
-            real_m, self.cursor.beat,
-        )
-        self._mark_dirty()
-        self.speak(_('Pasted {name}').format(name=self._clipboard))
 
     # ------------------------------------------------------------------
     # No-chord insertion
@@ -992,19 +1016,59 @@ class App(MenuMixin, KeysMixin, IOMixin):
                 self.cursor = self.cursor - 1
         else:
             if direction == 'right':
-                nxt = self.progression.find_next_chord_to_right(self.cursor)
-                if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
-                    self.cursor = nxt.position
+                if self.progression.is_in_virtual_range(self.cursor.measure):
+                    # Mirror the virtual-aware right navigation from navigate()
+                    primary_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+                    virtual_offset = self.cursor.measure - primary_m
+                    primary_pos = Position(primary_m, self.cursor.beat, ts)
+                    nxt_primary = self.progression.find_next_chord_to_right(primary_pos)
+                    vc = self.progression.get_virtual_context(self.cursor.measure)
+                    if nxt_primary:
+                        virtual_m = nxt_primary.position.measure + virtual_offset
+                        if vc and virtual_m <= vc[1]:
+                            self.cursor = Position(virtual_m, nxt_primary.position.beat, ts)
+                        else:
+                            self.cursor = Position(self.cursor.measure + 1, 1, ts)
+                    else:
+                        self.cursor = Position(self.cursor.measure + 1, 1, ts)
+                else:
+                    nxt = self.progression.find_next_chord_to_right(self.cursor)
+                    if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
+                        self.cursor = nxt.position
             else:
-                prv = self.progression.find_last_chord_to_left(self.cursor)
-                if prv and not self.progression.is_in_hidden_range(prv.position.measure):
-                    self.cursor = prv.position
+                if self.progression.is_in_virtual_range(self.cursor.measure):
+                    # Mirror the virtual-aware left navigation from navigate()
+                    primary_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+                    virtual_offset = self.cursor.measure - primary_m
+                    primary_pos = Position(primary_m, self.cursor.beat, ts)
+                    prv_primary = self.progression.find_last_chord_to_left(primary_pos)
+                    vc = self.progression.get_virtual_context(self.cursor.measure)
+                    if prv_primary:
+                        virtual_m = prv_primary.position.measure + virtual_offset
+                        if vc and virtual_m >= vc[0]:
+                            self.cursor = Position(virtual_m, prv_primary.position.beat, ts)
+                        else:
+                            prv = self.progression.find_last_chord_to_left(self.cursor)
+                            if prv and not self.progression.is_in_hidden_range(prv.position.measure):
+                                self.cursor = prv.position
+                    else:
+                        prv = self.progression.find_last_chord_to_left(self.cursor)
+                        if prv and not self.progression.is_in_hidden_range(prv.position.measure):
+                            self.cursor = prv.position
+                else:
+                    prv = self.progression.find_last_chord_to_left(self.cursor)
+                    if prv and not self.progression.is_in_hidden_range(prv.position.measure):
+                        self.cursor = prv.position
         self._sel_active = self.cursor
         self._announce_selection()
 
     def _announce_selection(self) -> None:
         chords_sel = self._chords_in_selection()
-        chords_here = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat,
+                                    self.progression.time_signature))
+        chords_here = self.progression.find_chords_at_position(lookup_pos)
         chord_part = chords_here[0].chord_name_spoken() if chords_here else ''
         n = len(chords_sel)
         count_part = ngettext('{n} chord selected', '{n} chords selected', n).format(n=n)
@@ -1022,8 +1086,48 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if rng is None:
             return []
         start, end = rng
-        return [item for item in self.progression.items
-                if start <= item.position <= end]
+        result = []
+        seen: set[tuple[int, int]] = set()
+
+        # 1. Real (stored) items that fall directly inside the range.
+        for item in self.progression.items:
+            if start <= item.position <= end:
+                key = (item.position.measure, item.position.beat)
+                if key not in seen:
+                    result.append(item)
+                    seen.add(key)
+
+        # 2. Virtual items: chords that are *shown* inside the range because of
+        #    a plain/volta repeat, but whose canonical storage is in the primary
+        #    body.  We return them with their virtual positions so that the
+        #    caller can compute correct relative offsets for paste operations.
+        #    Pre-index items by measure to avoid O(V*N) nested scanning.
+        from chords import ProgressionItem as _PI
+        items_by_measure: dict[int, list] = {}
+        for item in self.progression.items:
+            items_by_measure.setdefault(item.position.measure, []).append(item)
+
+        for vb in self.progression.volta_brackets:
+            if not vb.is_complete():
+                continue
+            virt_start = vb.ending1_end + 1
+            virt_end = vb.after_repeat_measure() - 1
+            v_lo = max(virt_start, start.measure)
+            v_hi = min(virt_end, end.measure)
+            for vm in range(v_lo, v_hi + 1):
+                pm = self.progression.resolve_virtual_measure(vm)
+                for item in items_by_measure.get(pm, []):
+                    beat = item.position.beat
+                    vpos = Position(vm, beat, item.position.time_signature)
+                    if not (start <= vpos <= end):
+                        continue
+                    key = (vm, beat)
+                    if key not in seen:
+                        result.append(_PI(item.chord, vpos, item.bass_note))
+                        seen.add(key)
+
+        result.sort(key=lambda i: i.position)
+        return result
 
     def _select_all(self) -> None:
         items = self.progression.items
@@ -1041,22 +1145,60 @@ class App(MenuMixin, KeysMixin, IOMixin):
         if not chords:
             self.speak(_('No chords selected'))
             return
-        self._clipboard = chords[0].chord.name
-        self.speak(_('Copied {name}').format(name=chords[0].chord_name_spoken()))
+        if len(chords) == 1:
+            self._clipboard = chords[0].chord.name
+            self._selection_clipboard = None
+            self.speak(_('Copied {name}').format(name=chords[0].chord_name_spoken()))
+        else:
+            anchor_bfs = chords[0].position.beat_from_start
+            self._selection_clipboard = [
+                {
+                    'bfs_offset': item.position.beat_from_start - anchor_bfs,
+                    'chord': item.chord.name,
+                    'bass_note': item.bass_note,
+                }
+                for item in chords
+            ]
+            self._clipboard = None
+            n = len(chords)
+            self.speak(ngettext('Copied {n} chord', 'Copied {n} chords', n).format(n=n))
 
     def _cut_selection(self) -> None:
         chords = self._chords_in_selection()
         if not chords:
             self.speak(_('No chords selected'))
             return
-        self._clipboard = chords[0].chord.name
-        self._push_undo()
-        for item in chords:
-            self.progression.delete_chord_at(item.position)
-        self._mark_dirty()
+        # Copy to clipboard (single or multi-chord)
+        if len(chords) == 1:
+            self._clipboard = chords[0].chord.name
+            self._selection_clipboard = None
+        else:
+            anchor_bfs = chords[0].position.beat_from_start
+            self._selection_clipboard = [
+                {
+                    'bfs_offset': item.position.beat_from_start - anchor_bfs,
+                    'chord': item.chord.name,
+                    'bass_note': item.bass_note,
+                }
+                for item in chords
+            ]
+            self._clipboard = None
+        # Only delete non-virtual items; virtual territory is read-only
+        real_chords = [c for c in chords
+                       if not self.progression.is_in_virtual_range(c.position.measure)]
+        if real_chords:
+            self._push_undo()
+            for item in real_chords:
+                self.progression.delete_chord_at(item.position)
+            self._mark_dirty()
         self._clear_selection()
-        n = len(chords)
-        self.speak(ngettext('Cut {n} chord', 'Cut {n} chords', n).format(n=n))
+        n_deleted = len(real_chords)
+        if n_deleted == 0:
+            self.speak(ngettext('Copied {n} chord (virtual — nothing deleted)',
+                                'Copied {n} chords (virtual — nothing deleted)',
+                                len(chords)).format(n=len(chords)))
+        else:
+            self.speak(ngettext('Cut {n} chord', 'Cut {n} chords', n_deleted).format(n=n_deleted))
 
     def _delete_selection(self) -> None:
         chords = self._chords_in_selection()
@@ -1070,17 +1212,24 @@ class App(MenuMixin, KeysMixin, IOMixin):
             return
         start = min(anchor, active)
         prev_item = self.progression.find_last_chord_to_left(start)
-        self._push_undo()
-        for item in chords:
-            self.progression.delete_chord_at(item.position)
-        self._mark_dirty()
+        # Only delete non-virtual items; virtual territory is read-only
+        real_chords = [c for c in chords
+                       if not self.progression.is_in_virtual_range(c.position.measure)]
+        if real_chords:
+            self._push_undo()
+            for item in real_chords:
+                self.progression.delete_chord_at(item.position)
+            self._mark_dirty()
         self._clear_selection()
         if prev_item:
             self.cursor = prev_item.position
         else:
             self.cursor = Position(1, 1, self.progression.time_signature)
-        n = len(chords)
-        self.speak(ngettext('Deleted {n} chord', 'Deleted {n} chords', n).format(n=n))
+        n_deleted = len(real_chords)
+        if n_deleted == 0:
+            self.speak(_('Selection contains only virtual chords — nothing deleted'))
+        else:
+            self.speak(ngettext('Deleted {n} chord', 'Deleted {n} chords', n_deleted).format(n=n_deleted))
         self._announce_position()
 
     # ------------------------------------------------------------------
@@ -1178,11 +1327,17 @@ class App(MenuMixin, KeysMixin, IOMixin):
                         if vc and virtual_m >= vc[0]:
                             self.cursor = Position(virtual_m, prv_primary.position.beat, ts)
                         else:
-                            # Previous chord maps before the virtual block; exit.
-                            self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                            # Previous chord maps before the virtual block; exit to the
+                            # last real chord before the virtual range start.
+                            prv = self.progression.find_last_chord_to_left(self.cursor)
+                            self.cursor = (prv.position if prv
+                                           else Position(max(1, self.cursor.measure - 1), 1, ts))
                     else:
-                        # No previous chord in the primary body; exit virtual.
-                        self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                        # No previous chord in the primary body; exit virtual to the
+                        # last real chord before the virtual range start.
+                        prv = self.progression.find_last_chord_to_left(self.cursor)
+                        self.cursor = (prv.position if prv
+                                       else Position(max(1, self.cursor.measure - 1), 1, ts))
                 else:
                     prv = self.progression.find_last_chord_to_left(self.cursor)
                     if prv:
@@ -1252,6 +1407,31 @@ class App(MenuMixin, KeysMixin, IOMixin):
             chords[-1].position if chords
             else Position(last_m, 1, self.progression.time_signature)
         )
+        self._announce_position(announce_section=True)
+        self._maybe_play_chord_on_nav()
+
+    def navigate_to_measure(self) -> None:
+        """Open a dialog and move the cursor to the chosen measure number."""
+        from dialogs import go_to_measure_dialog
+        # Include virtual repeat measures in the navigable range so Ctrl+F can
+        # jump to any measure the cursor can actually reach.
+        prog = self.progression
+        max_m = max(prog.last_measure(), prog.total_measures, 1)
+        for vb in prog.volta_brackets:
+            if vb.is_complete():
+                max_m = max(max_m, vb.after_repeat_measure() - 1)
+        measure = go_to_measure_dialog(max_measure=max_m, parent=self._frame)
+        if measure is None:
+            return
+        ts = prog.time_signature
+        # For virtual measures, look up chords via the resolved primary measure.
+        real_m = prog.resolve_virtual_measure(measure)
+        chords = prog.find_chords_in_measure(real_m)
+        if chords:
+            beat = chords[0].position.beat
+            self.cursor = Position(measure, beat, ts)
+        else:
+            self.cursor = Position(measure, 1, ts)
         self._announce_position(announce_section=True)
         self._maybe_play_chord_on_nav()
 

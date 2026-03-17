@@ -255,6 +255,11 @@ class KeysMixin:
             if self._recorder.state == AppState.IDLE:
                 self._on_transpose()
 
+        # Ctrl+F – go to measure
+        elif ctrl and key == 'f' and not shift:
+            if self._recorder.state == AppState.IDLE:
+                self.navigate_to_measure()
+
         # D key – debug: speak beat offset during recording/pre-count/playback
         elif key == 'd' and not ctrl and not shift:
             if self._recorder.state != AppState.IDLE:

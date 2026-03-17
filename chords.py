@@ -1038,6 +1038,28 @@ class ChordProgression:
         return not any(item.position.measure == measure for item in self.items)
 
     def find_last_chord_to_left(self, position: Position) -> ProgressionItem | None:
+        """Return the last stored chord strictly to the left of *position*.
+
+        When *position* falls inside virtual (hidden or plain-repeat virtual)
+        territory, the search maps to the corresponding primary body position
+        first.  If no primary chord is found before the mapped position the
+        method falls back to the last real (stored) chord before the start of
+        the virtual range.
+        """
+        if self.is_in_virtual_range(position.measure):
+            primary_m = self.resolve_virtual_measure(position.measure)
+            primary_pos = Position(primary_m, position.beat, position.time_signature)
+            vc = self.get_virtual_context(position.measure)
+            # Search in the primary body first.
+            left_primary = [i for i in self.items if i.position < primary_pos]
+            if left_primary:
+                return left_primary[-1]
+            # No primary chord before the mapped position; fall back to the last
+            # real chord before the start of the virtual range.
+            if vc:
+                boundary = Position(vc[0], 1, position.time_signature)
+                left = [i for i in self.items if i.position < boundary]
+                return left[-1] if left else None
         left = [i for i in self.items if i.position < position]
         return left[-1] if left else None
 

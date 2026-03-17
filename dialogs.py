@@ -573,6 +573,54 @@ def project_settings_dialog(parent=None, defaults: dict | None = None) -> dict |
         return None
 
 
+def go_to_measure_dialog(max_measure: int, parent=None) -> int | None:
+    """Show a 'Go to Measure' dialog prompting for a measure number.
+
+    Returns the (1-based) measure number chosen by the user, or ``None`` if
+    cancelled or if the entered value is out of range.
+    """
+    if not _IS_WINDOWS:
+        try:
+            raw = input(_("Go to measure (1–{max}): ").format(max=max_measure)).strip()
+            measure = int(raw)
+            return measure if 1 <= measure <= max_measure else None
+        except (KeyboardInterrupt, EOFError, ValueError):
+            return None
+
+    try:
+        import wx
+
+        class _GoToMeasureDlg(wx.Dialog):
+            def __init__(self, parent_wnd):
+                super().__init__(parent_wnd, title=_("Go to Measure"),
+                                 style=wx.DEFAULT_DIALOG_STYLE)
+                grid = wx.FlexGridSizer(rows=1, cols=2, vgap=6, hgap=8)
+                grid.AddGrowableCol(1, 1)
+                grid.Add(wx.StaticText(self, label=_("Measure:")),
+                         flag=wx.ALIGN_CENTER_VERTICAL)
+                self._spin = wx.SpinCtrl(self, min=1, max=max_measure, initial=1)
+                grid.Add(self._spin, flag=wx.EXPAND)
+
+                outer = wx.BoxSizer(wx.VERTICAL)
+                outer.Add(grid, proportion=0,
+                          flag=wx.EXPAND | wx.ALL, border=12)
+                outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          border=12)
+                self.SetSizerAndFit(outer)
+                self._spin.SetFocus()
+
+            def get_measure(self) -> int:
+                return self._spin.GetValue()
+
+        dlg = _GoToMeasureDlg(parent)
+        measure = dlg.get_measure() if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        return measure
+    except Exception:
+        return None
+
+
 def transpose_dialog(parent=None) -> dict | None:
     """Show a Transpose dialog where the user picks a number of semitones (-11 … +11).
 
