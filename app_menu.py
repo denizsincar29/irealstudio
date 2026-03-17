@@ -217,13 +217,24 @@ class MenuMixin:
                 self.progression, self.cursor,
                 recording_bpm=self.recording_bpm,
             )
+        elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
+            self._recorder.stop_all()
+            if self.recording_mode == RECORDING_MODE_OVERWRITE:
+                self._apply_overwrite()
+            self.speak(_("Stopped"))
         else:
-            self.speak(_("Already active"))
+            self._recorder.stop_all()
+            self.speak(_("Stopped"))
 
     def _menu_play(self) -> None:
         if self._recorder.state == AppState.IDLE:
             self._seed_smart_metro()
             self._recorder.start_playback(self.progression, self.cursor)
+        elif self._recorder.state in (AppState.RECORDING, AppState.PRE_COUNT):
+            self._recorder.stop_all()
+            if self.recording_mode == RECORDING_MODE_OVERWRITE:
+                self._apply_overwrite()
+            self.speak(_("Stopped"))
         elif self._recorder.state == AppState.PLAYING:
             self._recorder.stop_all()
 
@@ -521,9 +532,13 @@ class MenuMixin:
                          id=_CMD_EDIT_UNDO)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.redo(),
                          id=_CMD_EDIT_REDO)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self.cut_chord(),
+        self._frame.Bind(wx.EVT_MENU,
+                         lambda e: (self._cut_selection() if self._selected_range() is not None
+                                    else self.cut_chord()),
                          id=_CMD_EDIT_CUT)
-        self._frame.Bind(wx.EVT_MENU, lambda e: self.copy_chord(),
+        self._frame.Bind(wx.EVT_MENU,
+                         lambda e: (self._copy_selection() if self._selected_range() is not None
+                                    else self.copy_chord()),
                          id=_CMD_EDIT_COPY)
         self._frame.Bind(wx.EVT_MENU, lambda e: self.paste_chord(),
                          id=_CMD_EDIT_PASTE)
