@@ -471,6 +471,10 @@ class VoltaBracket:
     def is_complete(self) -> bool:
         return self.ending1_end > 0 and self.ending2_start > 0
 
+    def is_repeat_only(self) -> bool:
+        """Return True when this bracket represents a plain repeat (no endings)."""
+        return self.is_complete() and self.ending1_start == self.ending1_end + 1
+
     def hidden_range(self) -> tuple[int, int] | None:
         """Return the (start, end) measure range that is hidden between endings."""
         if not self.is_complete():
@@ -1148,6 +1152,27 @@ class ChordProgression:
             ).format(n=cleared)
         return msg
 
+    def add_repeat_bracket(self, repeat_start: int, repeat_end: int) -> str:
+        """Create a normal repeat (no volta endings required)."""
+        if repeat_end <= repeat_start:
+            return _("Repeat end must be after repeat start")
+
+        self.volta_brackets = [vb for vb in self.volta_brackets
+                               if vb.repeat_start != repeat_start]
+
+        # Represent plain repeat in existing structure:
+        # - ending1_start = repeat_end + 1 (no N1 marker in written measures)
+        # - ending1_end   = repeat_end      (closing brace location)
+        # - ending2_start = repeat_start    (jump back target)
+        vb = VoltaBracket(
+            repeat_start=repeat_start,
+            ending1_start=repeat_end + 1,
+            ending1_end=repeat_end,
+            ending2_start=repeat_start,
+        )
+        self.volta_brackets.append(vb)
+        return _("Repeat set: {start}–{end}").format(start=repeat_start, end=repeat_end)
+
     def _find_section_start(self, measure: int) -> int:
         """Find the measure where the current section starts (for repeat bracket placement)."""
         marks_before = [s.measure for s in self.section_marks if s.measure <= measure]
@@ -1210,7 +1235,7 @@ class ChordProgression:
         At ending2_start jumps back to ending1_end.
         """
         for vb in self.volta_brackets:
-            if vb.is_complete() and measure == vb.ending2_start:
+            if vb.is_complete() and not vb.is_repeat_only() and measure == vb.ending2_start:
                 return vb.ending1_end
         prev_m = measure - 1
         if prev_m < 1:
@@ -1238,8 +1263,9 @@ class ChordProgression:
             marks.add(sm.measure)
         for vb in self.volta_brackets:
             marks.add(vb.repeat_start)
-            marks.add(vb.ending1_start)
-            if vb.is_complete():
+            if not vb.is_repeat_only():
+                marks.add(vb.ending1_start)
+            if vb.is_complete() and not vb.is_repeat_only():
                 marks.add(vb.ending2_start)
         return sorted(marks)
 
@@ -1395,6 +1421,8 @@ class ChordProgression:
             # Determine ending marker
             ending = ''
             for vb in self.volta_brackets:
+                if vb.is_repeat_only():
+                    continue
                 if measure_num == vb.ending1_start:
                     ending = 'N1'
                     break

@@ -1268,9 +1268,15 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.speak(_("Repeat end must be after repeat start"))
             return
         self._pending_repeat_end = self.cursor.measure
+        self._push_undo()
+        msg = self.progression.add_repeat_bracket(
+            self._pending_repeat_start,
+            self._pending_repeat_end,
+        )
+        self._mark_dirty()
         self.speak(
-            _("Repeat end set at measure {n}. Navigate to the first volta ending and press V.").format(
-                n=self._pending_repeat_end))
+            _("{msg}. If you need endings, move to ending 1 and press V.").format(msg=msg)
+        )
 
     def add_volta(self) -> None:
         """Insert a repeat bracket / volta mark.

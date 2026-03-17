@@ -67,8 +67,8 @@ Section Marks (Ctrl+Shift+letter)
 
 Repeat Brackets & Volta
   [                     Mark repeat start
-  ]                     Mark repeat end (then press V at volta beginning)
-  V                     Add volta / ending bracket
+  ]                     Mark repeat end (creates normal repeat)
+  V                     Optional: add volta / ending bracket
 
 Other
   / + (A–G)             Add bass note (slash chord)
