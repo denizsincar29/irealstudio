@@ -119,9 +119,9 @@ def _identify_chord_name(notes: list[str]) -> str | None:
     flat5   = has_tritone and not sharp11
 
     # --- Validation rule 3 ---
-    # If perfect 4th is present and no minor 3rd → sus4.
-    # If minor 3rd is also present, the 4th is the natural 11th of the chord.
-    sus4 = has_4th and not min3
+    # If perfect 4th is present and there is no 3rd at all → sus4.
+    # If a minor or major 3rd is present, the 4th is treated as an added/11th tone.
+    sus4 = has_4th and not has_min3 and not has_maj3
 
     # ================================================================
     # Chord-type identification

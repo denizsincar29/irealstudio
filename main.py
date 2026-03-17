@@ -1801,7 +1801,7 @@ class App(MenuMixin, KeysMixin, IOMixin):
             self.speak(_('IReal Studio ready. {title}. Press R to record.').format(
                 title=self.progression.title))
         else:
-            self.speak(_('IReal Studio ready. Press Ctrl+N for a new project or Ctrl+O to open a file.'))
+            self.speak(_('IReal Studio ready. New Project will open automatically. Press Ctrl+O to open a file.'))
 
         self._frame = wx.Frame(None, title="IReal Studio", size=(580, 420))
         self._frame.SetBackgroundColour(wx.Colour(30, 30, 30))

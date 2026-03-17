@@ -823,6 +823,11 @@ class TestChordRecognition(unittest.TestCase):
         name = self._chord(['G', 'C', 'D', 'F'])
         self.assertEqual('G7sus4', name)
 
+    def test_rule3_major_third_with_4th_is_not_sus4(self):
+        """C7 with a 4th color tone must not be reclassified as C7sus4."""
+        name = self._chord(['C', 'E', 'F', 'G', 'Bb'])
+        self.assertEqual('C7', name)
+
     # ------------------------------------------------------------------ #
     # Minor 11th chords (4th treated as natural 11 when minor 3rd present) #
     # ------------------------------------------------------------------ #
