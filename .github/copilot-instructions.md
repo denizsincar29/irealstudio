@@ -37,9 +37,11 @@ IReal Studio is a **blind-accessible chord progression recorder** for musicians 
 ## Environment Setup
 
 ```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux/macOS
-# or: pip install uv
+# Copilot setup usually installs uv automatically.
+# Check first and only install when `uv` is missing.
+command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh   # Linux/macOS
+# Windows (PowerShell): if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { irm https://astral.sh/uv/install.ps1 | iex }
+# Fallback: python -m pip install uv
 
 # Install all dependencies (including dev)
 uv sync
