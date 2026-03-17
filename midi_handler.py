@@ -164,9 +164,19 @@ class MidiHandler:
             return []
 
     def close(self) -> None:
-        """Signal the reader thread to stop and close both ports."""
+        """Signal the reader thread to stop, send all-notes-off, and close both ports."""
         _logger.debug("Closing MIDI port: %s", self.midi_input_name)
         self._stop_event.set()
+        if self.midi_output is not None:
+            try:
+                # Send "all notes off" (CC 123) on every MIDI channel to silence
+                # any notes that may still be sounding.
+                for ch in range(16):
+                    self.midi_output.send(
+                        mido.Message('control_change', channel=ch, control=123, value=0)
+                    )
+            except Exception as e:
+                _logger.error("MIDI all-notes-off error: %s", e)
         if self.midi_input is not None:
             try:
                 self.midi_input.close()

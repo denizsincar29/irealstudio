@@ -54,6 +54,8 @@ class Song:
     def composer_name(self):
         if self.composer_name_first == 'Unknown' and self.composer_name_last == 'Unknown':
             return 'Unknown'
+        if self.composer_name_last == 'Unknown':
+            return self.composer_name_first
         return f"{self.composer_name_last} {self.composer_name_first}"
 
     def url(self, urlencode=True):
