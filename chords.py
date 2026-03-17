@@ -465,8 +465,8 @@ class VoltaBracket:
 
     For plain repeats (is_repeat_only), *num_repeats* controls how many times
     the body plays (2–4).  The virtual copies are in the range
-    [ending1_end+1, after_repeat_measure()-1] and are also hidden from primary
-    navigation (accessible only via the Down-arrow repeat-navigation).
+    [ending1_end+1, after_repeat_measure()-1]; they are reachable via linear
+    (Ctrl/Alt+left/right, by-beat) navigation and the Down/Up arrow repeat-jump.
     """
     repeat_start: int       # first measure of the repeated section (where { goes)
     ending1_start: int      # first measure of ending 1  (N1)
@@ -1259,9 +1259,17 @@ class ChordProgression:
     def get_virtual_context(self, measure: int) -> tuple[int, int] | None:
         """Return ``(start, end)`` of the virtual territory containing *measure*.
 
-        Virtual territory is every measure that lies *after* ``ending1_end`` and
-        *before* ``after_repeat_measure()`` – i.e. the hidden body copy and the
-        second ending of a volta bracket, or all virtual copies of a plain repeat.
+        Virtual territory spans from ``ending1_end + 1`` up to (but not
+        including) ``after_repeat_measure()``.  For a **volta** bracket this
+        includes the hidden body *and* the second-ending measures; for a
+        **plain** repeat it covers all virtual copies of the body.
+
+        .. note::
+            This is a superset of :meth:`is_in_virtual_range`: ending-2
+            measures are included here (they are part of the virtual span of
+            the overall repeat structure) even though they are *stored* in the
+            chord array and therefore returned as ``False`` by
+            ``is_in_virtual_range()``.
 
         Returns *None* when *measure* is in primary (non-virtual) territory.
         """

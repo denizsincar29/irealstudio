@@ -1113,8 +1113,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
                 else:
                     nxt = self.progression.find_next_chord_to_right(self.cursor)
                     if nxt:
-                        # Enter virtual territory before the next stored chord
-                        # if any virtual territory lies between cursor and it.
+                        # Enter the nearest virtual block that lies between
+                        # the cursor and the next stored chord.  Collect all
+                        # candidates and pick the one with the smallest start
+                        # so we never skip over an earlier virtual block.
                         virtual_entry = None
                         for vb in self.progression.volta_brackets:
                             if not vb.is_complete():
@@ -1125,16 +1127,16 @@ class App(MenuMixin, KeysMixin, IOMixin):
                             if (vs <= hidden_end
                                     and self.cursor.measure < vs
                                     <= nxt.position.measure):
-                                virtual_entry = vs
-                                break
+                                if virtual_entry is None or vs < virtual_entry:
+                                    virtual_entry = vs
                             # Plain repeat virtual range
                             if vb.is_repeat_only():
                                 vr = vb.plain_virtual_range()
                                 if (vr
                                         and self.cursor.measure < vr[0]
                                         <= nxt.position.measure):
-                                    virtual_entry = vr[0]
-                                    break
+                                    if virtual_entry is None or vr[0] < virtual_entry:
+                                        virtual_entry = vr[0]
                         if virtual_entry is not None:
                             self.cursor = Position(virtual_entry, 1, ts)
                         else:
@@ -1146,8 +1148,10 @@ class App(MenuMixin, KeysMixin, IOMixin):
                 else:
                     prv = self.progression.find_last_chord_to_left(self.cursor)
                     if prv:
-                        # Enter virtual territory before the previous stored chord
-                        # if any virtual territory lies between it and the cursor.
+                        # Enter the nearest virtual block that lies between
+                        # the previous stored chord and the cursor.  Collect
+                        # all candidates and pick the one with the largest end
+                        # so we stop at the rightmost virtual block first.
                         virtual_exit = None
                         for vb in self.progression.volta_brackets:
                             if not vb.is_complete():
@@ -1158,16 +1162,16 @@ class App(MenuMixin, KeysMixin, IOMixin):
                             if (vs <= hidden_end
                                     and prv.position.measure < vs
                                     <= self.cursor.measure):
-                                virtual_exit = hidden_end
-                                break
+                                if virtual_exit is None or hidden_end > virtual_exit:
+                                    virtual_exit = hidden_end
                             # Plain repeat virtual range
                             if vb.is_repeat_only():
                                 vr = vb.plain_virtual_range()
                                 if (vr
                                         and prv.position.measure < vr[0]
                                         <= self.cursor.measure):
-                                    virtual_exit = vr[1]
-                                    break
+                                    if virtual_exit is None or vr[1] > virtual_exit:
+                                        virtual_exit = vr[1]
                         if virtual_exit is not None:
                             self.cursor = Position(virtual_exit, 1, ts)
                         else:
@@ -1248,9 +1252,15 @@ class App(MenuMixin, KeysMixin, IOMixin):
         """Play the chord at the current cursor position on the MIDI output.
 
         Uses the voicing algorithm from ``voice_chord_midi()`` and updates
-        ``_last_chord_root_midi`` for voice-leading continuity.
+        ``_last_chord_root_midi`` for voice-leading continuity.  When the
+        cursor is in virtual territory the chord is looked up at the
+        corresponding primary (stored) position.
         """
-        chords = self.progression.find_chords_at_position(self.cursor)
+        real_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+        ts = self.progression.time_signature
+        lookup_pos = (self.cursor if real_m == self.cursor.measure
+                      else Position(real_m, self.cursor.beat, ts))
+        chords = self.progression.find_chords_at_position(lookup_pos)
         if not chords:
             return
         item = chords[0]
@@ -1406,12 +1416,19 @@ class App(MenuMixin, KeysMixin, IOMixin):
                       else Position(real_m, self.cursor.beat, ts))
         chords_here = self.progression.find_chords_at_position(lookup_pos)
         if chords_here:
-            prev_item = self.progression.find_last_chord_to_left(lookup_pos)
+            # Keep the cursor on the virtual timeline after deletion:
+            # find the previous item relative to the cursor position (not
+            # the resolved primary position) so we stay in the same virtual
+            # region rather than jumping back to the start of the repeat body.
+            prev_virtual = self.progression.find_last_chord_to_left(self.cursor)
             self._push_undo()
             self.progression.delete_chord_at(lookup_pos)
             self._mark_dirty()
-            if prev_item:
-                self.cursor = prev_item.position
+            if prev_virtual:
+                self.cursor = prev_virtual.position
+            elif real_m != self.cursor.measure:
+                # Still in virtual territory; stay here
+                pass
             else:
                 self.cursor = Position(1, 1, ts)
             self.speak(_('Deleted'))
