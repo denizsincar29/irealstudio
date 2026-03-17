@@ -7,16 +7,17 @@ Usage::
 
 Behaviour is determined automatically from the current git branch:
 
-* **main branch** – full interactive release.  If ``.release_draft.json``
-  exists (written by a previous run on another branch), the draft is
-  finalised immediately (tag + push) without prompts.  Otherwise the user
-  is prompted for a version and changelog, the files are committed, the tag
-  is created, and everything is pushed.
+* **main branch** – full interactive release.  If ``version.py`` already
+  contains a version higher than the last git tag (prepared by a previous run
+  on another branch), the release is finalised immediately (tag + push)
+  without prompts.  Otherwise the user is prompted for a version and
+  changelog, the files are committed, the tag is created, and everything is
+  pushed.
 
 * **any other branch** – draft-only release.  The user is prompted for a
-  version and changelog; ``news.md``, ``changelog.md``, ``version.py`` and
-  ``.release_draft.json`` are committed, but NO tag or push happens.  Merge
-  the branch into main and re-run to finalise.
+  version and changelog; ``news.md``, ``changelog.md``, and ``version.py``
+  are committed, but NO tag or push happens.  Merge the branch into main and
+  re-run to finalise.
 
 Interactive full release steps:
 1. Checks that there are no uncommitted or untracked changes.
@@ -34,7 +35,6 @@ Interactive full release steps:
 12. Creates and pushes the git tag.
 """
 
-import json
 import sys
 import time
 from datetime import date
@@ -42,9 +42,6 @@ from pathlib import Path
 
 import git
 import semver
-
-# Temporary file used to hand off prepared release data to a main-branch run.
-_DRAFT_FILE = Path('.release_draft.json')
 
 # Sentinel representing "no prior release found".
 _ZERO_VERSION = semver.Version(0, 0, 0)
@@ -85,6 +82,24 @@ def _last_version_tag(tags: list[str]) -> semver.Version:
         if parsed is not None and parsed > best:
             best = parsed
     return best
+
+
+def _read_version_py() -> semver.Version | None:
+    """Read the current version from ``version.py``.
+
+    Returns *None* if the file does not exist or the VERSION line cannot be
+    parsed.
+    """
+    version_path = Path('version.py')
+    if not version_path.exists():
+        return None
+    text = version_path.read_text(encoding='utf-8')
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith('VERSION'):
+            _, _, rhs = line.partition('=')
+            return _parse_version(rhs.strip().strip('"').strip("'"))
+    return None
 
 
 def _read_multiline_changelog() -> str:
@@ -172,6 +187,13 @@ def _pull_latest(repo: git.Repo) -> None:
         sys.exit(1)
 
 
+def _format_changelog_preview(changelog: str) -> str:
+    """Return a short preview of *changelog* for console output."""
+    preview = changelog[:_CHANGELOG_PREVIEW_LEN]
+    ellipsis = '…' if len(changelog) > _CHANGELOG_PREVIEW_LEN else ''
+    return f"{preview}{ellipsis}"
+
+
 def _suggest_next_versions(last: semver.Version) -> dict[str, str]:
     """Return a dict of bump type → suggested version string."""
     return {
@@ -179,27 +201,6 @@ def _suggest_next_versions(last: semver.Version) -> dict[str, str]:
         'minor': str(last.bump_minor()),
         'major': str(last.bump_major()),
     }
-
-
-def _save_draft(version_tag: str, changelog: str) -> None:
-    """Persist release data to *_DRAFT_FILE* so a main-branch run can read it later."""
-    _DRAFT_FILE.write_text(
-        json.dumps({'version': version_tag, 'changelog': changelog}, indent=2),
-        encoding='utf-8',
-    )
-    print(f"Saved release draft to {_DRAFT_FILE}")
-
-
-def _load_draft() -> tuple[str, str]:
-    """Load the draft written by a non-main-branch run.  Exits with an error if missing."""
-    if not _DRAFT_FILE.exists():
-        print(
-            f"ERROR: No release draft found ({_DRAFT_FILE}).\n"
-            "Run tag_release.py on a non-main branch first."
-        )
-        sys.exit(1)
-    data = json.loads(_DRAFT_FILE.read_text(encoding='utf-8'))
-    return data['version'], data['changelog']
 
 
 def _prompt_version(existing_tags: list[str], last: semver.Version) -> tuple[str, semver.Version]:
@@ -237,72 +238,14 @@ def _prompt_version(existing_tags: list[str], last: semver.Version) -> tuple[str
         return version_tag, parsed
 
 
-def main(version_arg: str | None = None, changelog_arg: str | None = None) -> None:
-    """Entry point: behaviour is determined automatically from the current branch.
-
-    * **main branch** – full release (interactive or finalise existing draft).
-    * **any other branch** – draft-only (commit files; no tag or push).
-
-    Parameters
-    ----------
-    version_arg:
-        Version string provided via CLI (e.g. ``"0.1.7"``).  Skips the
-        interactive version prompt when supplied.
-    changelog_arg:
-        Changelog text provided via CLI.  Skips the interactive changelog
-        prompt when supplied.
-    """
-    repo = git.Repo('.')
-    try:
-        branch = repo.active_branch.name
-    except TypeError:
-        print("ERROR: HEAD is detached. Please check out a branch before releasing.")
-        sys.exit(1)
-
-    on_main = branch == 'main'
-
-    # On main: if a draft from a previous branch run exists, finalise it now.
-    if on_main and _DRAFT_FILE.exists():
-        print(f"Found release draft ({_DRAFT_FILE}). Finalizing…")
-        _check_clean_tree(repo)
-        _pull_latest(repo)
-
-        version_tag, _ = _load_draft()
-        parsed = _parse_version(version_tag)
-
-        existing_tags = _get_existing_tags(repo)
-        if version_tag in existing_tags:
-            print(f"ERROR: Tag '{version_tag}' already exists.")
-            sys.exit(1)
-        last = _last_version_tag(existing_tags)
-        if parsed is not None and parsed <= last:
-            print(f"ERROR: Version {version_tag} is not higher than the last tag v{last}.")
-            sys.exit(1)
-
-        repo.create_tag(version_tag, message=f'Release {version_tag}')
-        print(f"Created tag {version_tag}")
-
-        _DRAFT_FILE.unlink()
-        repo.index.remove([str(_DRAFT_FILE)])
-        repo.index.commit(f'chore: finalize release {version_tag}')
-        print("Removed draft and committed.")
-
-        print("Pushing commit and tag…")
-        origin = repo.remotes.origin
-        origin.push()
-        origin.push(version_tag)
-        print(f"Done! Release {version_tag} is on its way.")
-        return
-
-    # Interactive release preparation
-    _check_clean_tree(repo)
-    _pull_latest(repo)
-
-    existing_tags = _get_existing_tags(repo)
-    last = _last_version_tag(existing_tags)
-
+def _interactive_version_and_changelog(
+    existing_tags: list[str],
+    last: semver.Version,
+    version_arg: str | None,
+    changelog_arg: str | None,
+) -> tuple[str, str]:
+    """Resolve version and changelog from CLI args or interactive prompts."""
     if version_arg is not None:
-        # Non-interactive: validate the supplied version.
         parsed = _parse_version(version_arg)
         if parsed is None:
             print(f"ERROR: Invalid version '{version_arg}'. Use x.y.z (e.g. 1.2.3).")
@@ -325,17 +268,78 @@ def main(version_arg: str | None = None, changelog_arg: str | None = None) -> No
         if not changelog:
             print("ERROR: Changelog cannot be empty.")
             sys.exit(1)
-        print(f"Using provided changelog: {changelog[:_CHANGELOG_PREVIEW_LEN]}{'…' if len(changelog) > _CHANGELOG_PREVIEW_LEN else ''}")
+        print(f"Using provided changelog: {_format_changelog_preview(changelog)}")
     else:
         changelog = _read_multiline_changelog()
         if not changelog.strip():
             print("ERROR: Changelog cannot be empty.")
             sys.exit(1)
 
-    _write_news(version_tag, changelog)
-    _update_version_py(version_tag)
+    return version_tag, changelog
+
+
+def main(version_arg: str | None = None, changelog_arg: str | None = None) -> None:
+    """Entry point: behaviour is determined automatically from the current branch.
+
+    * **main branch** – full release (interactive, or finalize if version.py is
+      already ahead of the last tag).
+    * **any other branch** – draft-only (commit files; no tag or push).
+
+    Parameters
+    ----------
+    version_arg:
+        Version string provided via CLI (e.g. ``"0.1.7"``).  Skips the
+        interactive version prompt when supplied.
+    changelog_arg:
+        Changelog text provided via CLI.  Skips the interactive changelog
+        prompt when supplied.
+    """
+    repo = git.Repo('.')
+    try:
+        branch = repo.active_branch.name
+    except TypeError:
+        print("ERROR: HEAD is detached. Please check out a branch before releasing.")
+        sys.exit(1)
+
+    on_main = branch == 'main'
+
+    _check_clean_tree(repo)
+    _pull_latest(repo)
+
+    existing_tags = _get_existing_tags(repo)
+    last = _last_version_tag(existing_tags)
 
     if on_main:
+        # On main: if version.py is already ahead of the last tag, a draft was
+        # prepared on another branch.  Finalise it immediately without prompts.
+        current_version = _read_version_py()
+        if current_version is not None and current_version > last:
+            version_tag = f'v{current_version}'
+            print(
+                f"Found version.py ({version_tag}) ahead of last tag (v{last}). "
+                "Finalizing release…"
+            )
+            if version_tag in existing_tags:
+                print(f"ERROR: Tag '{version_tag}' already exists.")
+                sys.exit(1)
+
+            repo.create_tag(version_tag, message=f'Release {version_tag}')
+            print(f"Created tag {version_tag}")
+
+            print("Pushing tag…")
+            origin = repo.remotes.origin
+            origin.push(version_tag)
+            print(f"Done! Release {version_tag} is on its way.")
+            return
+
+        # No prepared draft: interactive release flow.
+        version_tag, changelog = _interactive_version_and_changelog(
+            existing_tags, last, version_arg, changelog_arg
+        )
+
+        _write_news(version_tag, changelog)
+        _update_version_py(version_tag)
+
         # Full release: commit, tag, push
         repo.index.add(['news.md', 'changelog.md', 'version.py'])
         repo.index.commit(f'chore: release {version_tag}')
@@ -349,10 +353,18 @@ def main(version_arg: str | None = None, changelog_arg: str | None = None) -> No
         origin.push()
         origin.push(version_tag)
         print(f"Done! Release {version_tag} is on its way.")
+
     else:
+        # Non-main branch: draft-only flow.
+        version_tag, changelog = _interactive_version_and_changelog(
+            existing_tags, last, version_arg, changelog_arg
+        )
+
+        _write_news(version_tag, changelog)
+        _update_version_py(version_tag)
+
         # Draft only: commit files but no tag or push
-        _save_draft(version_tag, changelog)
-        repo.index.add(['news.md', 'changelog.md', 'version.py', str(_DRAFT_FILE)])
+        repo.index.add(['news.md', 'changelog.md', 'version.py'])
         repo.index.commit(f'chore: prepare release {version_tag}')
         print(f"Committed release draft for {version_tag}.")
         print(f"Note: not on main branch (current: {branch!r}). No tag or push.")

@@ -1104,47 +1104,85 @@ class App(MenuMixin, KeysMixin, IOMixin):
             else:
                 self.cursor = self.cursor - 1
         else:
-            # By-chord navigation.  In virtual territory (no stored chords) we
-            # degrade to by-measure steps so every bar remains reachable.
+            # By-chord navigation.  Inside virtual territory there are no
+            # stored chords, but we can resolve the current position to the
+            # primary body and navigate chord-by-chord there, then map the
+            # result back to the virtual coordinate.
             if direction == 'right':
                 if self.progression.is_in_virtual_range(self.cursor.measure):
-                    # Virtual bar: advance one measure (no stored chords here)
-                    self.cursor = Position(self.cursor.measure + 1, 1, ts)
+                    # Resolve to the corresponding primary measure and beat.
+                    primary_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+                    virtual_offset = self.cursor.measure - primary_m
+                    primary_pos = Position(primary_m, self.cursor.beat, ts)
+                    nxt_primary = self.progression.find_next_chord_to_right(primary_pos)
+                    vc = self.progression.get_virtual_context(self.cursor.measure)
+                    if nxt_primary:
+                        virtual_m = nxt_primary.position.measure + virtual_offset
+                        if vc and virtual_m <= vc[1]:
+                            self.cursor = Position(virtual_m, nxt_primary.position.beat, ts)
+                        else:
+                            # Primary chord maps outside the virtual block; step
+                            # one measure forward so every bar stays reachable.
+                            self.cursor = Position(self.cursor.measure + 1, 1, ts)
+                    else:
+                        # No next chord in the primary body; advance by one
+                        # measure (handles sparse bodies and copy boundaries).
+                        self.cursor = Position(self.cursor.measure + 1, 1, ts)
                 else:
                     nxt = self.progression.find_next_chord_to_right(self.cursor)
-                    if nxt:
-                        # Enter the nearest virtual block that lies between
-                        # the cursor and the next stored chord.  Collect all
-                        # candidates and pick the one with the smallest start
-                        # so we never skip over an earlier virtual block.
-                        virtual_entry = None
-                        for vb in self.progression.volta_brackets:
-                            if not vb.is_complete():
-                                continue
-                            # Volta hidden body [ending1_end+1, ending2_start-1]
-                            vs = vb.ending1_end + 1
-                            hidden_end = vb.ending2_start - 1
-                            if (vs <= hidden_end
-                                    and self.cursor.measure < vs
-                                    <= nxt.position.measure):
-                                if virtual_entry is None or vs < virtual_entry:
-                                    virtual_entry = vs
-                            # Plain repeat virtual range
-                            if vb.is_repeat_only():
-                                vr = vb.plain_virtual_range()
-                                if (vr
-                                        and self.cursor.measure < vr[0]
-                                        <= nxt.position.measure):
-                                    if virtual_entry is None or vr[0] < virtual_entry:
-                                        virtual_entry = vr[0]
-                        if virtual_entry is not None:
-                            self.cursor = Position(virtual_entry, 1, ts)
-                        else:
-                            self.cursor = nxt.position
+                    # Enter the nearest virtual block that lies between the
+                    # cursor and the next stored chord (or at the end when
+                    # there is no stored chord ahead).  Collect all candidates
+                    # and pick the one with the smallest start so we never
+                    # skip over an earlier virtual block.
+                    virtual_entry = None
+                    for vb in self.progression.volta_brackets:
+                        if not vb.is_complete():
+                            continue
+                        # Volta hidden body [ending1_end+1, ending2_start-1]
+                        vs = vb.ending1_end + 1
+                        hidden_end = vb.ending2_start - 1
+                        # A virtual block is reachable when there is no stored
+                        # chord ahead of it (nxt is None) or the stored chord
+                        # is at or after the block start.
+                        hidden_reachable = (nxt is None or vs <= nxt.position.measure)
+                        if (vs <= hidden_end
+                                and self.cursor.measure < vs
+                                and hidden_reachable):
+                            if virtual_entry is None or vs < virtual_entry:
+                                virtual_entry = vs
+                        # Plain repeat virtual range
+                        if vb.is_repeat_only():
+                            vr = vb.plain_virtual_range()
+                            plain_reachable = (nxt is None or vr is not None and vr[0] <= nxt.position.measure)
+                            if (vr
+                                    and self.cursor.measure < vr[0]
+                                    and plain_reachable):
+                                if virtual_entry is None or vr[0] < virtual_entry:
+                                    virtual_entry = vr[0]
+                    if virtual_entry is not None:
+                        self.cursor = Position(virtual_entry, 1, ts)
+                    elif nxt:
+                        self.cursor = nxt.position
             else:
                 if self.progression.is_in_virtual_range(self.cursor.measure):
-                    # Virtual bar: step back one measure
-                    self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                    # Resolve to the corresponding primary measure and beat,
+                    # then find the previous chord there and map back.
+                    primary_m = self.progression.resolve_virtual_measure(self.cursor.measure)
+                    virtual_offset = self.cursor.measure - primary_m
+                    primary_pos = Position(primary_m, self.cursor.beat, ts)
+                    prv_primary = self.progression.find_last_chord_to_left(primary_pos)
+                    vc = self.progression.get_virtual_context(self.cursor.measure)
+                    if prv_primary:
+                        virtual_m = prv_primary.position.measure + virtual_offset
+                        if vc and virtual_m >= vc[0]:
+                            self.cursor = Position(virtual_m, prv_primary.position.beat, ts)
+                        else:
+                            # Previous chord maps before the virtual block; exit.
+                            self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
+                    else:
+                        # No previous chord in the primary body; exit virtual.
+                        self.cursor = Position(max(1, self.cursor.measure - 1), 1, ts)
                 else:
                     prv = self.progression.find_last_chord_to_left(self.cursor)
                     if prv:

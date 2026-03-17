@@ -213,7 +213,7 @@ msgid "Deleted"
 msgstr "Удалено"
 
 msgid "section mark"
-msgstr "метка раздела"
+msgstr "метка части"
 
 msgid "repeat bracket"
 msgstr "знак повтора"
@@ -602,13 +602,13 @@ msgid "Root:"
 msgstr "Тоника:"
 
 msgid "Quality:"
-msgstr "Функция:"
+msgstr "Тип аккорда:"
 
 msgid "Type a chord name directly, or choose root/quality above."
-msgstr "Введите название аккорда или выберите тонику и функцию выше."
+msgstr "Введите название аккорда или выберите тонику и тип аккорда выше."
 
 msgid "Type a chord name directly, or choose root/quality/alterations above."
-msgstr "Введите название аккорда или выберите тонику, функцию и альтерации выше."
+msgstr "Введите название аккорда или выберите тонику, тип аккорда и альтерации выше."
 
 # --- menu items ---
 msgid "&New Project"
