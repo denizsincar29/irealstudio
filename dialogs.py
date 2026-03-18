@@ -188,38 +188,44 @@ def new_project_dialog(parent=None, defaults: dict | None = None,
             except (KeyboardInterrupt, EOFError):
                 return None
             result['template'] = '' if tmpl == '(none)' else tmpl
-            if tmpl == 'Blues':
-                try:
-                    raw = input(_("Bars (12/16/24) [12]: ")).strip()
-                    result['template_blues_bars'] = int(raw) if raw in ('12', '16', '24') else 12
-                except (KeyboardInterrupt, EOFError, ValueError):
-                    result['template_blues_bars'] = 12
-            elif tmpl in ('AABA', 'ABAC', 'ABAB', 'ABCD'):
-                letters = {'AABA': 'AB', 'ABAC': 'ABC', 'ABAB': 'AB', 'ABCD': 'ABCD'}[tmpl]
-                for letter in letters:
+            if tmpl != '(none)':
+                if tmpl == 'Blues':
                     try:
-                        raw = input(_("Bars for {s} [8]: ").format(s=letter)).strip()
-                        result[f'template_bars_{letter.lower()}'] = int(raw) if raw.isdigit() else 8
-                    except (KeyboardInterrupt, EOFError):
-                        result[f'template_bars_{letter.lower()}'] = 8
-            try:
-                raw = input(_("Intro? (y/n) [n]: ")).strip().lower()
-                result['template_intro'] = raw in ('y', 'yes', '1')
-                result['template_intro_bars'] = 0
-                if result['template_intro']:
-                    raw2 = input(_("Intro bars [4]: ")).strip()
-                    result['template_intro_bars'] = int(raw2) if raw2.isdigit() else 4
-            except (KeyboardInterrupt, EOFError):
+                        raw = input(_("Bars (12/16/24) [12]: ")).strip()
+                        result['template_blues_bars'] = int(raw) if raw in ('12', '16', '24') else 12
+                    except (KeyboardInterrupt, EOFError, ValueError):
+                        result['template_blues_bars'] = 12
+                elif tmpl in ('AABA', 'ABAC', 'ABAB', 'ABCD'):
+                    letters = {'AABA': 'AB', 'ABAC': 'ABC', 'ABAB': 'AB', 'ABCD': 'ABCD'}[tmpl]
+                    for letter in letters:
+                        try:
+                            raw = input(_("Bars for {s} [8]: ").format(s=letter)).strip()
+                            result[f'template_bars_{letter.lower()}'] = int(raw) if raw.isdigit() else 8
+                        except (KeyboardInterrupt, EOFError):
+                            result[f'template_bars_{letter.lower()}'] = 8
+                try:
+                    raw = input(_("Intro? (y/n) [n]: ")).strip().lower()
+                    result['template_intro'] = raw in ('y', 'yes', '1')
+                    result['template_intro_bars'] = 0
+                    if result['template_intro']:
+                        raw2 = input(_("Intro bars [4]: ")).strip()
+                        result['template_intro_bars'] = int(raw2) if raw2.isdigit() else 4
+                except (KeyboardInterrupt, EOFError):
+                    result['template_intro'] = False
+                    result['template_intro_bars'] = 0
+                try:
+                    raw = input(_("Coda? (y/n) [n]: ")).strip().lower()
+                    result['template_coda'] = raw in ('y', 'yes', '1')
+                    result['template_coda_bars'] = 0
+                    if result['template_coda']:
+                        raw2 = input(_("Coda bars [4]: ")).strip()
+                        result['template_coda_bars'] = int(raw2) if raw2.isdigit() else 4
+                except (KeyboardInterrupt, EOFError):
+                    result['template_coda'] = False
+                    result['template_coda_bars'] = 0
+            else:
                 result['template_intro'] = False
                 result['template_intro_bars'] = 0
-            try:
-                raw = input(_("Coda? (y/n) [n]: ")).strip().lower()
-                result['template_coda'] = raw in ('y', 'yes', '1')
-                result['template_coda_bars'] = 0
-                if result['template_coda']:
-                    raw2 = input(_("Coda bars [4]: ")).strip()
-                    result['template_coda_bars'] = int(raw2) if raw2.isdigit() else 4
-            except (KeyboardInterrupt, EOFError):
                 result['template_coda'] = False
                 result['template_coda_bars'] = 0
         return result

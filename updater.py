@@ -54,9 +54,16 @@ _RELEASE_NOTES_PREVIEW_CHARS = 2000
 
 def _news_md_path() -> Path:
     """Return the best-effort path to ``news.md`` for this runtime."""
-    if _IS_COMPILED:
-        return Path(sys.executable).resolve().parent / 'news.md'
-    return Path(__file__).resolve().parent / 'news.md'
+    candidates = [
+        Path(sys.executable).resolve().parent / 'news.md',
+        Path(__file__).resolve().parent / 'news.md',
+        Path.cwd() / 'news.md',
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    _logger.warning("Release notes file not found in expected locations: %s", candidates)
+    return candidates[0]
 
 
 def open_release_notes_from_news() -> bool:
@@ -97,7 +104,10 @@ def open_release_notes_from_news() -> bool:
         ) as f:
             f.write(html_text)
             html_path = Path(f.name)
-        webbrowser.open(html_path.as_uri())
+        opened = webbrowser.open(html_path.as_uri())
+        if not opened:
+            _logger.warning("Browser reported failure opening release notes: %s", html_path)
+            return False
         _logger.info("Release notes opened in browser: %s", html_path)
         return True
     except Exception as exc:

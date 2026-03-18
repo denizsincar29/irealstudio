@@ -103,6 +103,8 @@ jobs:
             --assume-yes-for-downloads
             --follow-imports
             "--include-data-dir=locales=locales"
+            "--include-data-dir=templates=templates"
+            "--include-data-files=news.md=news.md"
             "--include-data-dir=${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib"
             --include-module=mido.backends.rtmidi
             --nofollow-import-to=unittest
@@ -129,6 +131,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          Copy-Item "register_openwith_windows.bat" -Destination "dist\main.dist\register_openwith_windows.bat" -Force
           # Nuitka names the standalone output directory after the script: main.dist
           Rename-Item -Path "dist\main.dist" -NewName "${{ matrix.dist_dir }}"
           Compress-Archive -Path "dist\${{ matrix.dist_dir }}" -DestinationPath "dist\${{ matrix.package_file }}"
@@ -187,6 +190,8 @@ jobs:
             --assume-yes-for-downloads \
             --follow-imports \
             "--include-data-dir=locales=locales" \
+            "--include-data-dir=templates=templates" \
+            "--include-data-files=news.md=news.md" \
             "--include-data-dir=${{ steps.ao3_path.outputs.lib_path }}=accessible_output3/lib" \
             --include-module=mido.backends.rtmidi \
             --nofollow-import-to=unittest \

@@ -5,12 +5,14 @@ Extracted from main.py to reduce its size.
 """
 import io
 import logging
+import sys
+from copy import deepcopy
 from pathlib import Path
 
 import wx
 import wx.adv
 
-from chords import ChordProgression, TimeSignature, Position, SectionMark
+from chords import ChordProgression, TimeSignature, Position
 from dialogs import (
     new_project_dialog, project_settings_dialog, insert_chord_dialog, prompt_input,
     BPM_MIN, BPM_MAX,
@@ -27,7 +29,19 @@ _app_logger = logging.getLogger('irealstudio')
 # ---------------------------------------------------------------------------
 # Directory containing bundled .ipst template files.
 # ---------------------------------------------------------------------------
-_TEMPLATES_DIR = Path(__file__).parent / 'templates'
+def _runtime_templates_dir() -> Path:
+    """Return the best runtime location for bundled template files."""
+    candidates = [
+        Path(sys.executable).resolve().parent / 'templates',
+        Path(__file__).resolve().parent / 'templates',
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[-1]
+
+
+_TEMPLATES_DIR = _runtime_templates_dir()
 
 
 def _apply_template(prog: ChordProgression, template: str, data: dict) -> None:
@@ -291,13 +305,7 @@ class IOMixin:
             confirm.Destroy()
 
         self.progression = tmpl_prog
-        self.cursor = Position(1, 1, self.progression.time_signature)
-        self._current_file = None
-        self._is_dirty = False
-        self._undo_stack.clear()
-        self._redo_stack.clear()
-        self._clear_selection()
-        self._save_app_settings()
+        self._apply_loaded_progression(path=None)
         self.speak(_("New project: {title}").format(title=self.progression.title))
 
     def save_as_template(self) -> None:
@@ -318,8 +326,11 @@ class IOMixin:
             dlg.Destroy()
             try:
                 _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+                as_template = deepcopy(self.progression)
+                as_template.title = ''
+                as_template.composer = ''
                 with open(path, 'w', encoding='utf-8') as f:
-                    f.write(self.progression.to_json())
+                    f.write(as_template.to_json())
                 self.speak(_("Template saved: {name}").format(name=path.name))
             except Exception as e:
                 self.speak(_("Save failed: {e}").format(e=e))

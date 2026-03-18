@@ -107,6 +107,8 @@ if $ONEFILE; then
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        --include-data-dir=templates=templates \
+        --include-data-files=news.md=news.md \
         "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
         --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \
@@ -124,6 +126,8 @@ else
         --assume-yes-for-downloads \
         --follow-imports \
         --include-data-dir=locales=locales \
+        --include-data-dir=templates=templates \
+        --include-data-files=news.md=news.md \
         "--include-data-dir=$AO3_LIB=accessible_output3/lib" \
         --include-module=mido.backends.rtmidi \
         --nofollow-import-to=unittest \

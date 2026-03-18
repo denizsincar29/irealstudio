@@ -16,12 +16,12 @@ dependencies = [
     "semver>=3.0.4",
     "sounddevice>=0.5.5",
     "wxpython>=4.2.0",
-    "babel>=2.18.0",
     "markdown>=3.10.2",
 ]
 
 [dependency-groups]
 dev = [
+    "babel>=2.18.0",
     "nuitka[onefile]>=4.0.5",
 ]
 
@@ -48,7 +48,10 @@ quiet = true
 follow-imports = true
 
 # Include localisation files so translations work in the distributed build
-include-data-dir = ["locales:locales"]
+include-data-dir = ["locales:locales", "templates:templates"]
+
+# Include release notes markdown used by --releasenotes startup flow.
+include-data-files = ["news.md=news.md"]
 
 # Include all data files (e.g. DLLs) from packages that use them at runtime.
 # compile.bat / compile.sh resolve the accessible_output3 lib path at build
@@ -68,4 +71,3 @@ nofollow-import-to = [
     "tkinter",
     "test",
 ]
-

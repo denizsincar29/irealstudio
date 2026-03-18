@@ -89,6 +89,8 @@ uv run python -m nuitka ^
     --assume-yes-for-downloads ^
     --follow-imports ^
     --include-data-dir=locales=locales ^
+    --include-data-dir=templates=templates ^
+    --include-data-files=news.md=news.md ^
     "--include-data-dir=!AO3_LIB!=accessible_output3/lib" ^
     --include-module=mido.backends.rtmidi ^
     --nofollow-import-to=unittest ^
@@ -109,6 +111,12 @@ if not exist "dist\main.dist\accessible_output3\lib" md "dist\main.dist\accessib
 xcopy /Y /Q "!AO3_LIB!\*.*" "dist\main.dist\accessible_output3\lib\"
 if errorlevel 1 (
     echo ERROR: Failed to copy accessible_output3 DLLs.
+    exit /b 1
+)
+
+copy /Y "register_openwith_windows.bat" "dist\main.dist\register_openwith_windows.bat" >nul
+if errorlevel 1 (
+    echo ERROR: Failed to copy register_openwith_windows.bat.
     exit /b 1
 )
 
