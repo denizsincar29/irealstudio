@@ -1,6 +1,5 @@
 # Task
-1. When selecting cord by cord using shift+right and passing a virtual aria of the second repeat, it instead selects all cords in the virtual area and passes it in one press. It must enter the virtual area and select the cord one by one. E.g. if you want to select and copy cords as they are like the virtual area not existing and repeat is real.
-2. In the new project dialog, make a templating system. E.g. select structure: blues, AABA, ABCD, ABAC, ABAB etc. Than depending on the structure, it asks how many bars A has, etc etc, default 8. In case of the blues it asks 12 16 or 24 bars without sections. The first option must be no template. Also intro and coda checkboxes and how many bars they have (hidden if not checked).
-3. Make a template song system. It's file format is ipst and it's very similar like ips but has no title etc but has bpm. You open a template from open template submenu (from programdir/templates folder), and than it asks for title etc etc.
-4. Carefully review new code and make translations. Actually if you can optimize translations to reduce the number of keys without effecting the quality, it'll be awesome.
-5. Don't make a release. Just add what you did recently to news.md and update changelog.md accordingly.
+1. Make github workflows run faster by caching dependencies by using [this action](https://github.com/actions/cache).
+2. In the copilot instructions, there is a mention that copilot should run tag_release.py. Change it not to run but just write news.md without version number. The user will run it manually. Even don't touch changelog. Copilot must only edit news.md.
+3. Fix bug in mac os latest build fail or don't allow the job to run on mac os latest until the bug is fixed. The bug is that it creates dist/main.app, but than chmods dist/irealstudio-macos/... which doesn't exist.
+4. Autoupdator works but than it doesn't launch the bat file and if i launch it, it says: C:\Users\user\Desktop\IREALS~1\python.exe  диалог  Не удается найти "C:\Users\user\Desktop\IREALS~1\python.exe". Проверьте, правильно ли указано имя и повторите попытку.   
