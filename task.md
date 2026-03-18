@@ -1,7 +1,6 @@
 # Task
-1. When exiting, send all notes off to prevent hanging notes.
-2. There are some major issues on how IReal pro format is exported. Read [IReal pro format specification](https://www.irealpro.com/ireal-pro-custom-chord-chart-protocol) and fix the export.
-3. Why sometimes the word unknown comes in composer name? Fix it. E.g. when composer name is "Sincar Deniz Abdullahovich", it shows "Unknown Sincar Deniz Abdullahovich".
-4. Make a debug export feature where if you specify file type .txt, it will export non url encoded url without any html.
-
-Bugs 2 and 3 are reproduced in examples folder (deniz changes.ips and deniz changes.html). Examine them and fix the bugs.
+1. When selecting cord by cord using shift+right and passing a virtual aria of the second repeat, it instead selects all cords in the virtual area and passes it in one press. It must enter the virtual area and select the cord one by one. E.g. if you want to select and copy cords as they are like the virtual area not existing and repeat is real.
+2. In the new project dialog, make a templating system. E.g. select structure: blues, AABA, ABCD, ABAC, ABAB etc. Than depending on the structure, it asks how many bars A has, etc etc, default 8. In case of the blues it asks 12 16 or 24 bars without sections. The first option must be no template. Also intro and coda checkboxes and how many bars they have (hidden if not checked).
+3. Make a template song system. It's file format is ipst and it's very similar like ips but has no title etc but has bpm. You open a template from open template submenu (from programdir/templates folder), and than it asks for title etc etc.
+4. Carefully review new code and make translations. Actually if you can optimize translations to reduce the number of keys without effecting the quality, it'll be awesome.
+5. Don't make a release. Just add what you did recently to news.md and update changelog.md accordingly.
