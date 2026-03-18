@@ -1,0 +1,30 @@
+{
+  "title": "Waltz AABA 32",
+  "key": "C",
+  "style": "Waltz",
+  "bpm": 120,
+  "composer": "Unknown",
+  "time_signature": "3/4",
+  "total_measures": 32,
+  "items": [],
+  "section_marks": [
+    {
+      "measure": 1,
+      "mark": "*A"
+    },
+    {
+      "measure": 9,
+      "mark": "*A"
+    },
+    {
+      "measure": 17,
+      "mark": "*B"
+    },
+    {
+      "measure": 25,
+      "mark": "*A"
+    }
+  ],
+  "volta_brackets": [],
+  "no_chord_measures": []
+}

@@ -1191,3 +1191,73 @@ msgstr "Применение обновления"
 
 msgid "Failed to apply update: {error}"
 msgstr "Не удалось применить обновление: {error}"
+
+# --- templates ---
+msgid "Template:"
+msgstr "Шаблон:"
+
+msgid "(none)"
+msgstr "(нет)"
+
+msgid "Blues"
+msgstr "Блюз"
+
+msgid "Bars:"
+msgstr "Тактов:"
+
+msgid "Bars for {s}:"
+msgstr "Тактов для {s}:"
+
+msgid "Intro"
+msgstr "Вступление"
+
+msgid "Coda"
+msgstr "Кода"
+
+msgid "Open template"
+msgstr "Открыть шаблон"
+
+msgid "Save as template"
+msgstr "Сохранить как шаблон"
+
+msgid "Open &Template"
+msgstr "Открыть &шаблон"
+
+msgid "Save as &Template..."
+msgstr "Сохранить как &шаблон..."
+
+msgid "&Browse..."
+msgstr "&Обзор..."
+
+msgid "Template saved: {name}"
+msgstr "Шаблон сохранён: {name}"
+
+msgid "No templates available"
+msgstr "Нет доступных шаблонов"
+
+msgid "IReal Studio templates (*.ipst)|*.ipst|All files (*.*)|*.*"
+msgstr "Шаблоны IReal Studio (*.ipst)|*.ipst|Все файлы (*.*)|*.*"
+
+msgid "'{title}' has unsaved changes.\n\nDiscard changes and open template?"
+msgstr "'{title}' содержит несохранённые изменения.\n\nОтменить изменения и открыть шаблон?"
+
+msgid "Bars (12/16/24) [12]: "
+msgstr "Количество тактов (12/16/24) [12]: "
+
+msgid "Template (enter number or name):"
+msgstr "Шаблон (введите номер или название):"
+
+msgid "Intro? (y/n) [n]: "
+msgstr "Вступление? (д/н) [н]: "
+
+msgid "Coda? (y/n) [n]: "
+msgstr "Кода? (д/н) [н]: "
+
+msgid "Intro bars [4]: "
+msgstr "Тактов вступления [4]: "
+
+msgid "Coda bars [4]: "
+msgstr "Тактов коды [4]: "
+
+msgid "Bars for {s} [8]: "
+msgstr "Тактов для {s} [8]: "
