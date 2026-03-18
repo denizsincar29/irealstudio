@@ -68,8 +68,8 @@ AO3_LIB=$(uv run python -c \
 
 # ── determine output names ────────────────────────────────────────────────────
 if [[ "$OS" == "Darwin" ]]; then
-    OUTPUT_FILE="irealstudio-macos"
-    DIST_LABEL="dist/${OUTPUT_FILE}  (single binary)"
+    OUTPUT_FILE="irealstudio"
+    DIST_LABEL="dist/${OUTPUT_FILE}.app  (application bundle)"
 else
     if $ONEFILE; then
         OUTPUT_FILE="irealstudio-linux"
@@ -100,8 +100,12 @@ fi
 info "[3/4] Building with Nuitka..."
 
 if $ONEFILE; then
+    MODE="onefile"
+    if [[ "$OS" == "Darwin" ]]; then
+        MODE="app"
+    fi
     uv run python -m nuitka \
-        --mode=onefile \
+        --mode=$MODE \
         --output-file="${OUTPUT_FILE}" \
         --output-dir=dist \
         --assume-yes-for-downloads \
@@ -117,7 +121,9 @@ if $ONEFILE; then
         --nofollow-import-to=tkinter \
         --nofollow-import-to=test \
         main.py
-    chmod +x "dist/${OUTPUT_FILE}"
+    if [[ "$OS" != "Darwin" ]]; then
+        chmod +x "dist/${OUTPUT_FILE}"
+    fi
 else
     uv run python -m nuitka \
         --mode=standalone \
