@@ -83,6 +83,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Set Nuitka Cache Directory
+        shell: bash
+        run: |
+          mkdir -p .nuitka-cache
+          echo "NUITKA_CACHE_DIR=${{ github.workspace }}/.nuitka-cache" >> "$GITHUB_ENV"
+
+      - name: Restore Nuitka Cache
+        uses: actions/cache@v5
+        with:
+          path: .nuitka-cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-
+
       - name: Get accessible_output3 lib path
         id: ao3_path
         shell: bash
@@ -175,6 +189,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
+      - name: Set Nuitka Cache Directory
+        shell: bash
+        run: |
+          mkdir -p .nuitka-cache
+          echo "NUITKA_CACHE_DIR=${{ github.workspace }}/.nuitka-cache" >> "$GITHUB_ENV"
+
+      - name: Restore Nuitka Cache
+        uses: actions/cache@v5
+        with:
+          path: .nuitka-cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-
+
       - name: Get accessible_output3 lib path
         id: ao3_path
         shell: bash
@@ -185,7 +213,7 @@ jobs:
           # Build a single self-contained binary using the same flags as compile.sh.
           uv run python -m nuitka \
             --mode=app \
-            --output-file=irealstudio-macos \
+            --output-file=irealstudio \
             --output-dir=dist \
             --assume-yes-for-downloads \
             --follow-imports \
@@ -200,13 +228,17 @@ jobs:
             --nofollow-import-to=tkinter \
             --nofollow-import-to=test \
             main.py
-          chmod +x dist/irealstudio-macos
+
+      - name: Package artifact (macOS)
+        run: |
+          cd dist
+          zip -r irealstudio-macos.zip irealstudio.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: irealstudio-macos
-          path: dist/irealstudio-macos
+          path: dist/irealstudio-macos.zip
           if-no-files-found: error
 
   release:
@@ -244,7 +276,7 @@ jobs:
           files: |
             artifacts/irealstudio-windows/irealstudio-windows.zip
             artifacts/irealstudio-linux/irealstudio-linux.tar.gz
-            artifacts/irealstudio-macos/irealstudio-macos
+            artifacts/irealstudio-macos/irealstudio-macos.zip
           draft: false
           prerelease: false
           fail_on_unmatched_files: false

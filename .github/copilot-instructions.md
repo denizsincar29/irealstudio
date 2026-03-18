@@ -90,21 +90,11 @@ CI builds are triggered on `v*` tag pushes via `.github/workflows/release.yml`.
 
 ## Releasing
 
-Use `tag_release.py` (not git commands directly):
+Copilot **must only** edit `news.md`. **Do not** run `tag_release.py`. **Do not** edit `changelog.md` or `version.py`.
 
-```bash
-# 1. Write release notes into news.md (plain bullet points; no version header needed)
-# 2. On a feature branch: draft the release (updates version.py, news.md, changelog.md; commits; no push)
-uv run python tag_release.py 0.3.0
+The user will run `tag_release.py` manually to finalize the release.
 
-# 3. After merging to main: finalize (detects version.py > last tag → tags + pushes immediately)
-uv run python tag_release.py
-```
-
-**How it works:**
-- `tag_release.py VERSION` reads `news.md`, prepends `## vVERSION - DATE` if the header is missing, updates `changelog.md` and `version.py`, then commits. On a non-main branch nothing is pushed (draft). On main it also creates and pushes the tag.
-- `tag_release.py` with no argument on main: if `version.py > last tag`, finalizes immediately. Otherwise prompts interactively.
-- `news.md` is used as the GitHub Release body by the CI workflow — keep it up to date.
+- `news.md` is used as the GitHub Release body by the CI workflow — keep it up to date with human-readable release notes (plain bullet points).
 
 ## Translations (Russian)
 

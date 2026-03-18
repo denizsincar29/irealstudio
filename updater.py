@@ -353,13 +353,21 @@ def apply_update_and_restart(
             "apply_update_and_restart is only supported in compiled mode."
         )
 
-    current_exe = Path(sys.executable)
+    current_exe = Path(sys.executable).resolve()
     current_dir = current_exe.parent
     system = platform.system()
 
+    # If sys.executable is python.exe (misleading in some Nuitka/environment cases),
+    # try to find the actual application executable in the same directory.
+    if system == 'Windows' and current_exe.name.lower() in ('python.exe', 'pythonw.exe'):
+        for candidate in current_dir.glob("*.exe"):
+            if candidate.name.lower() not in ('python.exe', 'pythonw.exe'):
+                current_exe = candidate
+                break
+
     _logger.info(
-        "Applying update: system=%s, src=%s, dst=%s",
-        system, new_content_dir, current_dir,
+        "Applying update: system=%s, exe=%s, src=%s, dst=%s",
+        system, current_exe, new_content_dir, current_dir,
     )
 
     if system == 'Windows':
@@ -384,8 +392,11 @@ def apply_update_and_restart(
             src = str(new_content_dir)
             dst = str(current_dir)
             exe = str(current_exe)
+            log_path = str(current_dir / "irealstudio_update.log")
             lines = [
                 '@echo off\r\n',
+                'setlocal EnableDelayedExpansion\r\n',
+                f'echo [%DATE% %TIME%] Starting update for PID {pid} > "{log_path}"\r\n',
                 # Wait until the main process exits.
                 f':waitloop\r\n',
                 f'tasklist /FI "PID eq {pid}" 2>nul | find /I " {pid} " >nul\r\n',
@@ -393,23 +404,37 @@ def apply_update_and_restart(
                 f'    timeout /t 1 /nobreak >nul\r\n',
                 f'    goto waitloop\r\n',
                 f')\r\n',
+                f'echo [%DATE% %TIME%] Process {pid} exited. >> "{log_path}"\r\n',
                 # Brief pause after process exit to let file locks / AV scanners
                 # release handles before robocopy starts.
                 f'timeout /t 2 /nobreak >nul\r\n',
                 # robocopy exit codes 0-7 indicate success (8+ = error).
-                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS >nul 2>&1\r\n',
-                f'if %errorlevel% leq 7 (\r\n',
-                f'    start "" "{exe}" "--releasenotes"\r\n',
+                f'echo [%DATE% %TIME%] Copying from "{src}" to "{dst}"... >> "{log_path}"\r\n',
+                f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS >> "{log_path}" 2>&1\r\n',
+                f'set ROBO_ERR=%errorlevel%\r\n',
+                f'echo [%DATE% %TIME%] Robocopy finished with code !ROBO_ERR! >> "{log_path}"\r\n',
+                f'if !ROBO_ERR! leq 7 (\r\n',
+                f'    if exist "{exe}" (\r\n',
+                f'        echo [%DATE% %TIME%] Restarting "{exe}"... >> "{log_path}"\r\n',
+                f'        start "" "{exe}" "--releasenotes"\r\n',
+                f'    ) else (\r\n',
+                f'        echo [%DATE% %TIME%] "{exe}" not found, searching for other exe... >> "{log_path}"\r\n',
+                f'        for %%f in ("{dst}\\*.exe") do (\r\n',
+                f'            if not "%%~nxf"=="python.exe" if not "%%~nxf"=="pythonw.exe" (\r\n',
+                f'                echo [%DATE% %TIME%] Restarting "%%f"... >> "{log_path}"\r\n',
+                f'                start "" "%%f" "--releasenotes"\r\n',
+                f'                goto :done\r\n',
+                f'            )\r\n',
+                f'        )\r\n',
+                f'    )\r\n',
+                f')\r\n',
+                f':done\r\n',
             ]
             if cleanup_dir:
                 # Only remove the temp download dir on a successful copy.
-                lines.append(f'    rmdir /s /q "{cleanup_dir}"\r\n')
-            lines += [
-                f')\r\n',
-                # Spawn a separate cmd process to delete the script file so
-                # the running batch file can be removed while it is still active.
-                f'start /b cmd /c del /f /q "%~f0"\r\n',
-            ]
+                lines.append(f'if !ROBO_ERR! leq 7 rmdir /s /q "{cleanup_dir}"\r\n')
+
+            lines.append(f'start /b cmd /c del /f /q "%~f0"\r\n')
             bat_file.write(''.join(lines))
 
         _logger.info("Launching update helper script: %s", bat_path)
