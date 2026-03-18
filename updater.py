@@ -30,6 +30,7 @@ import json
 import logging
 import zipfile
 import tarfile
+import webbrowser
 from pathlib import Path
 from typing import Callable
 
@@ -49,6 +50,59 @@ _GITHUB_API_URL = (
 )
 _RELEASES_PAGE = 'https://github.com/denizsincar29/irealstudio/releases/latest'
 _RELEASE_NOTES_PREVIEW_CHARS = 2000
+
+
+def _news_md_path() -> Path:
+    """Return the best-effort path to ``news.md`` for this runtime."""
+    if _IS_COMPILED:
+        return Path(sys.executable).resolve().parent / 'news.md'
+    return Path(__file__).resolve().parent / 'news.md'
+
+
+def open_release_notes_from_news() -> bool:
+    """Render ``news.md`` to HTML and open it in the default browser.
+
+    Returns ``True`` when a browser open was attempted successfully, otherwise
+    ``False`` (missing file, markdown conversion failure, or browser failure).
+    """
+    news_path = _news_md_path()
+    if not news_path.exists():
+        _logger.warning("Release notes file not found: %s", news_path)
+        return False
+    try:
+        import markdown  # uv dependency: Markdown
+
+        # Best-effort cleanup of stale release-notes temp files from previous runs.
+        for stale in Path(tempfile.gettempdir()).glob('*-irealstudio-release-notes.html'):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+
+        md_text = news_path.read_text(encoding='utf-8')
+        body_html = markdown.markdown(md_text)
+        html_text = (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<title>IReal Studio Release Notes</title>"
+            "<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:900px;"
+            "margin:2rem auto;padding:0 1rem;line-height:1.6}"
+            "h1,h2,h3{line-height:1.3}pre{background:#f5f5f5;padding:0.75rem;"
+            "overflow:auto;border-radius:4px}code{background:#f5f5f5;padding:0.1rem 0.25rem;"
+            "border-radius:3px}</style></head><body>"
+            f"{body_html}</body></html>"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='-irealstudio-release-notes.html',
+            delete=False, encoding='utf-8',
+        ) as f:
+            f.write(html_text)
+            html_path = Path(f.name)
+        webbrowser.open(html_path.as_uri())
+        _logger.info("Release notes opened in browser: %s", html_path)
+        return True
+    except Exception as exc:
+        _logger.warning("Could not open release notes: %s", exc)
+        return False
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
@@ -335,7 +389,7 @@ def apply_update_and_restart(
                 # robocopy exit codes 0-7 indicate success (8+ = error).
                 f'robocopy "{src}" "{dst}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS >nul 2>&1\r\n',
                 f'if %errorlevel% leq 7 (\r\n',
-                f'    start "" "{exe}"\r\n',
+                f'    start "" "{exe}" "--releasenotes"\r\n',
             ]
             if cleanup_dir:
                 # Only remove the temp download dir on a successful copy.
@@ -416,7 +470,12 @@ def apply_update_and_restart(
         # Flush and close all log handlers so the restart entry reaches the
         # file before os.execv replaces the process image.
         logging.shutdown()
-        os.execv(str(current_exe), [str(current_exe)] + sys.argv[1:])
+        restart_args = (
+            [str(current_exe)]
+            + [a for a in sys.argv[1:] if a != '--releasenotes']
+            + ['--releasenotes']
+        )
+        os.execv(str(current_exe), restart_args)
 
     raise RuntimeError(f"Unsupported platform for auto-update: {system}")
 

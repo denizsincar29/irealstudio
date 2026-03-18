@@ -468,9 +468,20 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # Current open file path (None = unsaved / new project)
         self._current_file: Path | None = None
 
+        # Startup flag: open release notes in browser (used after auto-update).
+        startup_args = sys.argv[1:]
+        show_release_notes = '--releasenotes' in startup_args
+        startup_args = [a for a in startup_args if a != '--releasenotes']
+        if show_release_notes:
+            try:
+                from updater import open_release_notes_from_news
+                open_release_notes_from_news()
+            except Exception as exc:
+                _logger.warning("Could not open release notes: %s", exc)
+
         # Load a file passed on the command line (e.g. via Windows "Open with")
-        if len(sys.argv) > 1:
-            cli_path = Path(sys.argv[1])
+        if startup_args:
+            cli_path = Path(startup_args[0])
             if cli_path.exists():
                 try:
                     with open(cli_path, encoding='utf-8') as f:
