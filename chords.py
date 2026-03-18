@@ -602,6 +602,10 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('7(b5)',    '7b5'),
     ('7(#9#5)',  '7#9#5'),
     ('7(b9#5)',  '7b9#5'),
+    # Dominant with 13th (must come before simpler forms to match exactly)
+    ('7(b913)',  '13b9'),  # dominant b9 + 13 → iReal 13b9
+    ('7(#913)',  '13#9'),  # dominant #9 + 13 → iReal 13#9
+    ('7(913)',   '13'),    # dominant nat9 + 13 → iReal 13
     ('7(b9)',   '7b9'),
     ('7(#9)',   '7#9'),
     ('7(9)',    '9'),
@@ -616,7 +620,10 @@ _IREAL_QUALITY_MAP: list[tuple[str, str]] = [
     ('aug7',   '7#5'),
     ('augM7',  '^7#5'),
     ('aug',    '+'),
-    # Sus chords
+    # Sus chords (more-specific forms must come before '7sus4')
+    ('7sus4(b913)', '7b9sus'),  # dominant sus4 + b9 + 13 → iReal 7b9sus
+    ('7sus4(13)',   '13sus'),   # dominant sus4 + 13       → iReal 13sus
+    ('7sus4(b9)',   '7b9sus'),  # dominant sus4 + b9       → iReal 7b9sus
     ('7sus4',  '7sus'),
     ('sus4',   'sus'),
 ]
@@ -642,9 +649,25 @@ def _chord_name_to_ireal(name: str) -> str:
             root = r
             break
     quality = name[len(root):]
+
+    # 1. Exact match in the internal→iReal quality map.
     for src, dst in _IREAL_QUALITY_MAP:
         if quality == src:
             return root + dst
+
+    # 2. The quality may have a spurious iReal Pro section-marker character
+    #    appended (e.g. '7b9C' → '7b9', '6C' → '6', 'sus4C' → 'sus4').
+    #    Known marker chars: C=coda, Q=coda-alt, f=fine, S=segno, Y=vert-space.
+    #    Stripping is only attempted when the suffix consists solely of these
+    #    characters, so genuinely unknown qualities are left unchanged.
+    stripped = quality.rstrip('CQfSY')
+    if stripped != quality and stripped:
+        for src, dst in _IREAL_QUALITY_MAP:
+            if stripped == src:
+                return root + dst
+        # stripped is already in iReal Pro pass-through format
+        return root + stripped
+
     return name  # unchanged — already canonical or unknown
 
 
@@ -696,6 +719,9 @@ _SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
     ('7(9)',          '9'),
     ('7(#11)',        '7 sharp 11'),
     ('7(b13)',        '7 flat 13'),
+    ('7(b913)',       '7 flat 9 13'),
+    ('7(#913)',       '7 sharp 9 13'),
+    ('7(913)',        '13'),
     ('7(13)',         '13'),
     ('6/9',           '6 9'),
     ('dim7',          'diminished 7'),
@@ -703,6 +729,9 @@ _SPOKEN_QUALITY_MAP: list[tuple[str, str]] = [
     ('aug7',          'augmented 7'),
     ('augM7',         'augmented major 7'),
     ('aug',           'augmented'),
+    ('7sus4(b913)',   '7 sus 4 flat 9 13'),
+    ('7sus4(13)',     '7 sus 4 13'),
+    ('7sus4(b9)',     '7 sus 4 flat 9'),
     ('7sus4',         '7 sus 4'),
     ('sus4',          'sus 4'),
     ('7sus',          '7 sus 4'),
@@ -1562,8 +1591,16 @@ class ChordProgression:
     # iReal Pro export
     # -----------------------------------------------------------------------
 
-    def to_ireal_url(self) -> str:
-        """Export to an iRealPro URL string."""
+    def to_ireal_url(self, urlencode: bool = True) -> str:
+        """Export to an iRealPro URL string.
+
+        Parameters
+        ----------
+        urlencode:
+            When *True* (default) the returned URL is percent-encoded so it
+            can be embedded in HTML or opened by browsers.  When *False* the
+            raw human-readable URL is returned (useful for debug exports).
+        """
         from pyrealpro import Song, Measure as IrMeasure, TimeSignature as IrTS
 
         # Map our time signature to iReal Pro TimeSignature
@@ -1680,7 +1717,7 @@ class ChordProgression:
                 )
                 song.measures.append(ir_measure)
 
-        return song.url()
+        return song.url(urlencode=urlencode)
 
     # -----------------------------------------------------------------------
     # Transpose helpers

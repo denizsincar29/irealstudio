@@ -1767,5 +1767,137 @@ class TestTransposeHelpers(unittest.TestCase):
         self.assertEqual(prog.items[0].chord.name, 'Dm7')
 
 
+class TestBugFixes(unittest.TestCase):
+    """Regression tests for bugs fixed per task.md."""
+
+    # -----------------------------------------------------------------------
+    # Bug 2: missing iReal Pro quality mappings & corrupted chord names
+    # -----------------------------------------------------------------------
+
+    def _ireal(self, chord_name: str) -> str:
+        from chords import ProgressionItem, Chord, Position, TimeSignature
+        pos = Position(1, 1, TimeSignature(4, 4))
+        item = ProgressionItem(chord=Chord(chord_name), position=pos, bass_note='')
+        return item.ireal_chord_name()
+
+    def test_7b913_maps_to_13b9(self):
+        """F7(b913) must export as F13b9 (dominant b9+13)."""
+        self.assertEqual('F13b9', self._ireal('F7(b913)'))
+
+    def test_g7b913_maps_to_g13b9(self):
+        """G7(b913) must export as G13b9."""
+        self.assertEqual('G13b9', self._ireal('G7(b913)'))
+
+    def test_7sus4_with_13_maps_to_13sus(self):
+        """G7sus4(13) must export as G13sus."""
+        self.assertEqual('G13sus', self._ireal('G7sus4(13)'))
+
+    def test_7sus4_with_b9_maps_to_7b9sus(self):
+        """G7sus4(b9) must export as G7b9sus."""
+        self.assertEqual('G7b9sus', self._ireal('G7sus4(b9)'))
+
+    def test_7sus4_with_b9_and_13_maps_to_7b9sus(self):
+        """G7sus4(b913) must export as G7b9sus."""
+        self.assertEqual('G7b9sus', self._ireal('G7sus4(b913)'))
+
+    def test_corrupted_sus4_with_trailing_C(self):
+        """Fsus4C (coda marker erroneously appended) must export as Fsus."""
+        self.assertEqual('Fsus', self._ireal('Fsus4C'))
+
+    def test_corrupted_7b9_with_trailing_C(self):
+        """F7b9C (iReal-format quality with trailing marker) must export as F7b9."""
+        self.assertEqual('F7b9', self._ireal('F7b9C'))
+
+    def test_corrupted_6_with_trailing_C(self):
+        """Bb6C (trailing marker) must export as Bb6."""
+        self.assertEqual('Bb6', self._ireal('Bb6C'))
+
+    def test_7b913_recognition_from_notes(self):
+        """Notes C-E-G-Bb-Db-A (C dominant with b9 and 13th) → C7(b913)."""
+        from chords import Chord
+        c = Chord.from_notes(['C', 'E', 'G', 'Bb', 'Db', 'A'])
+        self.assertIsNotNone(c)
+        self.assertEqual('C7(b913)', c.name)
+
+    def test_7sus4_13_recognition_from_notes(self):
+        """Notes G-C-F-E (G sus4 dominant with 13th) → G7sus4(13)."""
+        from chords import Chord
+        c = Chord.from_notes(['G', 'C', 'F', 'E'])
+        self.assertIsNotNone(c)
+        self.assertEqual('G7sus4(13)', c.name)
+
+    def test_deniz_example_file_export(self):
+        """The Deniz_changes.ips example file must export without known-bad patterns."""
+        from chords import ChordProgression
+        ips_path = os.path.join(os.path.dirname(__file__), '..', 'examples', 'Deniz_changes.ips')
+        with open(ips_path, encoding='utf-8') as f:
+            prog = ChordProgression.from_json(f.read())
+        url = prog.to_ireal_url(urlencode=False)
+        # Bug 2 fixes: these invalid patterns must be absent
+        for bad in ('7(b913)', '7sus4(13)', 'Fsus4C', 'F7b9C', 'Bb6C'):
+            self.assertNotIn(bad, url, f"Unexpected pattern {bad!r} still present in URL")
+        # Bug 3 fix: composer name must not have 'Unknown' prefix
+        self.assertNotIn('Unknown Sincar', url)
+        # Correct patterns must be present
+        self.assertIn('13b9', url)
+        self.assertIn('13sus', url)
+
+    # -----------------------------------------------------------------------
+    # Bug 3: composer name must not gain "Unknown" prefix
+    # -----------------------------------------------------------------------
+
+    def test_composer_name_first_only(self):
+        """When only composer_name_first is supplied, no 'Unknown' prefix appears."""
+        from pyrealpro import Song
+        s = Song(title='T', composer_name_first='Sincar Deniz Abdullahovich',
+                 key='C', style='Medium Swing')
+        self.assertEqual('Sincar Deniz Abdullahovich', s.composer_name)
+
+    def test_composer_legacy_kwarg(self):
+        """Legacy 'composer' kwarg must produce the given name, not 'Unknown <name>'."""
+        from pyrealpro import Song
+        s = Song(title='T', composer='Bach', key='C', style='Medium Swing')
+        self.assertEqual('Bach', s.composer_name)
+
+    def test_composer_both_names(self):
+        """When both first and last name are given, format is 'last first'."""
+        from pyrealpro import Song
+        s = Song(title='T', composer_name_first='Johann',
+                 composer_name_last='Bach', key='C', style='Medium Swing')
+        self.assertEqual('Bach Johann', s.composer_name)
+
+    def test_composer_default_is_unknown(self):
+        """With no composer info, composer_name must be 'Unknown'."""
+        from pyrealpro import Song
+        s = Song(title='T', key='C', style='Medium Swing')
+        self.assertEqual('Unknown', s.composer_name)
+
+    def test_composer_last_name_only(self):
+        """When only last name is set, no 'Unknown' suffix appears."""
+        from pyrealpro import Song
+        s = Song(title='T', composer_name_last='Bach', key='C', style='Medium Swing')
+        self.assertEqual('Bach', s.composer_name)
+
+    # -----------------------------------------------------------------------
+    # Bug 4: urlencode=False exports raw (non-encoded) URL
+    # -----------------------------------------------------------------------
+
+    def test_to_ireal_url_urlencode_false_is_not_percent_encoded(self):
+        """to_ireal_url(urlencode=False) must return a human-readable URL."""
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        raw = prog.to_ireal_url(urlencode=False)
+        # Percent-encoded output would have %20, %7C etc.
+        self.assertNotIn('%', raw)
+        self.assertIn('irealbook://', raw)
+
+    def test_to_ireal_url_default_is_percent_encoded(self):
+        """to_ireal_url() (default) must return a percent-encoded URL."""
+        prog = make_prog()
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        encoded = prog.to_ireal_url()
+        self.assertIn('%', encoded)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -261,7 +261,7 @@ class IOMixin:
                 message=_("Export iReal Pro HTML"),
                 defaultDir=default_dir,
                 defaultFile=default_name,
-                wildcard=_("HTML files (*.html)|*.html|All files (*.*)|*.*"),
+                wildcard=_("HTML files (*.html)|*.html|Text files (*.txt)|*.txt|All files (*.*)|*.*"),
                 style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
             )
             if dlg.ShowModal() != wx.ID_OK:
@@ -272,9 +272,16 @@ class IOMixin:
         else:
             html_file = default_name
         try:
-            with open(html_file, 'w', encoding='utf-8') as f:
-                f.write(html)
-            self.speak(_("Exported to {name}").format(name=Path(html_file).name))
+            dest = Path(html_file)
+            if dest.suffix.lower() == '.txt':
+                # Debug export: raw non-URL-encoded URL, no HTML wrapper
+                content = self.progression.to_ireal_url(urlencode=False)
+                with open(dest, 'w', encoding='utf-8') as f:
+                    f.write(content)
+            else:
+                with open(dest, 'w', encoding='utf-8') as f:
+                    f.write(html)
+            self.speak(_("Exported to {name}").format(name=dest.name))
         except Exception as e:
             self.speak(_("Export failed: {e}").format(e=e))
 

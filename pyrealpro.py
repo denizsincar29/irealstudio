@@ -52,9 +52,15 @@ class Song:
 
     @property
     def composer_name(self):
-        if self.composer_name_first == 'Unknown' and self.composer_name_last == 'Unknown':
-            return 'Unknown'
-        return f"{self.composer_name_last} {self.composer_name_first}"
+        first_set = self.composer_name_first != 'Unknown'
+        last_set  = self.composer_name_last  != 'Unknown'
+        if first_set and last_set:
+            return f"{self.composer_name_last} {self.composer_name_first}"
+        if first_set:
+            return self.composer_name_first
+        if last_set:
+            return self.composer_name_last
+        return 'Unknown'
 
     def url(self, urlencode=True):
         if len(self.measures) == 0:
