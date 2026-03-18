@@ -458,6 +458,8 @@ class App(MenuMixin, KeysMixin, IOMixin):
         self._midi_menu = None
         self._midi_out_menu = None
         self._sound_out_menu = None
+        self._templates_menu = None
+        self._template_files: list = []
         self._chord_grid: ChordGridPanel | None = None
         # Cached state tuple used to detect changes before refreshing the chord grid.
         # Compared in _schedule_display_update; Refresh() is called only on change.
@@ -466,9 +468,20 @@ class App(MenuMixin, KeysMixin, IOMixin):
         # Current open file path (None = unsaved / new project)
         self._current_file: Path | None = None
 
+        # Startup flag: open release notes in browser (used after auto-update).
+        startup_args = sys.argv[1:]
+        show_release_notes = '--releasenotes' in startup_args
+        startup_args = [a for a in startup_args if a != '--releasenotes']
+        if show_release_notes:
+            try:
+                from updater import open_release_notes_from_news
+                open_release_notes_from_news()
+            except Exception as exc:
+                _logger.warning("Could not open release notes: %s", exc)
+
         # Load a file passed on the command line (e.g. via Windows "Open with")
-        if len(sys.argv) > 1:
-            cli_path = Path(sys.argv[1])
+        if startup_args:
+            cli_path = Path(startup_args[0])
             if cli_path.exists():
                 try:
                     with open(cli_path, encoding='utf-8') as f:
@@ -1056,7 +1069,32 @@ class App(MenuMixin, KeysMixin, IOMixin):
                         self.cursor = Position(self.cursor.measure + 1, 1, ts)
                 else:
                     nxt = self.progression.find_next_chord_to_right(self.cursor)
-                    if nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
+                    # Mirror navigate(): enter the nearest virtual block that
+                    # lies between the cursor and the next stored chord before
+                    # jumping to the chord itself.
+                    virtual_entry = None
+                    for vb in self.progression.volta_brackets:
+                        if not vb.is_complete():
+                            continue
+                        vs = vb.ending1_end + 1
+                        hidden_end = vb.ending2_start - 1
+                        hidden_reachable = (nxt is None or vs <= nxt.position.measure)
+                        if (vs <= hidden_end
+                                and self.cursor.measure < vs
+                                and hidden_reachable):
+                            if virtual_entry is None or vs < virtual_entry:
+                                virtual_entry = vs
+                        if vb.is_repeat_only():
+                            vr = vb.plain_virtual_range()
+                            plain_reachable = (nxt is None or vr is not None and vr[0] <= nxt.position.measure)
+                            if (vr
+                                    and self.cursor.measure < vr[0]
+                                    and plain_reachable):
+                                if virtual_entry is None or vr[0] < virtual_entry:
+                                    virtual_entry = vr[0]
+                    if virtual_entry is not None:
+                        self.cursor = Position(virtual_entry, 1, ts)
+                    elif nxt and not self.progression.is_in_hidden_range(nxt.position.measure):
                         self.cursor = nxt.position
             else:
                 if self.progression.is_in_virtual_range(self.cursor.measure):
@@ -1080,8 +1118,32 @@ class App(MenuMixin, KeysMixin, IOMixin):
                             self.cursor = prv.position
                 else:
                     prv = self.progression.find_last_chord_to_left(self.cursor)
-                    if prv and not self.progression.is_in_hidden_range(prv.position.measure):
-                        self.cursor = prv.position
+                    if prv:
+                        # Mirror navigate(): enter the nearest virtual block that
+                        # lies between the previous chord and the cursor before
+                        # jumping to the chord itself.
+                        virtual_exit = None
+                        for vb in self.progression.volta_brackets:
+                            if not vb.is_complete():
+                                continue
+                            vs = vb.ending1_end + 1
+                            hidden_end = vb.ending2_start - 1
+                            if (vs <= hidden_end
+                                    and prv.position.measure < vs
+                                    <= self.cursor.measure):
+                                if virtual_exit is None or hidden_end > virtual_exit:
+                                    virtual_exit = hidden_end
+                            if vb.is_repeat_only():
+                                vr = vb.plain_virtual_range()
+                                if (vr
+                                        and prv.position.measure < vr[0]
+                                        <= self.cursor.measure):
+                                    if virtual_exit is None or vr[1] > virtual_exit:
+                                        virtual_exit = vr[1]
+                        if virtual_exit is not None:
+                            self.cursor = Position(virtual_exit, 1, ts)
+                        elif not self.progression.is_in_hidden_range(prv.position.measure):
+                            self.cursor = prv.position
         self._sel_active = self.cursor
         self._announce_selection()
 

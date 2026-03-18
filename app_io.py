@@ -5,6 +5,8 @@ Extracted from main.py to reduce its size.
 """
 import io
 import logging
+import sys
+from copy import deepcopy
 from pathlib import Path
 
 import wx
@@ -23,6 +25,66 @@ from app_settings import (
 from i18n import _
 
 _app_logger = logging.getLogger('irealstudio')
+
+# ---------------------------------------------------------------------------
+# Directory containing bundled .ipst template files.
+# ---------------------------------------------------------------------------
+def _runtime_templates_dir() -> Path:
+    """Return the best runtime location for bundled template files."""
+    candidates = [
+        Path(sys.executable).resolve().parent / 'templates',
+        Path(__file__).resolve().parent / 'templates',
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[-1]
+
+
+_TEMPLATES_DIR = _runtime_templates_dir()
+
+
+def _apply_template(prog: ChordProgression, template: str, data: dict) -> None:
+    """Populate *prog* with section marks and ``total_measures`` for *template*.
+
+    Called from :meth:`IOMixin.new_project` after the progression is created.
+    """
+    intro_bars: int = data.get('template_intro_bars', 0) if data.get('template_intro') else 0
+    coda_bars: int  = data.get('template_coda_bars', 0)  if data.get('template_coda')  else 0
+
+    cursor = 1
+    if intro_bars > 0:
+        prog.add_section_mark(cursor, '*i')
+        cursor += intro_bars
+
+    if template == 'Blues':
+        blues_bars = int(data.get('template_blues_bars', 12))
+        if blues_bars not in (12, 16, 24):
+            blues_bars = 12
+        cursor += blues_bars
+    else:
+        bars: dict[str, int] = {
+            'a': int(data.get('template_bars_a', 8)),
+            'b': int(data.get('template_bars_b', 8)),
+            'c': int(data.get('template_bars_c', 8)),
+            'd': int(data.get('template_bars_d', 8)),
+        }
+        mark_map = {'a': '*A', 'b': '*B', 'c': '*C', 'd': '*D'}
+        sequences: dict[str, list[str]] = {
+            'AABA': ['a', 'a', 'b', 'a'],
+            'ABAC': ['a', 'b', 'a', 'c'],
+            'ABAB': ['a', 'b', 'a', 'b'],
+            'ABCD': ['a', 'b', 'c', 'd'],
+        }
+        for letter in sequences.get(template, []):
+            prog.add_section_mark(cursor, mark_map[letter])
+            cursor += bars[letter]
+
+    if coda_bars > 0:
+        prog.add_section_mark(cursor, 'Q')
+        cursor += coda_bars
+
+    prog.total_measures = max(prog.total_measures, cursor - 1)
 
 # Keyboard shortcuts reference (translated as a whole at runtime)
 _KEYBOARD_SHORTCUTS_TEXT = """\
@@ -166,6 +228,115 @@ class IOMixin:
         else:
             dlg.Destroy()
 
+    def open_template(self, path: 'Path | None' = None) -> None:
+        """Load an .ipst template file and prompt for title/composer.
+
+        *path* may be provided directly (e.g. from the Templates submenu); when
+        ``None`` a file-open dialog is shown, defaulting to the templates folder.
+        """
+        if self._frame is None:
+            return
+
+        if path is None:
+            default_dir = str(_TEMPLATES_DIR) if _TEMPLATES_DIR.exists() else ''
+            dlg = wx.FileDialog(
+                self._frame,
+                message=_("Open template"),
+                defaultDir=default_dir,
+                wildcard=_("IReal Studio templates (*.ipst)|*.ipst|All files (*.*)|*.*"),
+                style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+            )
+            if dlg.ShowModal() == wx.ID_OK:
+                path = Path(dlg.GetPath())
+                dlg.Destroy()
+            else:
+                dlg.Destroy()
+                return
+
+        try:
+            with open(path, encoding='utf-8') as f:
+                tmpl_prog = ChordProgression.from_json(f.read())
+        except Exception as e:
+            self.speak(_("Open failed: {e}").format(e=e))
+            return
+
+        # Ask the user for title/composer (and let them override key/style/bpm).
+        data = new_project_dialog(
+            parent=self._frame,
+            defaults={
+                'title':    '',
+                'composer': '',
+                'key':      tmpl_prog.key,
+                'style':    tmpl_prog.style,
+                'bpm':      tmpl_prog.bpm,
+            },
+            show_template=False,
+        )
+        if data is None:
+            return
+
+        # Apply the user's metadata on top of the loaded template.
+        tmpl_prog.title    = data.get('title', '')
+        tmpl_prog.composer = data.get('composer', '')
+        tmpl_prog.key      = data.get('key', tmpl_prog.key)
+        tmpl_prog.style    = data.get('style', tmpl_prog.style)
+        try:
+            bpm = int(data.get('bpm', tmpl_prog.bpm))
+            if BPM_MIN <= bpm <= BPM_MAX:
+                tmpl_prog.bpm = bpm
+        except (ValueError, TypeError):
+            pass
+
+        # Stop recording/playback and swap in the new progression.
+        if self._recorder.state != AppState.IDLE:
+            self._recorder.stop_all()
+        if self._is_dirty:
+            confirm = wx.MessageDialog(
+                self._frame,
+                _("'{title}' has unsaved changes.\n\nDiscard changes and open template?").format(
+                    title=self.progression.title
+                ),
+                _("Unsaved Changes"),
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+            )
+            if confirm.ShowModal() != wx.ID_YES:
+                confirm.Destroy()
+                return
+            confirm.Destroy()
+
+        self.progression = tmpl_prog
+        self._apply_loaded_progression(path=None)
+        self.speak(_("New project: {title}").format(title=self.progression.title))
+
+    def save_as_template(self) -> None:
+        """Save the current progression as an .ipst template file."""
+        if self._frame is None:
+            return
+        default_name = _safe_filename(self.progression.title) + '.ipst'
+        dlg = wx.FileDialog(
+            self._frame,
+            message=_("Save as template"),
+            defaultDir=str(_TEMPLATES_DIR) if _TEMPLATES_DIR.exists() else '',
+            defaultFile=default_name,
+            wildcard=_("IReal Studio templates (*.ipst)|*.ipst|All files (*.*)|*.*"),
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            path = Path(dlg.GetPath())
+            dlg.Destroy()
+            try:
+                _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+                as_template = deepcopy(self.progression)
+                as_template.title = ''
+                as_template.composer = ''
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(as_template.to_json())
+                self.speak(_("Template saved: {name}").format(name=path.name))
+            except Exception as e:
+                self.speak(_("Save failed: {e}").format(e=e))
+        else:
+            dlg.Destroy()
+
     def new_project(self) -> None:
         """Prompt to save unsaved changes, then show New Project dialog and reset state."""
         # Stop any active recording / playback before resetting state.
@@ -231,6 +402,10 @@ class IOMixin:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._clear_selection()
+        # Apply template structure (section marks, total_measures) if requested.
+        tmpl = data.get('template', '')
+        if tmpl:
+            _apply_template(self.progression, tmpl, data)
         # Clear last_file so next launch also shows the new project dialog.
         self._save_app_settings()
         self.speak(_("New project: {title}").format(title=self.progression.title))

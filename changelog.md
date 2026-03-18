@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.1 - 2026-03-18
+
+- Fixed Shift+Right / Shift+Left selection so it enters virtual (repeated) areas chord-by-chord instead of jumping past the entire virtual block in one press.
+- New Project dialog now offers a template structure picker (Blues 12/16/24, AABA, ABAC, ABAB, ABCD) with per-section bar counts and optional Intro/Coda bars.
+- Added `.ipst` template file format: save any progression as a reusable template via *File → Save as Template…* and reopen it via *File → Open Template*.  Bundled sample templates included (Blues 12, Minor Blues 12, AABA/ABAC/ABCD 32, Ballad AABA 32, Waltz AABA 32).
+- Added Russian translations for all new UI strings.
+
 ## v0.2.0 - 2026-03-17
 
 - Repeat workflow: `[` + `]` creates normal repeats; `V` adds optional volta endings.

@@ -96,13 +96,21 @@ def prompt_input(title: str, prompt: str, default: str = '',
         return None
 
 
-def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None:
+def new_project_dialog(parent=None, defaults: dict | None = None,
+                       show_template: bool = True) -> dict | None:
     """
     Show a 'New Project' dialog that collects title, composer, key, style and BPM.
 
     *defaults* is a dict with any of those keys; missing keys use built-in defaults.
-    Returns a dict ``{'title', 'composer', 'key', 'style', 'bpm'}`` on OK,
-    or ``None`` if the user cancelled.
+    *show_template* controls whether the template structure section is shown
+    (set to ``False`` when opening an .ipst template file).
+
+    Returns a dict on OK, or ``None`` if the user cancelled.
+    The dict always contains ``title``, ``composer``, ``key``, ``style``, ``bpm``.
+    When *show_template* is ``True`` it also contains ``template`` (str),
+    ``template_blues_bars`` (int), ``template_bars_a/b/c/d`` (int),
+    ``template_intro`` (bool), ``template_intro_bars`` (int),
+    ``template_coda`` (bool), ``template_coda_bars`` (int).
     """
     _defaults: dict = defaults or {}
     # Text-entry fields (title, composer, bpm only — key and style get choices)
@@ -162,6 +170,64 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                 result['style'] = default_style
         except (KeyboardInterrupt, EOFError):
             return None
+        # Template section (non-Windows fallback)
+        if show_template:
+            _tmpl_names = ['(none)', 'Blues', 'AABA', 'ABAC', 'ABAB', 'ABCD']
+            print(_("Template (enter number or name):"))
+            for idx, t in enumerate(_tmpl_names, 1):
+                print(f"  {idx}: {t}")
+            try:
+                raw = input("[1]: ").strip()
+                if raw.isdigit():
+                    idx = int(raw) - 1
+                    tmpl = _tmpl_names[idx] if 0 <= idx < len(_tmpl_names) else '(none)'
+                elif raw in _tmpl_names:
+                    tmpl = raw
+                else:
+                    tmpl = '(none)'
+            except (KeyboardInterrupt, EOFError):
+                return None
+            result['template'] = '' if tmpl == '(none)' else tmpl
+            if tmpl != '(none)':
+                if tmpl == 'Blues':
+                    try:
+                        raw = input(_("Bars (12/16/24) [12]: ")).strip()
+                        result['template_blues_bars'] = int(raw) if raw in ('12', '16', '24') else 12
+                    except (KeyboardInterrupt, EOFError, ValueError):
+                        result['template_blues_bars'] = 12
+                elif tmpl in ('AABA', 'ABAC', 'ABAB', 'ABCD'):
+                    letters = {'AABA': 'AB', 'ABAC': 'ABC', 'ABAB': 'AB', 'ABCD': 'ABCD'}[tmpl]
+                    for letter in letters:
+                        try:
+                            raw = input(_("Bars for {s} [8]: ").format(s=letter)).strip()
+                            result[f'template_bars_{letter.lower()}'] = int(raw) if raw.isdigit() else 8
+                        except (KeyboardInterrupt, EOFError):
+                            result[f'template_bars_{letter.lower()}'] = 8
+                try:
+                    raw = input(_("Intro? (y/n) [n]: ")).strip().lower()
+                    result['template_intro'] = raw in ('y', 'yes', '1')
+                    result['template_intro_bars'] = 0
+                    if result['template_intro']:
+                        raw2 = input(_("Intro bars [4]: ")).strip()
+                        result['template_intro_bars'] = int(raw2) if raw2.isdigit() else 4
+                except (KeyboardInterrupt, EOFError):
+                    result['template_intro'] = False
+                    result['template_intro_bars'] = 0
+                try:
+                    raw = input(_("Coda? (y/n) [n]: ")).strip().lower()
+                    result['template_coda'] = raw in ('y', 'yes', '1')
+                    result['template_coda_bars'] = 0
+                    if result['template_coda']:
+                        raw2 = input(_("Coda bars [4]: ")).strip()
+                        result['template_coda_bars'] = int(raw2) if raw2.isdigit() else 4
+                except (KeyboardInterrupt, EOFError):
+                    result['template_coda'] = False
+                    result['template_coda_bars'] = 0
+            else:
+                result['template_intro'] = False
+                result['template_intro_bars'] = 0
+                result['template_coda'] = False
+                result['template_coda_bars'] = 0
         return result
 
     try:
@@ -169,6 +235,7 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
         from pyrealpro import STYLES_ALL
 
         _default_root, _default_mode = key_to_root_mode(default_key)
+        _show_template = show_template
 
         class _NewProjectDlg(wx.Dialog):
             def __init__(self, parent_wnd):
@@ -214,10 +281,106 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                 grid.Add(style_choice, flag=wx.EXPAND)
 
                 outer = wx.BoxSizer(wx.VERTICAL)
-                outer.Add(grid, proportion=1,
+                outer.Add(grid, proportion=0,
                           flag=wx.EXPAND | wx.ALL, border=12)
+
+                # ---- Template section (optional) ----
+                if _show_template:
+                    outer.Add(wx.StaticLine(self),
+                              flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=12)
+
+                    tmpl_row = wx.BoxSizer(wx.HORIZONTAL)
+                    tmpl_row.Add(wx.StaticText(self, label=_('Template:')),
+                                 flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                    self._tmpl_choice = wx.Choice(
+                        self,
+                        choices=[_('(none)'), _('Blues'), 'AABA', 'ABAC', 'ABAB', 'ABCD'],
+                    )
+                    self._tmpl_choice.SetSelection(0)
+                    tmpl_row.Add(self._tmpl_choice, proportion=1)
+                    outer.Add(tmpl_row,
+                              flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=12)
+
+                    # Blues options panel (shown only for Blues template)
+                    self._blues_panel = wx.Panel(self)
+                    blues_sz = wx.BoxSizer(wx.HORIZONTAL)
+                    blues_sz.Add(wx.StaticText(self._blues_panel, label=_('Bars:')),
+                                 flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                    self._blues_bars = wx.Choice(self._blues_panel,
+                                                 choices=['12', '16', '24'])
+                    self._blues_bars.SetSelection(0)
+                    blues_sz.Add(self._blues_bars)
+                    self._blues_panel.SetSizer(blues_sz)
+                    self._blues_panel.Show(False)
+                    outer.Add(self._blues_panel,
+                              flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=12)
+
+                    # Section-form bars panel (shown for AABA/ABAC/ABAB/ABCD)
+                    self._sect_panel = wx.Panel(self)
+                    sect_sz = wx.BoxSizer(wx.VERTICAL)
+                    self._sect_row_panels: dict[str, wx.Panel] = {}
+                    self._sect_ctrls: dict[str, wx.SpinCtrl] = {}
+                    for letter in 'ABCD':
+                        rp = wx.Panel(self._sect_panel)
+                        rs = wx.BoxSizer(wx.HORIZONTAL)
+                        rs.Add(wx.StaticText(rp,
+                                            label=_('Bars for {s}:').format(s=letter)),
+                               proportion=1,
+                               flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                        sc = wx.SpinCtrl(rp, value='8', min=1, max=64)
+                        rs.Add(sc, flag=wx.ALIGN_CENTER_VERTICAL)
+                        rp.SetSizer(rs)
+                        sect_sz.Add(rp, flag=wx.EXPAND | wx.BOTTOM, border=4)
+                        self._sect_row_panels[letter] = rp
+                        self._sect_ctrls[letter] = sc
+                    self._sect_panel.SetSizer(sect_sz)
+                    self._sect_panel.Show(False)
+                    outer.Add(self._sect_panel,
+                              flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=12)
+
+                    # Intro / Coda panel (shown for all non-none templates)
+                    self._ic_panel = wx.Panel(self)
+                    ic_sz = wx.BoxSizer(wx.VERTICAL)
+                    intro_row = wx.BoxSizer(wx.HORIZONTAL)
+                    self._intro_check = wx.CheckBox(self._ic_panel, label=_('Intro'))
+                    self._intro_bars = wx.SpinCtrl(self._ic_panel, value='4', min=1, max=32)
+                    self._intro_bars.Enable(False)
+                    intro_row.Add(self._intro_check,
+                                  flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                    intro_row.Add(self._intro_bars, flag=wx.ALIGN_CENTER_VERTICAL)
+                    ic_sz.Add(intro_row, flag=wx.EXPAND | wx.BOTTOM, border=4)
+                    coda_row = wx.BoxSizer(wx.HORIZONTAL)
+                    self._coda_check = wx.CheckBox(self._ic_panel, label=_('Coda'))
+                    self._coda_bars = wx.SpinCtrl(self._ic_panel, value='4', min=1, max=32)
+                    self._coda_bars.Enable(False)
+                    coda_row.Add(self._coda_check,
+                                 flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+                    coda_row.Add(self._coda_bars, flag=wx.ALIGN_CENTER_VERTICAL)
+                    ic_sz.Add(coda_row, flag=wx.EXPAND)
+                    self._ic_panel.SetSizer(ic_sz)
+                    self._ic_panel.Show(False)
+                    outer.Add(self._ic_panel,
+                              flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=12)
+
+                    self._tmpl_choice.Bind(wx.EVT_CHOICE, self._on_template_change)
+                    self._intro_check.Bind(wx.EVT_CHECKBOX, self._on_intro_check)
+                    self._coda_check.Bind(wx.EVT_CHECKBOX, self._on_coda_check)
+                else:
+                    # Placeholders so get_values() can safely reference attributes
+                    self._tmpl_choice = None
+                    self._blues_panel = None
+                    self._sect_panel = None
+                    self._ic_panel = None
+                    self._blues_bars = None
+                    self._sect_row_panels = {}
+                    self._sect_ctrls = {}
+                    self._intro_check = None
+                    self._intro_bars = None
+                    self._coda_check = None
+                    self._coda_bars = None
+
                 outer.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL),
-                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+                          flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.TOP,
                           border=12)
                 self.SetSizerAndFit(outer)
 
@@ -230,6 +393,41 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
 
                 # Focus first field for screen readers
                 list(self._ctrls.values())[0].SetFocus()
+
+            # ----------------------------------------------------------
+            # Template helpers
+            # ----------------------------------------------------------
+
+            def _on_template_change(self, event: wx.CommandEvent) -> None:
+                tmpl = self._tmpl_choice.GetString(self._tmpl_choice.GetSelection())
+                none_label = _('(none)')
+                blues_label = _('Blues')
+                if tmpl == none_label:
+                    self._blues_panel.Show(False)
+                    self._sect_panel.Show(False)
+                    self._ic_panel.Show(False)
+                elif tmpl == blues_label:
+                    self._blues_panel.Show(True)
+                    self._sect_panel.Show(False)
+                    self._ic_panel.Show(True)
+                else:
+                    self._blues_panel.Show(False)
+                    visible = {
+                        'AABA': 'AB', 'ABAC': 'ABC', 'ABAB': 'AB', 'ABCD': 'ABCD',
+                    }.get(tmpl, '')
+                    for letter in 'ABCD':
+                        self._sect_row_panels[letter].Show(letter in visible)
+                    self._sect_panel.Layout()
+                    self._sect_panel.Show(True)
+                    self._ic_panel.Show(True)
+                self.Layout()
+                self.Fit()
+
+            def _on_intro_check(self, event: wx.CommandEvent) -> None:
+                self._intro_bars.Enable(self._intro_check.IsChecked())
+
+            def _on_coda_check(self, event: wx.CommandEvent) -> None:
+                self._coda_bars.Enable(self._coda_check.IsChecked())
 
             # ----------------------------------------------------------
             # BPM helpers
@@ -323,6 +521,34 @@ def new_project_dialog(parent=None, defaults: dict | None = None) -> dict | None
                 mode_idx = self._key_mode_choice.GetSelection()
                 mode = 'minor' if mode_idx == 1 else 'major'
                 result['key'] = root_mode_to_key(root, mode)
+                # Template data
+                if _show_template and self._tmpl_choice is not None:
+                    tmpl_label = self._tmpl_choice.GetString(
+                        self._tmpl_choice.GetSelection())
+                    none_label = _('(none)')
+                    blues_label = _('Blues')
+                    if tmpl_label == none_label:
+                        result['template'] = ''
+                    elif tmpl_label == blues_label:
+                        result['template'] = 'Blues'
+                        result['template_blues_bars'] = int(
+                            self._blues_bars.GetString(
+                                self._blues_bars.GetSelection()))
+                    else:
+                        result['template'] = tmpl_label
+                        for letter in 'ABCD':
+                            result[f'template_bars_{letter.lower()}'] = (
+                                self._sect_ctrls[letter].GetValue())
+                    result['template_intro'] = (self._intro_check is not None
+                                                and self._intro_check.IsChecked())
+                    result['template_intro_bars'] = (
+                        self._intro_bars.GetValue()
+                        if result.get('template_intro') else 0)
+                    result['template_coda'] = (self._coda_check is not None
+                                               and self._coda_check.IsChecked())
+                    result['template_coda_bars'] = (
+                        self._coda_bars.GetValue()
+                        if result.get('template_coda') else 0)
                 return result
 
         dlg = _NewProjectDlg(parent)

@@ -3,12 +3,15 @@ app_menu.py – Menu building and menu event handler mixin for the App class.
 
 Extracted from main.py to reduce its size.
 """
+from pathlib import Path
 import wx
 from sound import get_output_devices, set_output_device, get_current_output_device
 from recorder import AppState
 from commands import (
     _CMD_FILE_NEW, _CMD_FILE_OPEN, _CMD_FILE_SAVE, _CMD_FILE_SAVE_AS,
     _CMD_FILE_EXPORT, _CMD_FILE_QR, _CMD_FILE_QUIT,
+    _CMD_FILE_OPEN_TEMPLATE, _CMD_FILE_SAVE_TEMPLATE,
+    _TEMPLATE_BASE,
     _CMD_EDIT_UNDO, _CMD_EDIT_REDO, _CMD_EDIT_CUT, _CMD_EDIT_COPY, _CMD_EDIT_PASTE,
     _CMD_INSERT_CHORD, _CMD_EDIT_CHORD,
     _CMD_INSERT_SM_A, _CMD_INSERT_SM_B, _CMD_INSERT_SM_C,
@@ -76,6 +79,30 @@ class MenuMixin:
         self._refresh_midi_devices()
         self._refresh_midi_out_devices()
         self._refresh_sound_out_devices()
+        self._refresh_templates_menu()
+
+    def _refresh_templates_menu(self) -> None:
+        """Rebuild the Templates submenu from the templates directory."""
+        if self._templates_menu is None:
+            return
+        # Clear all items except the last two (separator + "Browse…")
+        count = self._templates_menu.GetMenuItemCount()
+        for _ in range(max(0, count - 2)):
+            item = self._templates_menu.FindItemByPosition(0)
+            if item is not None:
+                self._templates_menu.Remove(item)
+        from app_io import _TEMPLATES_DIR
+        ipst_files = sorted(_TEMPLATES_DIR.glob('*.ipst')) if _TEMPLATES_DIR.exists() else []
+        self._template_files = ipst_files[:99]
+        if self._template_files:
+            for idx, path in enumerate(self._template_files):
+                self._templates_menu.Insert(idx, wx.MenuItem(
+                    self._templates_menu, _TEMPLATE_BASE + idx, path.stem))
+        else:
+            placeholder = wx.MenuItem(
+                self._templates_menu, wx.ID_ANY, _("No templates available"))
+            self._templates_menu.Insert(0, placeholder)
+            placeholder.Enable(False)
 
     def _refresh_midi_out_devices(self) -> None:
         """Rebuild the MIDI Output submenu with currently available output ports."""
@@ -163,6 +190,11 @@ class MenuMixin:
             self._refresh_midi_devices()
             self.speak(_("MIDI input: {name}").format(name=names[idx]))
             self._save_app_settings()
+
+    def _on_menu_template(self, event: wx.CommandEvent) -> None:
+        idx = event.GetId() - _TEMPLATE_BASE
+        if 0 <= idx < len(self._template_files):
+            self.open_template(self._template_files[idx])
 
     def _on_menu_midi_out_refresh(self, _event: wx.CommandEvent) -> None:
         self._refresh_midi_out_devices()
@@ -380,6 +412,14 @@ class MenuMixin:
         file_menu.Append(_CMD_FILE_SAVE,   _("&Save") + "\tCtrl+S")
         file_menu.Append(_CMD_FILE_SAVE_AS, _("Save &As..."))
         file_menu.AppendSeparator()
+        # Templates submenu
+        self._templates_menu = wx.Menu()
+        self._template_files: list[Path] = []
+        self._templates_menu.AppendSeparator()
+        self._templates_menu.Append(_CMD_FILE_OPEN_TEMPLATE, _("&Browse..."))
+        file_menu.AppendSubMenu(self._templates_menu, _("Open &Template"))
+        file_menu.Append(_CMD_FILE_SAVE_TEMPLATE, _("Save as &Template..."))
+        file_menu.AppendSeparator()
         file_menu.Append(_CMD_FILE_EXPORT, _("&Export to iReal Pro") + "\tCtrl+E")
         file_menu.Append(_CMD_FILE_QR,     _("Export &QR Code") + "\tCtrl+Shift+E")
         file_menu.AppendSeparator()
@@ -527,6 +567,12 @@ class MenuMixin:
                          id=_CMD_FILE_QR)
         self._frame.Bind(wx.EVT_MENU, lambda e: self._on_quit(),
                          id=_CMD_FILE_QUIT)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.open_template(),
+                         id=_CMD_FILE_OPEN_TEMPLATE)
+        self._frame.Bind(wx.EVT_MENU, lambda e: self.save_as_template(),
+                         id=_CMD_FILE_SAVE_TEMPLATE)
+        self._frame.Bind(wx.EVT_MENU, self._on_menu_template,
+                         id=_TEMPLATE_BASE, id2=_TEMPLATE_BASE + 99)
         # Edit
         self._frame.Bind(wx.EVT_MENU, lambda e: self.undo(),
                          id=_CMD_EDIT_UNDO)
