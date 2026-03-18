@@ -1820,7 +1820,7 @@ class TestBugFixes(unittest.TestCase):
         self.assertEqual('C7(b913)', c.name)
 
     def test_7sus4_13_recognition_from_notes(self):
-        """Notes G-C-D-F-E (G sus4 dominant with 13th) → G7sus4(13)."""
+        """Notes G-C-F-E (G sus4 dominant with 13th) → G7sus4(13)."""
         from chords import Chord
         c = Chord.from_notes(['G', 'C', 'F', 'E'])
         self.assertIsNotNone(c)
@@ -1871,6 +1871,12 @@ class TestBugFixes(unittest.TestCase):
         from pyrealpro import Song
         s = Song(title='T', key='C', style='Medium Swing')
         self.assertEqual('Unknown', s.composer_name)
+
+    def test_composer_last_name_only(self):
+        """When only last name is set, no 'Unknown' suffix appears."""
+        from pyrealpro import Song
+        s = Song(title='T', composer_name_last='Bach', key='C', style='Medium Swing')
+        self.assertEqual('Bach', s.composer_name)
 
     # -----------------------------------------------------------------------
     # Bug 4: urlencode=False exports raw (non-encoded) URL

@@ -655,17 +655,11 @@ def _chord_name_to_ireal(name: str) -> str:
         if quality == src:
             return root + dst
 
-    # 2. Longest-prefix match: sort by descending key length so the first hit is
-    #    automatically the longest.  This handles cases where a spurious section
-    #    marker is appended to a valid internal quality (e.g. 'sus4C').
-    for src, dst in sorted(_IREAL_QUALITY_MAP, key=lambda t: len(t[0]), reverse=True):
-        if quality.startswith(src):
-            return root + dst
-
-    # 3. The quality may already be in iReal Pro format with a spurious single
-    #    character appended (e.g. '7b9C' → '7b9', '6C' → '6').  iReal Pro
-    #    marker characters (C=coda, Q=coda-alt, f=fine, S=segno, Y=vert-space)
-    #    cannot validly appear at the end of a quality, so strip them.
+    # 2. The quality may have a spurious iReal Pro section-marker character
+    #    appended (e.g. '7b9C' → '7b9', '6C' → '6', 'sus4C' → 'sus4').
+    #    Known marker chars: C=coda, Q=coda-alt, f=fine, S=segno, Y=vert-space.
+    #    Stripping is only attempted when the suffix consists solely of these
+    #    characters, so genuinely unknown qualities are left unchanged.
     stripped = quality.rstrip('CQfSY')
     if stripped != quality and stripped:
         for src, dst in _IREAL_QUALITY_MAP:
