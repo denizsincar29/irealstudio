@@ -311,7 +311,106 @@ class TestExplicitRepeatWorkflow(unittest.TestCase):
         self.assertIn('N2', body)
 
 
-class TestJsonRoundTrip(unittest.TestCase):
+class TestPlainRepeatVirtualSkip(unittest.TestCase):
+    """Plain-repeat virtual copies must NOT appear in the exported URL."""
+
+    def test_plain_repeat_virtual_measures_not_exported(self):
+        """Virtual copies of the body in a plain repeat must be omitted."""
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('C', m, 1)
+        prog.add_repeat_bracket(1, 8)
+        # Force total_measures to span into the virtual range so the old code
+        # (which only skipped hidden-range measures) would have exported them.
+        prog.total_measures = 16
+
+        vb = prog.volta_brackets[0]
+        self.assertTrue(vb.is_repeat_only())
+        vr = vb.plain_virtual_range()
+        self.assertIsNotNone(vr)
+
+        body = url_body(prog)
+        # The virtual range body should appear only as the { } repeat barlines,
+        # NOT as extra x|x|x|x measures after the closing }.
+        # Count measure separators: only 8 real measures should be in the URL.
+        # We check by ensuring the body ends with '}Z' (close repeat + final bar)
+        # and does NOT contain 'x' (repeat-measure placeholder) after the '}'.
+        close_pos = body.rfind('}')
+        self.assertNotEqual(close_pos, -1, "Expected } in URL for plain repeat")
+        after_close = body[close_pos + 1:]
+        self.assertNotIn('x', after_close,
+                          "Virtual plain-repeat copies should not appear after }")
+
+    def test_plain_repeat_total_measures_clamped(self):
+        """Exported measure count must equal the real (non-virtual) measures."""
+        prog = make_prog()
+        for m in range(1, 5):
+            prog.add_chord_by_name('C', m, 1)
+        prog.add_repeat_bracket(1, 4)
+        prog.total_measures = 8  # includes virtual copy
+
+        body = url_body(prog)
+        # The repeat closes with '}', which Song.url() leaves as-is (it's a
+        # structural barline).  Verify there is nothing between '}' and end.
+        close_pos = body.find('}')
+        self.assertNotEqual(close_pos, -1)
+        after_close = body[close_pos + 1:].strip()
+        # After the closing repeat brace there should be no measure content
+        self.assertNotIn('x', after_close,
+                          "Virtual copies should not appear after }")
+        self.assertNotIn('C', after_close,
+                          "Virtual copies should not appear after }")
+
+
+class TestRowBreakLayout(unittest.TestCase):
+    """Y row-break separators must be inserted every measures_per_row measures."""
+
+    def test_16_measures_has_three_y_breaks(self):
+        """16 measures in 4/4 → 4 rows of 4 → 3 Y separators."""
+        prog = make_prog()
+        for m in range(1, 17):
+            prog.add_chord_by_name('C', m, 1)
+        body = url_body(prog)
+        self.assertEqual(body.count('Y'), 3, body)
+
+    def test_8_measures_has_one_y_break(self):
+        """8 measures in 4/4 → 2 rows → 1 Y separator."""
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('C', m, 1)
+        body = url_body(prog)
+        self.assertEqual(body.count('Y'), 1, body)
+
+    def test_4_measures_no_y_break(self):
+        """4 measures in 4/4 → 1 row → no Y separator."""
+        prog = make_prog()
+        for m in range(1, 5):
+            prog.add_chord_by_name('C', m, 1)
+        body = url_body(prog)
+        self.assertNotIn('Y', body, body)
+
+    def test_y_separator_format(self):
+        """Y must appear as |Y| between measures (not |Y at end)."""
+        prog = make_prog()
+        for m in range(1, 9):
+            prog.add_chord_by_name('C', m, 1)
+        body = url_body(prog)
+        self.assertIn('|Y|', body, body)
+
+    def test_3_4_time_measures_per_row(self):
+        """In 3/4 time (3 beats → 5 measures/row), 10 measures → 1 Y break."""
+        from chords import TimeSignature
+        ts = TimeSignature(3, 4)
+        from chords import ChordProgression
+        prog = ChordProgression(title='Waltz', time_signature=ts, key='C',
+                                style='Medium Swing', bpm=120)
+        for m in range(1, 11):
+            prog.add_chord_by_name('C', m, 1)
+        body = url_body(prog)
+        self.assertEqual(body.count('Y'), 1, body)
+
+
+
     """Tests that serialisation / deserialisation preserves all data."""
 
     def test_basic_roundtrip(self):

@@ -1600,6 +1600,16 @@ class ChordProgression:
             When *True* (default) the returned URL is percent-encoded so it
             can be embedded in HTML or opened by browsers.  When *False* the
             raw human-readable URL is returned (useful for debug exports).
+
+        Layout notes
+        ------------
+        iReal Pro uses 16 cells per row; each measure in 4/4 time occupies
+        4 cells, giving exactly 4 measures per row.  ``Y`` is inserted after
+        every 4th real measure (provided the preceding barline is a normal
+        ``|``) so that the chart renders with a clean 4-measure-per-row layout.
+        ``Y`` is *not* inserted after structural barlines (``}``, ``]``, ``Z``)
+        or when the next measure opens a repeat/double bar, because iReal Pro
+        already starts a new visual row at those points.
         """
         from pyrealpro import Song, Measure as IrMeasure, TimeSignature as IrTS
 
@@ -1621,22 +1631,38 @@ class ChordProgression:
                     key=key, style=style)
 
         last_m = self.last_measure()
-        total_m = max(last_m, self.total_measures)
+        # Clamp total_m so we never iterate into pure-virtual territory
+        # (plain-repeat virtual copies or hidden volta body copies).
+        # We derive the true last *written* measure as the last measure that is
+        # NOT in any virtual/hidden range.
+        total_m_raw = max(last_m, self.total_measures)
+        total_m = total_m_raw
+        # Walk backwards to find the last measure that will actually be written.
+        while total_m > 0 and self.is_in_virtual_range(total_m):
+            total_m -= 1
 
-        # Build a list of measures (1-indexed), skipping hidden ones
+        # Build a list of measures (1-indexed), skipping ALL virtual measures:
+        # - hidden volta body (between ending-1-end and ending-2-start)
+        # - plain-repeat virtual copies (after the body in plain repeats)
         measures_to_write = []
         m = 1
         while m <= total_m:
-            if self.is_in_hidden_range(m):
+            if self.is_in_virtual_range(m):
                 m += 1
                 continue
             measures_to_write.append(m)
             m += 1
 
+        # Number of measures per row in iReal Pro.  Each beat occupies one
+        # cell; a row has 16 cells, so the row width in measures is
+        # 16 / beats_per_measure (floor).  For 4/4 → 4, for 3/4 → 5, etc.
+        beats = self.time_signature.numerator
+        measures_per_row = max(1, 16 // beats)
+
         # Build iReal Pro measures
+        row_measure_count = 0  # counts real (non-structural-break) measures in current row
         for idx, measure_num in enumerate(measures_to_write):
             chords_in_measure = self.find_chords_in_measure(measure_num)
-            beats = self.time_signature.numerator
 
             if chords_in_measure:
                 # Build chord list for the measure
@@ -1693,13 +1719,60 @@ class ChordProgression:
             # Whether to render time signature (first measure or after time sig change)
             render_ts = (idx == 0)
 
+            # ----------------------------------------------------------------
+            # Row-break (Y) logic
+            # iReal Pro has 16 cells per row; we insert Y after every
+            # measures_per_row measures so the chart has a consistent layout.
+            # Rules:
+            #   - Only insert Y when the previous barline was a plain | (not
+            #     a structural one like }, ], Z).
+            #   - Reset the row counter after any structural barline (}, ])
+            #     because iReal Pro begins a new row there automatically.
+            #   - Never insert Y before the very first measure or the last one.
+            # ----------------------------------------------------------------
+            is_structural_close = barline_close in ('}', ']', 'Z')
+            is_structural_open = barline_open in ('{', '[')
+
+            # If this measure opens a repeat/section block, iReal Pro starts a
+            # new row there — reset counter without emitting Y.
+            if is_structural_open:
+                row_measure_count = 0
+
+            row_measure_count += 1
+
+            # Decide whether to append Y after this measure's barline.
+            # Emit Y if:
+            #   - we've filled a row (row_measure_count == measures_per_row)
+            #   - the barline for this measure is a plain | (not structural)
+            #   - this is not the last measure in the song
+            want_row_break = (
+                row_measure_count >= measures_per_row
+                and not is_structural_close
+                and idx < len(measures_to_write) - 1
+            )
+
+            # Apply Y by appending it to the barline_close so the URL string
+            # becomes ...chord|Y|nextchord... which is valid iReal Pro syntax.
+            effective_barline_close = barline_close  # may be None → pyrealpro uses '|'
+            if want_row_break:
+                # iReal Pro requires Y to sit *between* two barlines: |Y|
+                # We append 'Y|' to the normal close barline so the sequence
+                # in the URL becomes ...chord|Y|nextchord... which is valid.
+                base_close = effective_barline_close if effective_barline_close else '|'
+                effective_barline_close = base_close + 'Y|'
+                row_measure_count = 0  # reset for next row
+
+            # Reset row counter after structural close (iReal Pro auto-breaks there)
+            if is_structural_close:
+                row_measure_count = 0
+
             try:
                 ir_measure = IrMeasure(
                     chords=chords_arg,
                     time_sig=ir_ts,
                     rehearsal_marks=rehearsal_marks,
                     barline_open=barline_open,
-                    barline_close=barline_close,
+                    barline_close=effective_barline_close,
                     ending=ending,
                     render_ts=render_ts,
                 )
@@ -1711,7 +1784,7 @@ class ChordProgression:
                     time_sig=ir_ts,
                     rehearsal_marks=rehearsal_marks,
                     barline_open=barline_open,
-                    barline_close=barline_close,
+                    barline_close=effective_barline_close,
                     ending=ending,
                     render_ts=render_ts,
                 )
