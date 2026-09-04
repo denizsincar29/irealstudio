@@ -9,13 +9,36 @@
 //! ровно то, что слышит пользователь. Сетка отдаёт на каждый такт короткую
 //! строку символов аккордов (для отрисовки панели тактов в `on_paint`).
 
-use irealwx_core::{chord_name_to_spoken, ChordProgression, TimeSignature};
+use irealwx_core::{chord_name_to_spoken, ChordProgression, Position, TimeSignature};
+
+/// Потолок стека undo — как python `_UNDO_MAX = 50` (main.py).
+pub const UNDO_MAX: usize = 50;
+
+/// Один аккорд в буфере обмена (одиночный: имя + слэш-бас).
+pub struct ClipboardItem {
+    pub name: String,
+    pub bass: String,
+}
 
 /// Текущая цифровка + курсор по тактам.
+///
+/// Модель редактирования (этап 2, slice 5) — «клетка такта»: у Doc курсор
+/// тактовый (без доли), поэтому все правки адресуют первый аккорд такта.
+/// Это упрощение зафиксировано в slice 1; такты с аккордами на 1 и 3 долях
+/// (как в демо) редактируются только по первой доле — вставка/замена идёт на
+/// доле 1, а F2/копирование/удаление работают с первым аккордом такта.
 pub struct Doc {
     pub cp: ChordProgression,
     /// Номер текущего такта (1-based), в пределах документа.
     pub cursor: i32,
+    /// Стек undo — снимки `cp.to_json()` до правки (как python `_undo_stack`).
+    pub undo_stack: Vec<String>,
+    /// Стек redo — снимки состояния, отменённые undo.
+    pub redo_stack: Vec<String>,
+    /// Буфер обмена одиночного аккорда (имя + бас).
+    pub clipboard: Option<ClipboardItem>,
+    /// Цифровка менялась после последнего сохранения (для «*» в заголовке).
+    pub dirty: bool,
 }
 
 /// Один аккорд такта — что рисуем и что озвучиваем.
@@ -201,7 +224,14 @@ impl Doc {
         cp.add_no_chord(12);
 
         let last = cp.last_measure();
-        Doc { cp, cursor: 1.min(last.max(1)) }
+        Doc {
+            cp,
+            cursor: 1.min(last.max(1)),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
+            dirty: false,
+        }
     }
 
     /// Новая цифровка из данных формы (Ctrl+N) — как python `new_project`
@@ -217,7 +247,14 @@ impl Doc {
             cp.bpm = spec.bpm;
         }
         apply_template(&mut cp, spec);
-        Doc { cp, cursor: 1 }
+        Doc {
+            cp,
+            cursor: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
+            dirty: false,
+        }
     }
 
     /// Сохранить цифровку в строку файла `.ips`/`.ipst` — как python
@@ -232,7 +269,14 @@ impl Doc {
     /// Курсор — на такт 1 (python ставит Position(1,1)).
     pub fn from_json(json: &str) -> Result<Self, String> {
         let cp = ChordProgression::from_json(json)?;
-        Ok(Doc { cp, cursor: 1 })
+        Ok(Doc {
+            cp,
+            cursor: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
+            dirty: false,
+        })
     }
 
     /// Последний такт документа (не ниже 1). Длина песни — это `total_measures`
@@ -369,6 +413,393 @@ impl Doc {
             lines.push(self.announce_measure(m));
         }
         lines.join("\n")
+    }
+}
+
+// ===========================================================================
+// Редактирование «клетки такта» (slice 5) — калька python app_io/main.py.
+//
+// Курсор у Doc тактовый, без доли (см. шапку): правки адресуют первый аккорд
+// такта. Возврат каждого метода — готовая строка для озвучки (что проговорить
+// одним вызовом NVDA); пустая строка = молчание (например, диалог вставки не
+// меняет имя — python тоже ничего не говорит). Стек undo/redo, буфер обмена и
+// dirty — как в python (main.py `_undo_stack`/`_redo_stack`/`_clipboard`).
+// ===========================================================================
+
+/// Репетиционные метки по буквам клавиатуры — как python `SECTION_KEYS`
+/// (chords.py:358): a/b/c/d → *A..*D, v → *V, i → *i, s → Segno, q → Coda,
+/// f → Fine. Строчные и прописные принимаются.
+pub fn section_mark_from_letter(letter: char) -> Option<&'static str> {
+    match letter.to_ascii_lowercase() {
+        'a' => Some("*A"),
+        'b' => Some("*B"),
+        'c' => Some("*C"),
+        'd' => Some("*D"),
+        'v' => Some("*V"),
+        'i' => Some("*i"),
+        's' => Some("S"),
+        'q' => Some("Q"),
+        'f' => Some("f"),
+        _ => None,
+    }
+}
+
+/// Русское имя метки для озвучки — как python `_section_name` (main.py:1580):
+/// `*A` → «Часть A», `*i` → «Вступление», `S` → «Сеньо» и т.д.
+pub fn section_display_name(mark: &str) -> String {
+    match mark {
+        "*A" => "Часть A".to_string(),
+        "*B" => "Часть B".to_string(),
+        "*C" => "Часть C".to_string(),
+        "*D" => "Часть D".to_string(),
+        "*V" => "Куплет".to_string(),
+        "*i" => "Вступление".to_string(),
+        "S" => "Сеньо".to_string(),
+        "Q" => "Кода".to_string(),
+        "f" => "Фине".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Допустимые написания басовой ноты (слэш-бас). Шире python `NOTE_NAMES`
+/// (там только натуральные/бемольные): принимаем все хроматические написания —
+/// диезные тоже, чтобы диалог не отклонял осмысленный ввод.
+pub const BASS_SPELLINGS: [&str; 17] = [
+    "C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B",
+];
+
+impl Doc {
+    /// Виртуальный такт → реальный (для правок внутри повторов/вольт), как
+    /// python `progression.resolve_virtual_measure(cursor.measure)`.
+    fn real_measure(&self) -> i32 {
+        self.cp.resolve_virtual_measure(self.cursor)
+    }
+
+    /// Первый (по доле) аккорд реального такта под курсором — «активная клетка».
+    fn active_chord(&self) -> Option<(i32 /*real_m*/, i32 /*beat*/, String, String)> {
+        let m = self.real_measure();
+        let first = self.cp.find_chords_in_measure(m).into_iter().next();
+        first.map(|it| {
+            (
+                m,
+                it.position.beat,
+                it.chord.name().to_string(),
+                it.bass_note.clone(),
+            )
+        })
+    }
+
+    /// Имя и слэш-бас аккорда под курсором — дефолт форм вставки/правки
+    /// (как python берёт текущий аккорд для предзаполнения). None — такт пуст.
+    pub fn chord_under_cursor(&self) -> Option<(String, String)> {
+        self.active_chord().map(|(_m, _beat, name, bass)| (name, bass))
+    }
+
+    /// Снимок прогрессии в стек undo (с дедупликацией и потолком), чистит redo.
+    fn push_undo(&mut self) {
+        let snapshot = self.cp.to_json();
+        if self.undo_stack.last() == Some(&snapshot) {
+            return;
+        }
+        self.undo_stack.push(snapshot);
+        if self.undo_stack.len() > UNDO_MAX {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Текущий такт перестаёт быть «изменённым» (после сохранения/открытия).
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
+
+    /// Отменить последнюю правку — как python `undo()` (main.py:748): снимок
+    /// возвращается из стека, курсор зажимается в конец документа.
+    pub fn undo(&mut self) -> String {
+        if self.undo_stack.is_empty() {
+            return "Нечего отменить".to_string();
+        }
+        self.redo_stack.push(self.cp.to_json());
+        let snapshot = self.undo_stack.pop().unwrap();
+        if let Ok(cp) = ChordProgression::from_json(&snapshot) {
+            self.cp = cp;
+        }
+        let last = self.cp.last_measure().max(1);
+        self.cursor = self.cursor.min(last).max(1);
+        self.dirty = true;
+        "Отменено".to_string()
+    }
+
+    /// Вернуть отменённую правку — как python `redo()` (main.py:763).
+    pub fn redo(&mut self) -> String {
+        if self.redo_stack.is_empty() {
+            return "Нечего повторить".to_string();
+        }
+        self.undo_stack.push(self.cp.to_json());
+        let snapshot = self.redo_stack.pop().unwrap();
+        if let Ok(cp) = ChordProgression::from_json(&snapshot) {
+            self.cp = cp;
+        }
+        self.dirty = true;
+        "Повторено".to_string()
+    }
+
+    /// Вставить аккорд по имени на долю 1 такта под курсором (заменяет аккорд
+    /// на той же доле, как core `add_chord_raw`) — как python
+    /// `_insert_chord_from_menu` (app_io.py:629). Возвращает «Вставлен аккорд: …».
+    pub fn insert_chord(&mut self, name: &str, bass: &str) -> String {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return String::new();
+        }
+        let m = self.real_measure();
+        self.push_undo();
+        self.cp.add_chord_by_name(&name, m, 1, bass);
+        self.dirty = true;
+        format!("Вставлен аккорд: {name}")
+    }
+
+    /// Отредактировать аккорд под курсором (F2) — как python
+    /// `_edit_chord_in_place` (app_io.py:638). Имя не изменилось → молчание.
+    /// Существующий слэш-бас сохраняется.
+    pub fn edit_chord(&mut self, name: &str) -> String {
+        let name = name.trim().to_string();
+        match self.active_chord() {
+            None => "Нет аккорда для редактирования".to_string(),
+            Some((m, beat, old, bass)) => {
+                if name.is_empty() || name == old {
+                    return String::new();
+                }
+                self.push_undo();
+                self.cp.add_chord_by_name(&name, m, beat, &bass);
+                self.dirty = true;
+                format!("Аккорд отредактирован: {name}")
+            }
+        }
+    }
+
+    /// Переключить N.C. на такте — как python `toggle_no_chord` (main.py:843).
+    pub fn toggle_no_chord(&mut self) -> String {
+        let m = self.real_measure();
+        if self.cp.is_no_chord(m) {
+            self.push_undo();
+            self.cp.remove_no_chord(m);
+            self.dirty = true;
+            format!("N.C. убрано в такте {m}")
+        } else {
+            self.push_undo();
+            self.cp.add_no_chord(m);
+            self.dirty = true;
+            format!("N.C. в такте {m}")
+        }
+    }
+
+    /// Скопировать аккорд под курсором — как python `copy_chord` (main.py:778).
+    pub fn copy_chord(&mut self) -> String {
+        match self.active_chord() {
+            Some((_m, _beat, name, bass)) => {
+                self.clipboard = Some(ClipboardItem {
+                    name: name.clone(),
+                    bass,
+                });
+                format!("Скопировано: {name}")
+            }
+            None => "Нет аккорда под курсором".to_string(),
+        }
+    }
+
+    /// Вырезать аккорд — как python `cut_chord` (main.py:791): копирует в
+    /// буфер и удаляет из прогрессии.
+    pub fn cut_chord(&mut self) -> String {
+        match self.active_chord() {
+            Some((m, beat, name, bass)) => {
+                self.clipboard = Some(ClipboardItem {
+                    name: name.clone(),
+                    bass: bass.clone(),
+                });
+                self.push_undo();
+                let pos = Position::new(m, beat, self.cp.time_signature);
+                self.cp.delete_chord_at(&pos);
+                self.dirty = true;
+                format!("Вырезано: {name}")
+            }
+            None => "Нет аккорда под курсором".to_string(),
+        }
+    }
+
+    /// Вставить аккорд из буфера на долю 1 такта под курсором — как python
+    /// `paste_chord` (main.py:807). Буфер НЕ очищается (python читает и хранит
+    /// дальше) — повторный Ctrl+V клеит тот же аккорд в следующий такт.
+    /// В отличие от python сохраняет и слэш-бас (копирование не теряет басовую ноту).
+    pub fn paste_chord(&mut self) -> String {
+        let Some(item) = self.clipboard.as_ref() else {
+            return "Буфер обмена пуст".to_string();
+        };
+        let name = item.name.clone();
+        let bass = item.bass.clone();
+        let m = self.real_measure();
+        self.push_undo();
+        self.cp.add_chord_by_name(&name, m, 1, &bass);
+        self.dirty = true;
+        format!("Вставлено: {name}")
+    }
+
+    /// Добавить басовую ноту (слэш-бас) к аккорду под курсором, а если такт
+    /// пуст — к последнему аккорду слева — как python `add_bass_note`
+    /// (main.py:1648). Говорит озвученный аккорд с новым басом.
+    pub fn add_bass_note(&mut self, root: &str) -> String {
+        let note = root.trim().to_uppercase();
+        if !BASS_SPELLINGS.contains(&note.as_str()) {
+            return "Неверная нота".to_string();
+        }
+        // Аккорд под курсором, иначе последний слева (в т.ч. через повторы).
+        let (m, beat, name) = match self.active_chord() {
+            Some((m, beat, name, _bass)) => (m, beat, name),
+            None => {
+                let ts = self.cp.time_signature;
+                let pos = Position::new(self.cursor, 1, ts);
+                match self.cp.find_last_chord_to_left(&pos) {
+                    Some(item) => {
+                        let it = item.clone();
+                        (it.position.measure, it.position.beat, it.chord.name().to_string())
+                    }
+                    None => return "Нет аккорда для изменения".to_string(),
+                }
+            }
+        };
+        let _ = m;
+        self.push_undo();
+        self.cp.add_chord_by_name(&name, m, beat, &note);
+        self.dirty = true;
+        chord_name_to_spoken(&name, &note)
+    }
+
+    /// Удалить аккорд/структуру на такте под курсором (Del/Backspace) — как
+    /// python `delete_at_cursor` (main.py:1714). Если на такте есть аккорд —
+    /// удаляет его и говорит «Удалено. <озвучка такта под курсором>»; иначе
+    /// снимает метку секции/знак повтора/N.C. и говорит что удалено.
+    pub fn delete_at_cursor(&mut self) -> String {
+        match self.active_chord() {
+            Some((m, beat, _name, _bass)) => {
+                let pos = Position::new(m, beat, self.cp.time_signature);
+                self.push_undo();
+                self.cp.delete_chord_at(&pos);
+                self.dirty = true;
+                // Пусто в такте? Тогда — на предыдущий аккорд (или такт 1),
+                // как python: иначе остаёмся на том же такте.
+                if self.cp.find_chords_in_measure(m).is_empty() {
+                    let prev = self.cp.find_last_chord_to_left(&pos);
+                    self.cursor = prev.map(|i| i.position.measure).unwrap_or(1);
+                }
+                format!("Удалено. {}", self.announce_measure(self.cursor))
+            }
+            None => self.delete_structure_at_measure(self.real_measure()),
+        }
+    }
+
+    /// Удалить структуру на такте (Ctrl+Del/Ctrl+Backspace) — как python
+    /// `delete_structural_at_cursor` (main.py:1772): метку секции, знак повтора
+    /// и N.C., игнорируя аккорд. Возвращает, что именно удалено.
+    pub fn delete_structural_at_cursor(&mut self) -> String {
+        self.delete_structure_at_measure(self.cursor)
+    }
+
+    /// Общая часть структурного удаления (по реальному или виртуальному такту).
+    fn delete_structure_at_measure(&mut self, m: i32) -> String {
+        let mut deleted: Vec<&'static str> = Vec::new();
+        if self.cp.get_section_mark(m).is_some() {
+            self.push_undo();
+            self.cp.remove_section_mark(m);
+            self.dirty = true;
+            deleted.push("метка части");
+        }
+        let vbs_to_remove: Vec<i32> = self
+            .cp
+            .volta_brackets
+            .iter()
+            .filter(|vb| {
+                vb.repeat_start == m
+                    || vb.ending1_start == m
+                    || (vb.is_complete() && vb.ending2_start == m)
+            })
+            .map(|vb| vb.repeat_start)
+            .collect();
+        if !vbs_to_remove.is_empty() {
+            if deleted.is_empty() {
+                self.push_undo();
+            }
+            for rs in vbs_to_remove {
+                self.cp.volta_brackets.retain(|vb| vb.repeat_start != rs);
+            }
+            self.dirty = true;
+            deleted.push("знак повтора");
+        }
+        if self.cp.is_no_chord(m) {
+            if deleted.is_empty() {
+                self.push_undo();
+            }
+            self.cp.remove_no_chord(m);
+            self.dirty = true;
+            deleted.push("N.C.");
+        }
+        if deleted.is_empty() {
+            format!("Нечего удалить в такте {m} доле 1")
+        } else {
+            format!("Удалено: {} в такте {m}", deleted.join(", "))
+        }
+    }
+
+    /// Поставить репетиционную метку на такте под курсором по букве клавиатуры
+    /// (Ctrl+Shift+letter) — как python `add_section_mark` (main.py:1639).
+    /// Неизвестная буква → молчание. Говорит «Часть A в такте {m}» и т.п.
+    pub fn add_section_mark_by_letter(&mut self, letter: char) -> String {
+        let Some(mark) = section_mark_from_letter(letter) else {
+            return String::new();
+        };
+        self.push_undo();
+        self.cp.add_section_mark(self.cursor, mark);
+        self.dirty = true;
+        format!(
+            "{} в такте {}",
+            section_display_name(mark),
+            self.cursor
+        )
+    }
+
+    /// Транспонировать всю цифровку — как python `_on_transpose`
+    /// (app_menu.py:364): кратно 12 — молчание; иначе транспонирует аккорды и
+    /// тональность, говорит «Транспонировано на N полутон(ов), новая тональность: …».
+    pub fn transpose(&mut self, raw_semitones: i32) -> String {
+        if raw_semitones % 12 == 0 {
+            return String::new();
+        }
+        // Как python: знак сохраняется, значение зажато в ±(1..11).
+        let semitones = if raw_semitones > 0 {
+            raw_semitones % 12
+        } else {
+            -(raw_semitones.abs() % 12)
+        };
+        self.push_undo();
+        self.cp.transpose(semitones, None);
+        self.dirty = true;
+        let unit = ru_semitones_unit(semitones);
+        format!(
+            "Транспонировано на {semitones} {unit}, новая тональность: {}",
+            self.cp.key
+        )
+    }
+}
+
+/// «полутон/полутона/полутонов» по правилам русского множественного числа.
+fn ru_semitones_unit(n: i32) -> &'static str {
+    let a = n.abs() % 100;
+    let b = n.abs() % 10;
+    if b == 1 && a != 11 {
+        "полутон"
+    } else if b >= 2 && b <= 4 && !(a >= 12 && a <= 14) {
+        "полутона"
+    } else {
+        "полутонов"
     }
 }
 
@@ -668,5 +1099,237 @@ mod tests {
         // Текстовый («debug») экспорт — сырой не-URL-encoded irealbook.
         let raw = d.cp.to_ireal_url(false);
         assert!(raw.starts_with("irealbook://"), "{raw}");
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    /// Пустая цифровка без шаблона — такты появляются при вводе (как python).
+    fn empty_doc() -> Doc {
+        Doc::new_chart(&NewChart::defaults())
+    }
+
+    #[test]
+    fn insert_places_and_replaces_at_beat_one() {
+        let mut d = empty_doc();
+        assert_eq!(d.insert_chord("C", ""), "Вставлен аккорд: C");
+        let v = d.measure_view(1);
+        assert_eq!(v.chords.len(), 1, "один аккорд в такте");
+        assert_eq!(v.chords[0].beat, 1);
+        assert_eq!(v.chords[0].symbol, "C");
+        // Тот же такт, новая вставка заменяет (core add_chord_raw — как python).
+        d.insert_chord("G7", "");
+        let v = d.measure_view(1);
+        assert_eq!(v.chords.len(), 1);
+        assert_eq!(v.chords[0].symbol, "G7");
+        assert_eq!(d.last_measure(), 1, "вставка создала такт");
+    }
+
+    #[test]
+    fn edit_chord_in_place_keeps_bass() {
+        let mut d = empty_doc();
+        // F2 на пустом такте — ошибка, как python.
+        assert_eq!(d.edit_chord("C7"), "Нет аккорда для редактирования");
+        d.insert_chord("D7", "A");
+        assert_eq!(d.edit_chord("D9"), "Аккорд отредактирован: D9");
+        // Слэш-бас пережил редактирование (python bass_note=item.bass_note).
+        let v = d.measure_view(1);
+        assert_eq!(v.chords[0].symbol, "D9/A");
+        // То же имя — молчание (пустая строка = не озвучивать).
+        assert_eq!(d.edit_chord("D9"), "");
+    }
+
+    #[test]
+    fn no_chord_toggle_roundtrip() {
+        let mut d = empty_doc();
+        assert!(!d.cp.is_no_chord(1));
+        assert_eq!(d.toggle_no_chord(), "N.C. в такте 1");
+        assert!(d.cp.is_no_chord(1));
+        assert_eq!(d.toggle_no_chord(), "N.C. убрано в такте 1");
+        assert!(!d.cp.is_no_chord(1));
+    }
+
+    #[test]
+    fn delete_chord_moves_cursor_to_previous() {
+        let mut d = empty_doc();
+        d.insert_chord("C", "");
+        d.cursor = 2;
+        d.insert_chord("G", "");
+        assert_eq!(d.active_chord().map(|a| a.2), Some("G".to_string()));
+        let msg = d.delete_at_cursor();
+        assert!(msg.starts_with("Удалено. "), "{msg}");
+        assert!(d.cp.find_chords_in_measure(2).is_empty(), "аккорд удалён");
+        assert_eq!(d.cursor, 1, "курсор ушёл на предыдущий аккорд");
+        assert!(msg.contains("такт 1"), "озвучка нового такта: {msg}");
+    }
+
+    #[test]
+    fn delete_on_empty_toggled_measure_removes_nc_and_structure() {
+        let mut d = empty_doc();
+        d.toggle_no_chord();
+        let msg = d.delete_at_cursor();
+        assert_eq!(msg, "Удалено: N.C. в такте 1");
+        assert!(!d.cp.is_no_chord(1));
+        // Пустой такт без структуры — «нечего удалить».
+        d.cursor = 3; // такта нет, но мера пустая
+        let msg = d.delete_at_cursor();
+        assert_eq!(msg, "Нечего удалить в такте 3 доле 1");
+    }
+
+    #[test]
+    fn delete_structural_ignores_chord() {
+        let mut d = empty_doc();
+        d.insert_chord("C", "");
+        d.add_section_mark_by_letter('a');
+        assert_eq!(d.cp.get_section_mark(1), Some("*A"));
+        let msg = d.delete_structural_at_cursor();
+        assert_eq!(msg, "Удалено: метка части в такте 1");
+        assert_eq!(d.cp.get_section_mark(1), None);
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 1, "аккорд не тронут");
+    }
+
+    #[test]
+    fn clipboard_copy_paste_cut_flow() {
+        let mut d = empty_doc();
+        assert_eq!(d.paste_chord(), "Буфер обмена пуст");
+        d.insert_chord("D7", "A");
+        assert_eq!(d.copy_chord(), "Скопировано: D7");
+        // Вставка в пустой такт 2: имя и бас сохраняются.
+        d.cursor = 2;
+        assert_eq!(d.paste_chord(), "Вставлено: D7");
+        let v = d.measure_view(2);
+        assert_eq!(v.chords[0].symbol, "D7/A", "слэш-бас не теряется");
+        // Повторная вставка не очищает буфер (python хранит дальше) — Ctrl+V
+        // в следующий такт клеит тот же аккорд снова.
+        d.cursor = 3;
+        assert_eq!(d.paste_chord(), "Вставлено: D7");
+        assert_eq!(d.cp.find_chords_in_measure(3).len(), 1);
+        let item3 = &d.cp.find_chords_in_measure(3)[0];
+        assert_eq!(item3.chord.name(), "D7");
+        assert_eq!(item3.bass_note, "A");
+        // Cut — копирует и удаляет источник.
+        d.cursor = 1;
+        assert_eq!(d.cut_chord(), "Вырезано: D7");
+        assert!(d.cp.find_chords_in_measure(1).is_empty());
+        d.cursor = 2;
+        assert_eq!(d.paste_chord(), "Вставлено: D7");
+        assert_eq!(d.cp.find_chords_in_measure(2).len(), 1);
+    }
+
+    #[test]
+    fn undo_redo_cycle_restores_state() {
+        let mut d = empty_doc();
+        d.insert_chord("C", "");
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 1);
+        assert_eq!(d.undo(), "Отменено");
+        assert!(d.cp.find_chords_in_measure(1).is_empty(), "undo убрал аккорд");
+        assert_eq!(d.undo(), "Нечего отменить");
+        assert_eq!(d.redo(), "Повторено");
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 1, "redo вернул аккорд");
+        assert_eq!(d.redo(), "Нечего повторить");
+        // Новая правка чистит redo (как python).
+        d.undo();
+        d.insert_chord("G", "");
+        assert_eq!(d.redo(), "Нечего повторить");
+    }
+
+    #[test]
+    fn undo_clamps_cursor_to_restored_length() {
+        let mut d = empty_doc();
+        // Длинная цифровка, курсор в конце.
+        d.insert_chord("C", "");
+        d.cursor = 8;
+        d.insert_chord("G", "");
+        assert_eq!(d.cursor, 8);
+        // undo вернул состояние, где аккорда на 8 нет — курсор зажат.
+        d.undo();
+        assert!(d.cursor <= d.last_measure(), "курсор не выходит за документ");
+        assert_eq!(d.cursor, 1);
+    }
+
+    #[test]
+    fn section_mark_insert_speaks_russian() {
+        let mut d = empty_doc();
+        assert_eq!(d.add_section_mark_by_letter('a'), "Часть A в такте 1");
+        assert_eq!(d.cp.get_section_mark(1), Some("*A"));
+        // Повторная — заменяет (python add_section_mark).
+        assert_eq!(d.add_section_mark_by_letter('b'), "Часть B в такте 1");
+        assert_eq!(d.cp.get_section_mark(1), Some("*B"));
+        assert_eq!(d.add_section_mark_by_letter('z'), "", "неизвестная — молчание");
+        assert_eq!(section_mark_from_letter('Q'), Some("Q"));
+        assert_eq!(section_display_name("*i"), "Вступление");
+    }
+
+    #[test]
+    fn bass_note_validation_and_targets() {
+        let mut d = empty_doc();
+        assert_eq!(d.add_bass_note("X"), "Неверная нота");
+        // Нет аккорда ни под курсором, ни слева — ошибка.
+        assert_eq!(d.add_bass_note("E"), "Нет аккорда для изменения");
+        d.insert_chord("C", "");
+        // Бас к аккорду под курсором; озвучка возвращает аккорд с басом.
+        let msg = d.add_bass_note("E");
+        assert!(!msg.is_empty() && msg != "Неверная нота", "{msg}");
+        let v = d.measure_view(1);
+        assert_eq!(v.chords[0].symbol, "C/E");
+        // Пустой такт → бас уходит последнему аккорду слева.
+        d.cursor = 2;
+        assert!(d.cp.find_chords_in_measure(2).is_empty());
+        d.add_bass_note("G");
+        assert_eq!(d.measure_view(2).chords.len(), 0);
+        assert_eq!(d.measure_view(1).chords[0].symbol, "C/G", "бас к аккорду слева");
+    }
+
+    #[test]
+    fn transpose_whole_song_speaks_key() {
+        let mut d = empty_doc();
+        d.cp.key = "C".to_string();
+        d.insert_chord("C", "");
+        let msg = d.transpose(3);
+        assert!(msg.starts_with("Транспонировано на 3 полутона,"), "{msg}");
+        assert!(msg.contains("новая тональность:"), "{msg}");
+        assert_ne!(d.cp.key, "C", "тональность сдвинута");
+        // Кратно 12 — python молча игнорирует.
+        d.insert_chord("G", ""); // ensure something to look at
+        assert_eq!(d.transpose(12), "");
+        assert_eq!(d.transpose(-12), "");
+        // Нижний регистр -3 говорит «полутона».
+        assert!(d.transpose(-3).contains("полутона"));
+        // 1 полутон — единственное число.
+        assert!(d.transpose(1).contains("полутон, новая"));
+    }
+
+    #[test]
+    fn dirty_flag_follows_edits() {
+        let mut d = empty_doc();
+        assert!(!d.dirty);
+        d.insert_chord("C", "");
+        assert!(d.dirty);
+        d.mark_clean();
+        assert!(!d.dirty);
+        d.undo();
+        assert!(d.dirty, "undo тоже меняет состояние");
+    }
+
+    #[test]
+    fn editing_measures_with_two_chords_targets_first_beat() {
+        // В такте с аккордами на 1 и 3 долях (как демо) клетка = первая доля:
+        // F2 правит первый, вставка заменяет долю 1, вторая доля не трогается.
+        let mut d = empty_doc();
+        d.insert_chord("B-7", "");
+        // Добавим аккорд на долю 3 напрямую в cp (как в demo-цифровке).
+        d.cp.add_chord_by_name("E-7", 1, 3, "");
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 2);
+        d.edit_chord("B7");
+        let view = d.measure_view(1);
+        let syms: Vec<String> = view.chords.iter().map(|c| c.symbol.clone()).collect();
+        assert_eq!(syms, vec!["B7", "E-7"], "правка тронула только первую долю");
+        d.cursor = 1;
+        d.delete_at_cursor();
+        let view = d.measure_view(1);
+        let syms: Vec<String> = view.chords.iter().map(|c| c.symbol.clone()).collect();
+        assert_eq!(syms, vec!["E-7"], "удалена первая доля, вторая осталась");
     }
 }

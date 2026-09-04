@@ -4,9 +4,12 @@
 // через альт-меню (нативный HMENU) и хоткеи; панель тактов рисуется в on_paint
 // (только видна, в дерево доступности не попадает); навигация озвучивается
 // через irealwx_speech (NVDA ControllerClient) и дублируется в статус-строку.
-// Обычные wx-контролы — только в формах: «Новая цифровка» (Ctrl+N), файловые
-// диалоги открыть/сохранить .ips (Ctrl+O / Ctrl+S) и экспорт в iReal Pro
-// (Ctrl+E — HTML/текст с irealb-ссылкой).
+// Обычные wx-контролы — только в диалогах: «Новая цифровка» (Ctrl+N), файловые
+// диалоги открыть/сохранить .ips (Ctrl+O / Ctrl+S), экспорт в iReal Pro
+// (Ctrl+E — HTML/текст с irealb-ссылкой) и правка (slice 5): аккорд/правка/
+// бас (Ctrl+Enter / F2 / поле), N.C. (N), метки частей (Ctrl+Shift+буква),
+// удаление (Del/Ctrl+Del), буфер обмена (Ctrl+X/C/V), отмена/повтор (Ctrl+Z/Y),
+// транспонирование (Ctrl+T), переход к такту (Ctrl+F).
 //
 // Сборка на любом хосте с тулчейном wxDragon (см. README): cargo build -p irealwx_ui.
 // Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
@@ -19,7 +22,8 @@ use std::rc::Rc;
 
 use wxdragon::dc::{AutoBufferedPaintDC, BrushStyle, PenStyle};
 use wxdragon::event::WindowEventData;
-use wxdragon::keycode::{WXK_END, WXK_HOME, WXK_LEFT, WXK_RIGHT};
+use wxdragon::keycode::{WXK_BACK, WXK_DELETE, WXK_END, WXK_HOME, WXK_LEFT, WXK_RIGHT};
+use wxdragon::menus::ItemKind;
 use wxdragon::prelude::*;
 
 use irealwx_speech::{default_speak, Speak};
@@ -37,6 +41,30 @@ const ID_SPEAK: i32 = 2001;
 const ID_SPEAK_ALL: i32 = 2002;
 const ID_GOTO_START: i32 = 2003;
 const ID_GOTO_END: i32 = 2004;
+// Меню «Правка» (Edit): undo/redo/буфер обмена/транспонирование.
+const ID_UNDO: i32 = 3001;
+const ID_REDO: i32 = 3002;
+const ID_CUT: i32 = 3003;
+const ID_COPY: i32 = 3004;
+const ID_PASTE: i32 = 3005;
+const ID_TRANSPOSE: i32 = 3006;
+// Меню «Вставка» (Insert): аккорд, правка, N.C., бас, метки частей.
+const ID_INS_CHORD: i32 = 3007;
+const ID_EDIT_CHORD: i32 = 3008;
+const ID_INS_NC: i32 = 3009;
+const ID_INS_BASS: i32 = 3010;
+// Подменю «Метка части» — Ctrl+Shift+буква (как python, без Fine: его
+// iReal-смысл python оставил «на уточнение», пункт в меню скрыт).
+const ID_SM_A: i32 = 3011;
+const ID_SM_B: i32 = 3012;
+const ID_SM_C: i32 = 3013;
+const ID_SM_D: i32 = 3014;
+const ID_SM_V: i32 = 3015;
+const ID_SM_I: i32 = 3016;
+const ID_SM_S: i32 = 3017;
+const ID_SM_Q: i32 = 3018;
+// Меню «Песня»: переход к такту по номеру.
+const ID_GOTO_MEASURE: i32 = 3019;
 
 /// Состояние панели тактов: короткие строки-ячейки + курсор.
 struct GridState {
@@ -104,15 +132,15 @@ fn draw_grid(panel: &Panel, st: &GridState) {
         return;
     }
     let cols = if n < 4 { n } else { 4 };
-    let cw = (w / cols).max(1);
-    let row_h = 64;
+    let cw = (w / cols as i32).max(1);
+    let row_h: i32 = 64;
 
     for (idx, text) in st.cells.iter().enumerate() {
         let measure = idx as i32 + 1;
         let r = idx / cols;
         let c = idx % cols;
-        let x = c * cw;
-        let y = r * row_h;
+        let x = c as i32 * cw;
+        let y = r as i32 * row_h;
         let is_cursor = measure == st.cursor;
 
         if is_cursor {
@@ -161,6 +189,43 @@ fn announce(doc: &Doc, speaker: &dyn Speak, frame: &Frame) {
         &format!("Такт {} из {}", doc.cursor, doc.last_measure()),
         0,
     );
+}
+
+/// Заголовок окна: «irealstudio — <название цифровки>», звёздочка спереди —
+/// признак несохранённых правок (как python `_mark_dirty` рисует звёздочку).
+fn window_title(doc: &Doc) -> String {
+    let base = format!("irealstudio — {}", doc.cp.title);
+    if doc.dirty {
+        format!("* {base}")
+    } else {
+        base
+    }
+}
+
+/// Применить результат правки Doc (метод уже мутировал документ и вернул строку
+/// для озвучки; пустая = молчание): перерисовать сетку, проговорить/показать в
+/// статусе сообщение и обновить «звёздочку» в заголовке.
+fn commit_edit(
+    msg: &str,
+    doc: &Rc<RefCell<Doc>>,
+    speaker: &Rc<RefCell<Box<dyn Speak>>>,
+    state: &Rc<RefCell<GridState>>,
+    panel: &Panel,
+    frame: &Frame,
+) {
+    let d = doc.borrow();
+    sync_grid(&d, state, panel);
+    if !msg.is_empty() {
+        speaker.borrow().speak(msg);
+        frame.set_status_text(msg, 0);
+    }
+    frame.set_title(&window_title(&d));
+}
+
+/// Обновить заголовок после открытия/создания/сохранения (без правок).
+fn refresh_title(doc: &Rc<RefCell<Doc>>, frame: &Frame) {
+    let d = doc.borrow();
+    frame.set_title(&window_title(&d));
 }
 
 // --- Открыть/сохранить (.ips = progression.to_json()) ---
@@ -221,6 +286,7 @@ fn install_loaded(
     *current_file.borrow_mut() = Some(path);
     let d = doc.borrow();
     sync_grid(&d, state, panel);
+    frame.set_title(&window_title(&d));
     let msg = format!("Открыто: {title}");
     spk.borrow().speak(&msg);
     frame.set_status_text(
@@ -259,8 +325,13 @@ fn save_as_progression(
         match res {
             Ok(()) => {
                 *current_file.borrow_mut() = Some(path);
+                {
+                    let mut d = doc.borrow_mut();
+                    d.mark_clean();
+                }
                 spk.borrow().speak(&format!("Сохранено: {name}"));
                 frame.set_status_text(&format!("Сохранено: {name}"), 0);
+                refresh_title(doc, frame);
             }
             Err(e) => {
                 spk.borrow().speak(&format!("Не удалось сохранить: {e}"));
@@ -291,6 +362,23 @@ fn pick_export_path(parent: &Frame, default_name: &str, default_dir: &str) -> Op
     } else {
         None
     }
+}
+
+/// Поставить метку части по букве (пункт подменю «Метка части») и проговорить
+/// результат — как python `add_section_mark(letter)`.
+fn add_section_mark_menu(
+    letter: char,
+    doc: &Rc<RefCell<Doc>>,
+    speaker: &Rc<RefCell<Box<dyn Speak>>>,
+    state: &Rc<RefCell<GridState>>,
+    panel: &Panel,
+    frame: &Frame,
+) {
+    let msg = {
+        let mut d = doc.borrow_mut();
+        d.add_section_mark_by_letter(letter)
+    };
+    commit_edit(&msg, doc, speaker, state, panel, frame);
 }
 
 /// Экспорт текущей цифровки в HTML/текст — как python export_ireal.
@@ -338,6 +426,111 @@ fn export_progression(
             }
         }
     }
+}
+
+// --- Правка цифровки (slice 5): меню «Правка»/«Вставка», формы-диалоги ---
+//
+// Поле ввода (имя аккорда, басовая нота) и счётчик (транспонирование, переход
+// к такту) — калька python-диалогов (dialogs.py insert_chord/go_to_measure/
+// transpose). Курсор у Doc тактовый, поэтому клетка = первый аккорд такта (см.
+// lib.rs). Диалоги устроены как show_new_chart_dialog ниже: настоящий wxDialog
+// с ролью для NVDA, порядок контролов = порядок табов.
+
+/// Модальный диалог с одним текстовым полем. OK → введённая строка (как есть,
+/// без трима — решает сам Doc), Отмена/ESC → None.
+fn modal_text(parent: &Frame, title: &str, label: &str, initial: &str) -> Option<String> {
+    let dialog = Dialog::builder(parent, title)
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+    let ctrl = TextCtrl::builder(&panel).with_value(initial).build();
+
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    add_labeled_row(&col, &panel, label, &ctrl);
+
+    let ok_button = Button::builder(&panel).with_id(ID_OK).with_label("ОК").build();
+    let cancel_button = Button::builder(&panel)
+        .with_id(ID_CANCEL)
+        .with_label("Отмена")
+        .build();
+    ok_button.set_default();
+    let ok_dialog = dialog;
+    ok_button.on_click(move |_| ok_dialog.end_modal(ID_OK));
+    let cancel_dialog = dialog;
+    cancel_button.on_click(move |_| cancel_dialog.end_modal(ID_CANCEL));
+
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(
+        &buttons,
+        0,
+        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
+        8,
+    );
+
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    let result = dialog.show_modal();
+    let value = if result == ID_OK { Some(ctrl.get_value()) } else { None };
+    dialog.destroy();
+    value
+}
+
+/// Модальный диалог со счётчиком в заданном диапазоне. OK → число, иначе None.
+fn modal_spin(
+    parent: &Frame,
+    title: &str,
+    label: &str,
+    min: i32,
+    max: i32,
+    initial: i32,
+) -> Option<i32> {
+    let dialog = Dialog::builder(parent, title)
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+    let spin = SpinCtrl::builder(&panel)
+        .with_range(min, max)
+        .with_initial_value(initial)
+        .build();
+
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    add_labeled_row(&col, &panel, label, &spin);
+
+    let ok_button = Button::builder(&panel).with_id(ID_OK).with_label("ОК").build();
+    let cancel_button = Button::builder(&panel)
+        .with_id(ID_CANCEL)
+        .with_label("Отмена")
+        .build();
+    ok_button.set_default();
+    let ok_dialog = dialog;
+    ok_button.on_click(move |_| ok_dialog.end_modal(ID_OK));
+    let cancel_dialog = dialog;
+    cancel_button.on_click(move |_| cancel_dialog.end_modal(ID_CANCEL));
+
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(
+        &buttons,
+        0,
+        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
+        8,
+    );
+
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    let result = dialog.show_modal();
+    let value = if result == ID_OK { Some(spin.value()) } else { None };
+    dialog.destroy();
+    value
 }
 
 // --- Форма «Новая цифровка» (Ctrl+N) ---
@@ -591,9 +784,14 @@ fn handle_key(
     if let WindowEventData::Keyboard(ref key) = ev {
         let code = key.get_key_code().unwrap_or(0);
         let alt = key.alt_down();
-        let ctrl = key.ctrl_down();
+        let ctrl = key.control_down();
+        let shift = key.shift_down();
         let mut d = doc.borrow_mut();
         let mut changed = false;
+        // Результат правки (строка для озвучки; пустая = молчание). Меню
+        // «Правка/Вставка» идёт через on_menu_selected, сюда — только горячие
+        // клавиши без пунктов меню: Del/Backspace и N (N.C.), как python.
+        let mut edited: Option<String> = None;
         match code {
             WXK_LEFT if !alt && !ctrl => {
                 d.go_left();
@@ -621,11 +819,33 @@ fn handle_key(
                 d.cursor = d.last_measure();
                 changed = true;
             }
+            // Del/Backspace — удалить аккорд; Ctrl+Del/Ctrl+Backspace — только
+            // структуру (метку части/знак повтора/N.C.), как python delete_at_cursor.
+            WXK_DELETE | WXK_BACK => {
+                edited = Some(if ctrl {
+                    d.delete_structural_at_cursor()
+                } else {
+                    d.delete_at_cursor()
+                });
+            }
+            // 'N' — переключение N.C. (клавиша отдаётся прописной ASCII, 78).
+            78 if !ctrl && !alt && !shift => {
+                edited = Some(d.toggle_no_chord());
+            }
             _ => {}
         }
-        if changed {
+        if let Some(msg) = edited {
             sync_grid(&d, state, panel);
-            announce(&d, &*speaker.borrow(), frame);
+            if !msg.is_empty() {
+                let spk = speaker.borrow();
+                spk.speak(&msg);
+                frame.set_status_text(&msg, 0);
+            }
+            frame.set_title(&window_title(&d));
+            handled = true;
+        } else if changed {
+            sync_grid(&d, state, panel);
+            announce(&d, &**speaker.borrow(), frame);
             handled = true;
         }
     }
@@ -652,7 +872,7 @@ fn main() {
 
         // --- Главное окно ---
         let frame = Frame::builder()
-            .with_title("irealstudio — Rust (форма Ctrl+N, файлы .ips, экспорт в iReal Pro)")
+            .with_title("irealstudio")
             .with_size(Size::new(920, 640))
             .build();
 
@@ -673,6 +893,66 @@ fn main() {
             .append_item(ID_EXIT, "&Выход", "Закрыть программу")
             .build();
 
+        // --- Правка (Edit): undo/redo, буфер обмена, транспонирование ---
+        let edit_menu = Menu::builder()
+            .append_item(ID_UNDO, "&Отменить\tCtrl+Z", "Отменить последнюю правку")
+            .append_item(ID_REDO, "&Повторить\tCtrl+Y", "Вернуть отменённую правку")
+            .append_separator()
+            .append_item(ID_CUT, "&Вырезать\tCtrl+X", "Вырезать аккорд под курсором")
+            .append_item(ID_COPY, "&Копировать\tCtrl+C", "Скопировать аккорд под курсором")
+            .append_item(ID_PASTE, "В&ставить\tCtrl+V", "Вставить аккорд из буфера")
+            .append_separator()
+            .append_item(
+                ID_TRANSPOSE,
+                "&Транспонировать…\tCtrl+T",
+                "Транспонировать всю цифровку",
+            )
+            .build();
+
+        // --- Вставка (Insert): аккорд, правка, метка части, N.C., бас ---
+        let section_menu = Menu::builder()
+            .append_item(ID_SM_A, "Часть A\tCtrl+Shift+A", "Метка «Часть A»")
+            .append_item(ID_SM_B, "Часть B\tCtrl+Shift+B", "Метка «Часть B»")
+            .append_item(ID_SM_C, "Часть C\tCtrl+Shift+C", "Метка «Часть C»")
+            .append_item(ID_SM_D, "Часть D\tCtrl+Shift+D", "Метка «Часть D»")
+            .append_separator()
+            .append_item(ID_SM_V, "Куплет\tCtrl+Shift+V", "Метка «Куплет»")
+            .append_item(ID_SM_I, "Вступление\tCtrl+Shift+I", "Метка «Вступление»")
+            .append_item(ID_SM_S, "Сеньо\tCtrl+Shift+S", "Метка «Сеньо»")
+            .append_item(ID_SM_Q, "Кода\tCtrl+Shift+Q", "Метка «Кода»")
+            .build();
+        let insert_menu = Menu::builder()
+            .append_item(
+                ID_INS_CHORD,
+                "Добавить &аккорд…\tCtrl+Return",
+                "Вставить аккорд в текущий такт",
+            )
+            .append_item(
+                ID_EDIT_CHORD,
+                "&Изменить аккорд…\tF2",
+                "Перезаписать аккорд под курсором",
+            )
+            .append_separator()
+            .build();
+        insert_menu.append_submenu(
+            section_menu,
+            "&Метка части",
+            "Репетиционные метки (Ctrl+Shift+буква)",
+        );
+        insert_menu.append(
+            ID_INS_NC,
+            "&Без аккорда (N.C.)",
+            "Переключить N.C. на текущем такте (клавиша N)",
+            ItemKind::Normal,
+        );
+        insert_menu.append(
+            ID_INS_BASS,
+            "&Басовая нота…",
+            "Слэш-бас к аккорду под курсором (например, E → C/E)",
+            ItemKind::Normal,
+        );
+
+        // --- Песня: озвучивание, навигация, переход к такту по номеру ---
         let song_menu = Menu::builder()
             .append_item(ID_SPEAK, "Озвучить &такт\tF5", "Прочитать текущий такт")
             .append_item(
@@ -683,6 +963,11 @@ fn main() {
             .append_separator()
             .append_item(ID_GOTO_START, "В &начало\tHome", "Первый такт")
             .append_item(ID_GOTO_END, "В &конец\tEnd", "Последний такт")
+            .append_item(
+                ID_GOTO_MEASURE,
+                "Перейти к &такту…\tCtrl+F",
+                "Перейти к такту по номеру",
+            )
             .build();
 
         let help_menu = Menu::builder()
@@ -691,6 +976,8 @@ fn main() {
 
         let menu_bar = MenuBar::builder()
             .append(file_menu, "&Файл")
+            .append(edit_menu, "&Правка")
+            .append(insert_menu, "&Вставка")
             .append(song_menu, "&Песня")
             .append(help_menu, "&Справка")
             .build();
@@ -700,7 +987,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Ctrl+N — новая цифровка, Ctrl+O — открыть, Ctrl+S — сохранить. Стрелки — по тактам, Alt+стрелки — по секциям.",
+                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор.",
             )
             .build();
 
@@ -710,6 +997,13 @@ fn main() {
         let root = BoxSizer::builder(Orientation::Vertical).build();
         root.add(&grid_panel, 1, SizerFlag::Expand | SizerFlag::All, 0);
         frame.set_sizer(root, true);
+
+        // Заголовок окна из текущего документа (дальше его обновляют открытие,
+        // сохранение и правки — «звёздочка» = несохранённые изменения).
+        {
+            let d = doc.borrow();
+            frame.set_title(&window_title(&d));
+        }
 
         // --- События меню ---
         let doc_menu = doc.clone();
@@ -737,6 +1031,7 @@ fn main() {
                         0,
                     );
                 }
+                refresh_title(&doc_menu, &frame_menu);
             }
             ID_OPEN => {
                 if let Some(path) = pick_open_path(&frame_menu) {
@@ -781,8 +1076,13 @@ fn main() {
                     };
                     match res {
                         Ok(()) => {
+                            {
+                                let mut d = doc_menu.borrow_mut();
+                                d.mark_clean();
+                            }
                             spk_menu.borrow().speak(&format!("Сохранено: {name}"));
                             frame_menu.set_status_text(&format!("Сохранено: {name}"), 0);
+                            refresh_title(&doc_menu, &frame_menu);
                         }
                         Err(e) => {
                             spk_menu
@@ -806,6 +1106,131 @@ fn main() {
             ID_EXPORT => {
                 export_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
             }
+            // --- Правка / Вставка (slice 5) ---
+            ID_UNDO => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.undo()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_REDO => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.redo()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_COPY => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.copy_chord()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_CUT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.cut_chord()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_PASTE => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.paste_chord()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_TRANSPOSE => {
+                // Спин -11..11 как python transpose_dialog; 0 и ±12 — молчание.
+                if let Some(n) = modal_spin(
+                    &frame_menu,
+                    "Транспонировать",
+                    "На сколько полутонов:",
+                    -11,
+                    11,
+                    0,
+                ) {
+                    let msg = {
+                        let mut d = doc_menu.borrow_mut();
+                        d.transpose(n)
+                    };
+                    commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+                }
+            }
+            ID_INS_CHORD => {
+                // Дефолт поля — аккорд под курсором, иначе C (как python).
+                let initial = {
+                    let d = doc_menu.borrow();
+                    d.chord_under_cursor()
+                        .map(|(name, _bass)| name)
+                        .unwrap_or_else(|| "C".to_string())
+                };
+                if let Some(name) = modal_text(&frame_menu, "Добавить аккорд", "Аккорд:", &initial) {
+                    let msg = {
+                        let mut d = doc_menu.borrow_mut();
+                        d.insert_chord(&name, "")
+                    };
+                    commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+                }
+            }
+            ID_EDIT_CHORD => {
+                let default = {
+                    let d = doc_menu.borrow();
+                    d.chord_under_cursor()
+                };
+                match default {
+                    None => {
+                        // Правки нет — как python: «No chord to edit».
+                        spk_menu.borrow().speak("Нет аккорда для редактирования");
+                    }
+                    Some((name, _bass)) => {
+                        if let Some(new_name) =
+                            modal_text(&frame_menu, "Изменить аккорд", "Аккорд:", &name)
+                        {
+                            let msg = {
+                                let mut d = doc_menu.borrow_mut();
+                                d.edit_chord(&new_name)
+                            };
+                            commit_edit(
+                                &msg,
+                                &doc_menu,
+                                &spk_menu,
+                                &state_menu,
+                                &panel_menu,
+                                &frame_menu,
+                            );
+                        }
+                    }
+                }
+            }
+            ID_INS_NC => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.toggle_no_chord()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_INS_BASS => {
+                if let Some(note) = modal_text(&frame_menu, "Басовая нота", "Нота (например, E):", "")
+                {
+                    let msg = {
+                        let mut d = doc_menu.borrow_mut();
+                        d.add_bass_note(&note)
+                    };
+                    commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+                }
+            }
+            // Метки частей — Ctrl+Shift+буква (a/b/c/d/v/i/s/q).
+            ID_SM_A => add_section_mark_menu('a', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_B => add_section_mark_menu('b', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_C => add_section_mark_menu('c', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_D => add_section_mark_menu('d', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_V => add_section_mark_menu('v', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_I => add_section_mark_menu('i', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_S => add_section_mark_menu('s', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
+            ID_SM_Q => add_section_mark_menu('q', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
             ID_SPEAK => {
                 let d = doc_menu.borrow();
                 let spk = spk_menu.borrow();
@@ -821,14 +1246,36 @@ fn main() {
                 d.cursor = 1;
                 let dref = &*d;
                 sync_grid(dref, &state_menu, &panel_menu);
-                announce(dref, &*spk_menu.borrow(), &frame_menu);
+                announce(dref, &**spk_menu.borrow(), &frame_menu);
             }
             ID_GOTO_END => {
                 let mut d = doc_menu.borrow_mut();
                 d.cursor = d.last_measure();
                 let dref = &*d;
                 sync_grid(dref, &state_menu, &panel_menu);
-                announce(dref, &*spk_menu.borrow(), &frame_menu);
+                announce(dref, &**spk_menu.borrow(), &frame_menu);
+            }
+            ID_GOTO_MEASURE => {
+                // Переход к такту по номеру — как python navigate_to_measure.
+                let (cur, last) = {
+                    let d = doc_menu.borrow();
+                    (d.cursor, d.last_measure())
+                };
+                let target = modal_spin(
+                    &frame_menu,
+                    "Перейти к такту",
+                    &format!("Номер такта (1–{last}):"),
+                    1,
+                    last.max(1),
+                    cur.max(1).min(last.max(1)),
+                );
+                if let Some(target) = target {
+                    let mut d = doc_menu.borrow_mut();
+                    d.cursor = target.max(1).min(d.last_measure());
+                    let dref = &*d;
+                    sync_grid(dref, &state_menu, &panel_menu);
+                    announce(dref, &**spk_menu.borrow(), &frame_menu);
+                }
             }
             ID_ABOUT => {
                 frame_menu.set_status_text(
