@@ -50,6 +50,10 @@ const ID_NAV_CHORD_LEFT: i32 = 2005;
 const ID_NAV_CHORD_RIGHT: i32 = 2006;
 const ID_NAV_MEASURE_LEFT: i32 = 2007;
 const ID_NAV_MEASURE_RIGHT: i32 = 2008;
+// Slice 12 (msg 1598): Alt+←/→ — по долям (только handle_key, без пунктов меню);
+// Ctrl+Alt+←/→ — по секциям (акселератор, как у остальных стрелок).
+const ID_NAV_SECTION_LEFT: i32 = 2010;
+const ID_NAV_SECTION_RIGHT: i32 = 2011;
 // «Закрыть окно» (Ctrl+W) — то же закрытие, что X / Alt+F4 / Ctrl+Q.
 const ID_CLOSE_WINDOW: i32 = 2009;
 // Меню «Правка» (Edit): undo/redo/буфер обмена/транспонирование.
@@ -232,6 +236,39 @@ fn nav_measure_step(doc: &mut Doc, left: bool) -> String {
         doc.go_left();
     } else {
         doc.go_right();
+    }
+    if doc.cursor != before {
+        doc.announce_current()
+    } else {
+        String::new()
+    }
+}
+
+/// Alt+←/→ (slice 12, msg 1598): по долям внутри такта, как MuseScore — шаг на
+/// соседнюю долю, в том числе ПУСТУЮ (на неё потом встанет аккорд через
+/// Ctrl+Enter). С последней доли — на долю 1 следующего такта, и наоборот.
+/// Озвучка — клетка «аккорд такт N доля M» / «такт N доля M пусто».
+fn nav_beat_step(doc: &mut Doc, left: bool) -> String {
+    let moved = if left {
+        doc.go_beat_left()
+    } else {
+        doc.go_beat_right()
+    };
+    if moved {
+        doc.announce_beat_cell()
+    } else {
+        String::new()
+    }
+}
+
+/// Ctrl+Alt+←/→ (slice 12): структурная навигация по секциям/вольтам (которые
+/// раньше висели на Alt). Озвучка — целиком такт, куда прыгнули.
+fn nav_section_step(doc: &mut Doc, left: bool) -> String {
+    let before = doc.cursor;
+    if left {
+        doc.go_prev_structural();
+    } else {
+        doc.go_next_structural();
     }
     if doc.cursor != before {
         doc.announce_current()
@@ -586,10 +623,11 @@ fn modal_text(parent: &Frame, title: &str, label: &str, initial: &str) -> Option
         .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
         .build();
     let panel = Panel::builder(&dialog).build();
-    let ctrl = TextCtrl::builder(&panel).with_value(initial).build();
-
     let col = BoxSizer::builder(Orientation::Vertical).build();
-    add_labeled_row(&col, &panel, label, &ctrl);
+    // Метка рождается до контрола (labeled_row), чтобы NVDA связала их (msg 1598).
+    let ctrl = labeled_row(&col, &panel, label, |p| {
+        TextCtrl::builder(p).with_value(initial).build()
+    });
 
     let ok_button = Button::builder(&panel).with_id(ID_OK).with_label("ОК").build();
     let cancel_button = Button::builder(&panel)
@@ -635,13 +673,14 @@ fn modal_spin(
         .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
         .build();
     let panel = Panel::builder(&dialog).build();
-    let spin = SpinCtrl::builder(&panel)
-        .with_range(min, max)
-        .with_initial_value(initial)
-        .build();
-
     let col = BoxSizer::builder(Orientation::Vertical).build();
-    add_labeled_row(&col, &panel, label, &spin);
+    // Метка рождается до контрола (labeled_row), чтобы NVDA связала их (msg 1598).
+    let spin = labeled_row(&col, &panel, label, |p| {
+        SpinCtrl::builder(p)
+            .with_range(min, max)
+            .with_initial_value(initial)
+            .build()
+    });
 
     let ok_button = Button::builder(&panel).with_id(ID_OK).with_label("ОК").build();
     let cancel_button = Button::builder(&panel)
@@ -750,8 +789,8 @@ const HELP_LINES: &[&str] = &[
     "Ctrl+T — транспонировать всю цифровку",
     "",
     "Вставка",
-    "Ctrl+Enter — добавить аккорд в текущий такт",
-    "F2 — изменить аккорд под курсором",
+    "Ctrl+Enter — добавить аккорд в текущий такт (на долю курсора)",
+    "F2 — изменить аккорд под курсором (на его доле)",
     "N — без аккорда (N.C.) на текущем такте",
     "V — вольта / окончание",
     "[ — начало повтора, ] — конец повтора",
@@ -765,7 +804,8 @@ const HELP_LINES: &[&str] = &[
     "Песня (навигация как в MuseScore)",
     "← / → — по аккордам и пустым тактам (внутри такта — второй аккорд)",
     "Ctrl+← / Ctrl+→ — по тактам, включая пустые",
-    "Alt+← / Alt+→ — в начало / конец секции",
+    "Alt+← / Alt+→ — по долям в такте; на пустую долю вставить — Ctrl+Enter",
+    "Ctrl+Alt+← / Ctrl+Alt+→ — по секциям",
     "Home — первый такт, End — последний такт",
     "Del / Backspace — удалить аккорд",
     "Ctrl+Del / Ctrl+Backspace — удалить только метку / повтор / N.C.",
@@ -897,25 +937,37 @@ const TEMPLATE_KEYS: [&str; 6] = ["", "Blues", "AABA", "ABAC", "ABAB", "ABCD"];
 
 /// Ряд «метка + расширяемый контрол» в вертикальную колонку формы.
 ///
-/// NVDA-лейбл контрола (slice 11, msg 1585): имя задаётся контролу явно через
-/// `set_name` (текст метки без двоеточия). Слепой эвристике MSAA «статик слева
-/// от поля = имя» доверять нельзя — метки в python-формах рождались до контролов
-/// (dialogs.py), а здесь контролы создаются до меток, и NVDA читала просто тип
-/// («Редактор», «Комбобокс»). Явное имя чинит все формы сразу.
-fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl: &W) {
-    let row = BoxSizer::builder(Orientation::Horizontal).build();
+/// NVDA-лейбл контрола (slice 11 msg 1585 → slice 12 msg 1598): метка
+/// (StaticText) создаётся РАНЬШЕ контрола — замыкание `make` зовётся после
+/// рождения метки. Порядок создания = z-order дочерних окон; NVDA на MSAA
+/// подхватывает неподписанное поле по ближайшему предшествующему статик-тексту
+/// (в python-формах метки рождались до контролов — dialogs.py). Когда контролы
+/// создавались до меток (как было), NVDA читала только тип («Редактор»,
+/// «Комбобокс») — поля были «без имён». Вдобавок имя кладётся в wxWindow
+/// (`set_name`) — нативный резервный канал. Метод возвращает контрол, чтобы
+/// форма держала его живым (чтение значений после OK) и давала фокус.
+fn labeled_row<W: WxWidget>(
+    col: &BoxSizer,
+    panel: &Panel,
+    label: &str,
+    make: impl FnOnce(&Panel) -> W,
+) -> W {
+    // Метка — ДО контрола (см. комментарий выше).
     let lab = StaticText::builder(panel).with_label(label).build();
+    let ctrl = make(panel);
     // Без конфликта wxEXPAND с флагами выравнивания: в box-sizer wxEXPAND сам
     // задаёт кросс-ось, комбинация с wxALIGN_* даёт debug-assert «wxEXPAND
     // overrides alignment flags in box sizers» (sizer.cpp). Поле тянется по
     // ширине ряда (пропорция 1), ряд — по ширине колонки (wxEXPAND).
+    let row = BoxSizer::builder(Orientation::Horizontal).build();
     row.add(&lab, 0, SizerFlag::AlignCenterVertical, 8);
-    row.add(ctrl, 1, SizerFlag::Expand, 0);
+    row.add(&ctrl, 1, SizerFlag::Expand, 0);
     col.add_sizer(&row, 0, SizerFlag::Expand, 4);
     let name = label.trim_end_matches(':').trim();
     if !name.is_empty() {
         ctrl.set_name(name);
     }
+    ctrl
 }
 
 /// Модальный диалог новой цифровки. Возвращает `NewChart` при OK,
@@ -927,56 +979,66 @@ fn show_new_chart_dialog(parent: &Frame) -> Option<NewChart> {
         .build();
     let panel = Panel::builder(&dialog).build();
 
-    // --- Поля: порядок создания = порядок табов (как в python-форме) ---
-    // Название / композитор / темп — текстовые поля.
-    let title_ctrl = TextCtrl::builder(&panel).with_value("My Progression").build();
-    let composer_ctrl = TextCtrl::builder(&panel).with_value("").build();
-    let bpm_spin = SpinCtrl::builder(&panel)
-        .with_range(BPM_MIN, BPM_MAX)
-        .with_initial_value(120)
-        .build();
+    // --- Поля: каждая метка рождается ДО своего контрола (labeled_row) — это
+    // порядок создания (z-order), по которому NVDA на MSAA связывает неподписанный
+    // контрол с ближайшим предшествующим статик-текстом (msg 1598). Порядок рядов
+    // = порядок табов (как в python-форме). Название / композитор / темп —
+    // текстовые поля.
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    let title_ctrl = labeled_row(&col, &panel, "Название:", |p| {
+        TextCtrl::builder(p).with_value("My Progression").build()
+    });
+    let composer_ctrl = labeled_row(&col, &panel, "Композитор:", |p| {
+        TextCtrl::builder(p).with_value("").build()
+    });
+    let bpm_spin = labeled_row(&col, &panel, "Темп (BPM):", |p| {
+        SpinCtrl::builder(p)
+            .with_range(BPM_MIN, BPM_MAX)
+            .with_initial_value(120)
+            .build()
+    });
 
     // Тональность: корень + лад (два комбобокса, как в python-сетке).
     let key_default = "C";
-    let root_choice = Choice::builder(&panel)
-        .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
-        .with_selection(Some(KEY_ROOTS.iter().position(|r| *r == key_default).unwrap_or(0) as u32))
-        .build();
-    let mode_choice = Choice::builder(&panel)
-        .with_choices(vec!["мажор".to_string(), "минор".to_string()])
-        .with_selection(Some(0))
-        .build();
+    let root_choice = labeled_row(&col, &panel, "Тональность:", |p| {
+        Choice::builder(p)
+            .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
+            .with_selection(
+                Some(KEY_ROOTS.iter().position(|r| *r == key_default).unwrap_or(0) as u32),
+            )
+            .build()
+    });
+    let mode_choice = labeled_row(&col, &panel, "Лад:", |p| {
+        Choice::builder(p)
+            .with_choices(vec!["мажор".to_string(), "минор".to_string()])
+            .with_selection(Some(0))
+            .build()
+    });
 
     // Стиль: все 50 стилей iReal, по умолчанию «Medium Swing».
     let style_default = "Medium Swing";
-    let style_choice = Choice::builder(&panel)
-        .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
-        .with_selection(
-            Some(
-                STYLES_ALL
-                    .iter()
-                    .position(|s| *s == style_default)
-                    .unwrap_or(0) as u32,
-            ),
-        )
-        .build();
+    let style_choice = labeled_row(&col, &panel, "Стиль:", |p| {
+        Choice::builder(p)
+            .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
+            .with_selection(
+                Some(
+                    STYLES_ALL
+                        .iter()
+                        .position(|s| *s == style_default)
+                        .unwrap_or(0) as u32,
+                ),
+            )
+            .build()
+    });
 
     // Шаблон структуры (в этом slice — без динамических подпанелей: блюз
     // по умолчанию 12 тактов, AABA-семейство по 8 тактов на секцию).
-    let template_choice = Choice::builder(&panel)
-        .with_choices(TEMPLATE_LABELS.iter().map(|s| s.to_string()).collect())
-        .with_selection(Some(0))
-        .build();
-
-    // --- Раскладка: колонка из рядов «метка + контрол» ---
-    let col = BoxSizer::builder(Orientation::Vertical).build();
-    add_labeled_row(&col, &panel, "Название:", &title_ctrl);
-    add_labeled_row(&col, &panel, "Композитор:", &composer_ctrl);
-    add_labeled_row(&col, &panel, "Темп (BPM):", &bpm_spin);
-    add_labeled_row(&col, &panel, "Тональность:", &root_choice);
-    add_labeled_row(&col, &panel, "Лад:", &mode_choice);
-    add_labeled_row(&col, &panel, "Стиль:", &style_choice);
-    add_labeled_row(&col, &panel, "Шаблон:", &template_choice);
+    let template_choice = labeled_row(&col, &panel, "Шаблон:", |p| {
+        Choice::builder(p)
+            .with_choices(TEMPLATE_LABELS.iter().map(|s| s.to_string()).collect())
+            .with_selection(Some(0))
+            .build()
+    });
 
     // --- Кнопки ОК / Отмена (справа) ---
     let ok_button = Button::builder(&panel)
@@ -1062,54 +1124,56 @@ fn show_project_settings_dialog(
         .build();
     let panel = Panel::builder(&dialog).build();
 
-    // --- Поля: порядок создания = порядок табов (как в python-форме) ---
-    let title_ctrl = TextCtrl::builder(&panel)
-        .with_value(defaults.title.as_str())
-        .build();
-    let composer_ctrl = TextCtrl::builder(&panel)
-        .with_value(defaults.composer.as_str())
-        .build();
-    let bpm_spin = SpinCtrl::builder(&panel)
-        .with_range(BPM_MIN, BPM_MAX)
-        .with_initial_value(defaults.bpm)
-        .build();
-    let time_ctrl = TextCtrl::builder(&panel)
-        .with_value(defaults.time_sig.as_str())
-        .build();
+    // --- Поля: каждая метка рождается ДО своего контрола (labeled_row) — это
+    // порядок создания (z-order), по которому NVDA на MSAA связывает неподписанный
+    // контрол с ближайшим предшествующим статик-текстом (msg 1598). Порядок рядов
+    // = порядок табов (как в python-форме).
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    let title_ctrl = labeled_row(&col, &panel, "Название:", |p| {
+        TextCtrl::builder(p).with_value(defaults.title.as_str()).build()
+    });
+    let composer_ctrl = labeled_row(&col, &panel, "Композитор:", |p| {
+        TextCtrl::builder(p).with_value(defaults.composer.as_str()).build()
+    });
+    let bpm_spin = labeled_row(&col, &panel, "Темп (BPM):", |p| {
+        SpinCtrl::builder(p)
+            .with_range(BPM_MIN, BPM_MAX)
+            .with_initial_value(defaults.bpm)
+            .build()
+    });
+    let time_ctrl = labeled_row(&col, &panel, "Размер такта:", |p| {
+        TextCtrl::builder(p).with_value(defaults.time_sig.as_str()).build()
+    });
 
     // Тональность: текущий ключ разбираем на (корень, лад) обратной функцией.
     let (root_str, minor) = key_to_root_mode(&defaults.key);
-    let root_choice = Choice::builder(&panel)
-        .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
-        .with_selection(Some(
-            KEY_ROOTS.iter().position(|r| *r == root_str).unwrap_or(0) as u32,
-        ))
-        .build();
-    let mode_choice = Choice::builder(&panel)
-        .with_choices(vec!["мажор".to_string(), "минор".to_string()])
-        .with_selection(Some(if minor { 1 } else { 0 }))
-        .build();
-    let style_choice = Choice::builder(&panel)
-        .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
-        .with_selection(
-            Some(
-                STYLES_ALL
-                    .iter()
-                    .position(|s| *s == defaults.style)
-                    .unwrap_or(0) as u32,
-            ),
-        )
-        .build();
-
-    // --- Раскладка: колонка из рядов «метка + контрол» ---
-    let col = BoxSizer::builder(Orientation::Vertical).build();
-    add_labeled_row(&col, &panel, "Название:", &title_ctrl);
-    add_labeled_row(&col, &panel, "Композитор:", &composer_ctrl);
-    add_labeled_row(&col, &panel, "Темп (BPM):", &bpm_spin);
-    add_labeled_row(&col, &panel, "Размер такта:", &time_ctrl);
-    add_labeled_row(&col, &panel, "Тональность:", &root_choice);
-    add_labeled_row(&col, &panel, "Лад:", &mode_choice);
-    add_labeled_row(&col, &panel, "Стиль:", &style_choice);
+    let root_choice = labeled_row(&col, &panel, "Тональность:", |p| {
+        Choice::builder(p)
+            .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
+            .with_selection(Some(
+                KEY_ROOTS.iter().position(|r| *r == root_str).unwrap_or(0) as u32,
+            ))
+            .build()
+    });
+    let mode_choice = labeled_row(&col, &panel, "Лад:", |p| {
+        Choice::builder(p)
+            .with_choices(vec!["мажор".to_string(), "минор".to_string()])
+            .with_selection(Some(if minor { 1 } else { 0 }))
+            .build()
+    });
+    let style_choice = labeled_row(&col, &panel, "Стиль:", |p| {
+        Choice::builder(p)
+            .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
+            .with_selection(
+                Some(
+                    STYLES_ALL
+                        .iter()
+                        .position(|s| *s == defaults.style)
+                        .unwrap_or(0) as u32,
+                ),
+            )
+            .build()
+    });
 
     // --- Кнопки ОК / Отмена (справа) ---
     let ok_button = Button::builder(&panel)
@@ -1217,16 +1281,35 @@ fn handle_key(
                     edited = Some(msg);
                 }
             }
-            // Alt+стрелки — структурная навигация по секциям (проверено: доходит).
-            WXK_LEFT if alt => {
-                let before = d.cursor;
-                d.go_prev_structural();
-                changed = d.cursor != before;
+            // Alt+←/→ (slice 12, msg 1598) — по долям внутри такта, как
+            // MuseScore, в т.ч. на пустую долю (Ctrl+Enter вставит туда аккорд).
+            // Без пункта меню — голый Alt доходит до handle_key (проверено).
+            WXK_LEFT if alt && !ctrl => {
+                let msg = nav_beat_step(&mut d, true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
             }
-            WXK_RIGHT if alt => {
-                let before = d.cursor;
-                d.go_next_structural();
-                changed = d.cursor != before;
+            WXK_RIGHT if alt && !ctrl => {
+                let msg = nav_beat_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            // Ctrl+Alt+←/→ — по секциям/вольтам (как раньше Alt; msg 1598).
+            // Дублирующий акселератор в меню «Песня» — страховка, если голый
+            // Ctrl+Alt+стрелка не дойдёт до handle_key.
+            WXK_LEFT if ctrl && alt => {
+                let msg = nav_section_step(&mut d, true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if ctrl && alt => {
+                let msg = nav_section_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
             }
             WXK_HOME => {
                 d.cursor = 1;
@@ -1452,6 +1535,19 @@ fn main() {
                 "Ctrl+→ по такту\tCtrl+Right",
                 "Следующий такт",
             )
+            // Slice 12 (msg 1598): Ctrl+Alt+←/→ — по секциям. Акселератор —
+            // страховка на случай, если голый Ctrl+Alt+стрелка не дойдёт до
+            // handle_key (у Home/End акселератор доходит всегда).
+            .append_item(
+                ID_NAV_SECTION_LEFT,
+                "Ctrl+Alt+← по секции\tCtrl+Alt+Left",
+                "На предыдущую секцию (метка части/вольта)",
+            )
+            .append_item(
+                ID_NAV_SECTION_RIGHT,
+                "Ctrl+Alt+→ по секции\tCtrl+Alt+Right",
+                "На следующую секцию (метка части/вольта)",
+            )
             .append_separator()
             .append_item(ID_GOTO_START, "В &начало\tHome", "Первый такт")
             .append_item(ID_GOTO_END, "В &конец\tEnd", "Последний такт")
@@ -1495,7 +1591,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+Shift+S — сохранить как, Ctrl+E — экспорт, Ctrl+P — настройки. ←/→ — по аккордам и пустым тактам, Ctrl+←/→ — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор. Вольта: [ — начало, ] — конец, V — окончание 1. Ctrl+W — закрыть окно.",
+                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+Shift+S — сохранить как, Ctrl+E — экспорт, Ctrl+P — настройки. ←/→ — по аккордам и пустым тактам, Ctrl+←/→ — по тактам, Alt+←/→ — по долям (вставка на пустую долю — Ctrl+Enter), Ctrl+Alt+←/→ — по секциям. F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор. Вольта: [ — начало, ] — конец, V — окончание 1. Ctrl+W — закрыть окно.",
             )
             .build();
 
@@ -1764,7 +1860,7 @@ fn main() {
             }
             // Шаг по аккордам/тактам (акселераторы ← / → / Ctrl+← / Ctrl+→,
             // slice 11). Озвучка как при хоткее: сменился такт — целиком,
-            // шаг внутри такта — «такт N, доля M, аккорд».
+            // шаг внутри такта — позиция «аккорд такт N доля M» (slice 12).
             ID_NAV_CHORD_LEFT => {
                 let msg = {
                     let mut d = doc_menu.borrow_mut();
@@ -1790,6 +1886,21 @@ fn main() {
                 let msg = {
                     let mut d = doc_menu.borrow_mut();
                     nav_measure_step(&mut d, false)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            // Ctrl+Alt+←/→ — по секциям (акселератор меню, slice 12).
+            ID_NAV_SECTION_LEFT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_section_step(&mut d, true)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_NAV_SECTION_RIGHT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_section_step(&mut d, false)
                 };
                 apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
             }

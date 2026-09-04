@@ -325,7 +325,8 @@ impl Doc {
         }
     }
 
-    /// К следующей структурной метке (секция/вольта) после курсора (Alt+→).
+    /// К следующей структурной метке (секция/вольта) после курсора
+    /// (Ctrl+Alt+→, slice 12; раньше сидело на Alt).
     pub fn go_next_structural(&mut self) {
         let m = self.cp.navigate_next_structural(self.cursor);
         if m > self.cursor {
@@ -334,7 +335,7 @@ impl Doc {
         }
     }
 
-    /// К предыдущей структурной метке до курсора (Alt+←).
+    /// К предыдущей структурной метке до курсора (Ctrl+Alt+←).
     pub fn go_prev_structural(&mut self) {
         let m = self.cp.navigate_prev_structural(self.cursor);
         if m < self.cursor {
@@ -390,6 +391,43 @@ impl Doc {
             self.beat = 1;
         }
         self.cursor != start_m || self.beat != start_b
+    }
+
+    /// Число долей в такте (размер такта) — граница шага Alt+стрелки.
+    fn beats_per_measure(&self) -> i32 {
+        self.cp.time_signature.numerator.max(1)
+    }
+
+    /// Alt+→ — по долям внутри такта, как MuseScore (slice 12): шаг на
+    /// следующую долю, в том числе ПУСТУЮ — на неё потом можно вставить аккорд
+    /// (Ctrl+Enter встаёт на долю курсора). С последней доли такта — на долю 1
+    /// следующего такта; за концом документа шаг не сдвигает. Долю НЕ зажимает
+    /// к аккордам (в отличие от go_chord_right) — цель удержать позицию на
+    /// пустой доле. Возвращает true, если позиция сдвинулась.
+    pub fn go_beat_right(&mut self) -> bool {
+        let m0 = self.cursor;
+        let b0 = self.beat;
+        if self.beat < self.beats_per_measure() {
+            self.beat += 1;
+        } else if self.cursor < self.last_measure() {
+            self.cursor += 1;
+            self.beat = 1;
+        }
+        self.cursor != m0 || self.beat != b0
+    }
+
+    /// Alt+← — зеркально `go_beat_right`: с первой доли такта на последнюю долю
+    /// предыдущего; за началом документа не сдвигает.
+    pub fn go_beat_left(&mut self) -> bool {
+        let m0 = self.cursor;
+        let b0 = self.beat;
+        if self.beat > 1 {
+            self.beat -= 1;
+        } else if self.cursor > 1 {
+            self.cursor -= 1;
+            self.beat = self.beats_per_measure();
+        }
+        self.cursor != m0 || self.beat != b0
     }
 
     /// Содержимое такта *measure*.
@@ -477,15 +515,20 @@ impl Doc {
         self.announce_measure(self.cursor)
     }
 
-    /// Озвучка клетки «такт, доля» после внутритактового шага стрелкой: аккорд
-    /// под курсором с номером доли — как python `_announce_position` (main.py).
-    /// Если доля аккорд не несёт (пустой такт / шаг «в такт») — целиком такт.
+    /// Озвучка клетки «позиция» — что слышится при шаге внутрь такта (Alt+←/→
+    /// по долям, шаг на соседний аккорд того же такта). Аккорд первым, без
+    /// запятых: «Ми бемоль 7 такт 1 доля 1» (msg 1598). На пустой доле —
+    /// «такт N доля M пусто» (туда можно вставить аккорд); на такте N.C.
+    /// аккордовая сетка не редактируется — целиком такт.
     pub fn announce_beat_cell(&self) -> String {
         let v = self.measure_view(self.cursor);
+        if v.no_chord {
+            return self.announce_measure(self.cursor);
+        }
         if let Some(c) = v.chords.iter().find(|c| c.beat == self.beat) {
-            format!("такт {}, доля {}, {}", self.cursor, self.beat, c.spoken)
+            format!("{} такт {} доля {}", c.spoken.trim(), self.cursor, self.beat)
         } else {
-            self.announce_measure(self.cursor)
+            format!("такт {} доля {} пусто", self.cursor, self.beat)
         }
     }
 
@@ -518,9 +561,10 @@ impl Doc {
 // ===========================================================================
 // Редактирование «клетки такта» (slice 5) — калька python app_io/main.py.
 //
-// Курсор у Doc — (такт, доля) с slice 11, НО правки по-прежнему тактовые:
-// редактирование адресует первый аккорд такта (долю 1), доля курсора служит
-// только для шагания стрелками по событиям (go_chord_left/right). Возврат
+// Курсор у Doc — (такт, доля): с slice 12 правки доля-точные (msg 1598) —
+// редактирование/копирование/удаление адресуют аккорд НА доле курсора, а
+// вставка и вставка-из-буфера кладут аккорд на долю курсора (в т.ч. пустую —
+// на неё курсор ставят Alt+←/→). Возврат
 // каждого метода — готовая строка для озвучки (что проговорить одним вызовом
 // NVDA); пустая строка = молчание (например, диалог вставки не меняет имя —
 // python тоже ничего не говорит). Стек undo/redo, буфер обмена и dirty — как
@@ -711,11 +755,14 @@ impl Doc {
         self.cp.resolve_virtual_measure(self.cursor)
     }
 
-    /// Первый (по доле) аккорд реального такта под курсором — «активная клетка».
+    /// Аккорд на доле курсора реального такта — «активная клетка» (slice 12).
+    /// Точность по доле: F2/копирование/удаление действуют на аккорд ПОД
+    /// КУРСОРОМ, а не на первый в такте (msg 1598). None — на доле аккорда нет.
     fn active_chord(&self) -> Option<(i32 /*real_m*/, i32 /*beat*/, String, String)> {
         let m = self.real_measure();
-        let first = self.cp.find_chords_in_measure(m).into_iter().next();
-        first.map(|it| {
+        let ts = self.cp.time_signature;
+        let pos = Position::new(m, self.beat, ts);
+        self.cp.find_chords_at_position(&pos).into_iter().next().map(|it| {
             (
                 m,
                 it.position.beat,
@@ -788,17 +835,19 @@ impl Doc {
         "Повторено".to_string()
     }
 
-    /// Вставить аккорд по имени на долю 1 такта под курсором (заменяет аккорд
-    /// на той же доле, как core `add_chord_raw`) — как python
-    /// `_insert_chord_from_menu` (app_io.py:629). Возвращает «Вставлен аккорд: …».
+    /// Вставить аккорд по имени НА ДОЛЮ КУРСОРА (slice 12): заменяет аккорд на
+    /// той же доле (core `add_chord_raw`), а на пустой доле — кладёт новый — как
+    /// python `_insert_chord_from_menu` (app_io.py:629), который ставил на долю 1.
+    /// Возвращает «Вставлен аккорд: …».
     pub fn insert_chord(&mut self, name: &str, bass: &str) -> String {
         let name = name.trim().to_string();
         if name.is_empty() {
             return String::new();
         }
         let m = self.real_measure();
+        let b = self.beat.clamp(1, self.beats_per_measure());
         self.push_undo();
-        self.cp.add_chord_by_name(&name, m, 1, bass);
+        self.cp.add_chord_by_name(&name, m, b, bass);
         self.dirty = true;
         format!("Вставлен аккорд: {name}")
     }
@@ -872,10 +921,10 @@ impl Doc {
         }
     }
 
-    /// Вставить аккорд из буфера на долю 1 такта под курсором — как python
-    /// `paste_chord` (main.py:807). Буфер НЕ очищается (python читает и хранит
-    /// дальше) — повторный Ctrl+V клеит тот же аккорд в следующий такт.
-    /// В отличие от python сохраняет и слэш-бас (копирование не теряет басовую ноту).
+    /// Вставить аккорд из буфера на долю курсора (slice 12) — как python
+    /// `paste_chord` (main.py:807), который клеил на долю 1. Буфер НЕ очищается
+    /// (python читает и хранит дальше) — повторный Ctrl+V клеит тот же аккорд
+    /// в следующий такт/долю. В отличие от python сохраняет и слэш-бас.
     pub fn paste_chord(&mut self) -> String {
         let Some(item) = self.clipboard.as_ref() else {
             return "Буфер обмена пуст".to_string();
@@ -883,8 +932,9 @@ impl Doc {
         let name = item.name.clone();
         let bass = item.bass.clone();
         let m = self.real_measure();
+        let b = self.beat.clamp(1, self.beats_per_measure());
         self.push_undo();
-        self.cp.add_chord_by_name(&name, m, 1, &bass);
+        self.cp.add_chord_by_name(&name, m, b, &bass);
         self.dirty = true;
         format!("Вставлено: {name}")
     }
@@ -901,8 +951,10 @@ impl Doc {
         let (m, beat, name) = match self.active_chord() {
             Some((m, beat, name, _bass)) => (m, beat, name),
             None => {
+                // От позиции курсора (такт+доля), чтобы аккорд на доле раньше
+                // в том же такте имел приоритет перед аккордом прошлого такта.
                 let ts = self.cp.time_signature;
-                let pos = Position::new(self.cursor, 1, ts);
+                let pos = Position::new(self.cursor, self.beat, ts);
                 match self.cp.find_last_chord_to_left(&pos) {
                     Some(item) => {
                         let it = item.clone();
@@ -1590,40 +1642,74 @@ mod tests {
     #[test]
     fn chord_step_announce_measure_vs_beat() {
         let mut d = nav_doc();
-        // Шаг внутри такта → озвучка клетки с долей.
+        // Шаг внутри такта → озвучка позиции: аккорд первым, без запятых
+        // (msg 1598: «E-7 такт 1 доля 3», не «такт 1, доля 3, E-7»).
         let from = d.cursor;
         d.go_chord_right();
         let s = d.announce_after_chord_step(from);
-        assert!(s.contains("такт 1, доля 3"), "клетка: {s}");
+        assert!(s.ends_with("такт 1 доля 3"), "клетка: {s}");
+        assert!(!s.contains(','), "без запятых: {s}");
         // Шаг на новый такт → озвучка такта целиком.
         let from = d.cursor;
         d.go_chord_right();
         let s = d.announce_after_chord_step(from);
         assert!(s.starts_with("такт 3"), "целый такт: {s}");
         assert!(!s.contains("доля"), "целый такт без доли: {s}");
-        // Пустой такт под курсором → клетка отдаёт весь такт.
+        // Пустая доля в пустом такте → «такт N доля M пусто».
         d.cursor = 2;
         d.beat = 1;
-        assert!(d.announce_beat_cell().contains("пустой такт"));
+        assert_eq!(d.announce_beat_cell(), "такт 2 доля 1 пусто");
     }
 
     #[test]
-    fn clamp_beat_reanchors_on_content_edit() {
+    fn alt_arrows_step_beats_within_and_across_measures() {
+        let mut d = nav_doc();
+        assert_eq!((d.cursor, d.beat), (1, 1));
+        // Внутри такта — по долям, в т.ч. по пустым (доля 2 аккорда не несёт).
+        for _ in 0..3 {
+            assert!(d.go_beat_right(), "шаг по долям внутри такта");
+        }
+        assert_eq!((d.cursor, d.beat), (1, 4), "с доли 1 до доли 4");
+        // Граница такта → доля 1 следующего такта (пустой такт 2).
+        assert!(d.go_beat_right());
+        assert_eq!((d.cursor, d.beat), (2, 1));
+        // Влево с первой доли → на последнюю долю предыдущего такта.
+        assert!(d.go_beat_left());
+        assert_eq!((d.cursor, d.beat), (1, 4));
+        assert!(d.go_beat_left());
+        assert_eq!((d.cursor, d.beat), (1, 3));
+        // За границы документа шаг не сдвигает.
+        d.cursor = 1;
+        d.beat = 1;
+        assert!(!d.go_beat_left(), "левее первого такта");
+        d.cursor = 4;
+        d.beat = 4;
+        assert!(!d.go_beat_right(), "правее последнего такта");
+    }
+
+    #[test]
+    fn clamp_beat_reanchors_after_deleting_cursor_chord() {
         let mut d = nav_doc();
         d.go_chord_right(); // на (1, 3) — второй аккорд такта 1
-        // Снос всего такта 1 (два удаления по «клетке такта»).
-        d.delete_at_cursor();
-        d.delete_at_cursor();
-        assert_eq!((d.cursor, d.beat), (1, 1), "удалён весь такт 1 → доля 1");
-        // undo вернул E-7 на доле 3 — beat сходится на этот аккорд.
-        d.undo();
-        assert_eq!((d.cursor, d.beat), (1, 3), "clamp подтянул beat к аккорду");
-        // ещё undo — исходная цифровка (аккорды на долях 1 и 3), beat 3 валиден.
-        d.undo();
         assert_eq!((d.cursor, d.beat), (1, 3));
-        // Влево с доли 3 — на первый аккорд того же такта.
-        assert!(d.go_chord_left());
+        // Del на доле 3 снимает ИМЕННО аккорд доли 3 (slice 12); аккорд доли 1
+        // цел, и курсор прижимается к нему (доли 3 больше нет → clamp на 1).
+        d.delete_at_cursor();
+        let syms: Vec<String> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.symbol.clone())
+            .collect();
+        assert_eq!(syms, vec!["B-7"], "удалён только аккорд доли 3");
+        assert_eq!((d.cursor, d.beat), (1, 1), "clamp подтянул beat к аккорду");
+        // Undo вернул E-7 на долю 3 — оба аккорда на месте.
+        d.undo();
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 2);
         assert_eq!((d.cursor, d.beat), (1, 1));
+        // Вправо по аккордам — снова на долю 3.
+        assert!(d.go_chord_right());
+        assert_eq!((d.cursor, d.beat), (1, 3));
     }
 }
 
@@ -1839,23 +1925,74 @@ mod edit_tests {
     }
 
     #[test]
-    fn editing_measures_with_two_chords_targets_first_beat() {
-        // В такте с аккордами на 1 и 3 долях (как демо) клетка = первая доля:
-        // F2 правит первый, вставка заменяет долю 1, вторая доля не трогается.
+    fn editing_and_deleting_target_chord_at_cursor_beat() {
+        // В такте с аккордами на 1 и 3 долях правки доля-точные (slice 12):
+        // F2 правит аккорд НА доле курсора, а не первый в такте (msg 1598).
         let mut d = empty_doc();
-        d.insert_chord("B-7", "");
+        d.insert_chord("B-7", ""); // на (1, 1) — доля по умолчанию
         // Добавим аккорд на долю 3 напрямую в cp (как в demo-цифровке).
         d.cp.add_chord_by_name("E-7", 1, 3, "");
         assert_eq!(d.cp.find_chords_in_measure(1).len(), 2);
-        d.edit_chord("B7");
-        let view = d.measure_view(1);
-        let syms: Vec<String> = view.chords.iter().map(|c| c.symbol.clone()).collect();
-        assert_eq!(syms, vec!["B7", "E-7"], "правка тронула только первую долю");
-        d.cursor = 1;
+        // Курсор на доле 3 → F2 меняет E-7, B-7 на доле 1 не тронут.
+        d.beat = 3;
+        d.edit_chord("F#-7");
+        let syms: Vec<String> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.symbol.clone())
+            .collect();
+        assert_eq!(syms, vec!["B-7", "F#-7"], "правка тронула только долю 3");
+        // Курсор на доле 1 → Del снимает B-7, аккорд доли 3 остаётся.
+        d.beat = 1;
         d.delete_at_cursor();
-        let view = d.measure_view(1);
-        let syms: Vec<String> = view.chords.iter().map(|c| c.symbol.clone()).collect();
-        assert_eq!(syms, vec!["E-7"], "удалена первая доля, вторая осталась");
+        let syms: Vec<String> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.symbol.clone())
+            .collect();
+        assert_eq!(syms, vec!["F#-7"], "удалён аккорд доли 1, доли 3 цел");
+        // На пустой доле того же такта F2 говорит, что редактировать нечего,
+        // а не «ловит» первый аккорд такта.
+        d.beat = 1;
+        assert_eq!(d.edit_chord("G7"), "Нет аккорда для редактирования");
+        let syms: Vec<String> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.symbol.clone())
+            .collect();
+        assert_eq!(syms, vec!["F#-7"]);
+    }
+
+    #[test]
+    fn insert_places_chord_on_empty_beat_of_cursor() {
+        // Alt+→ по долям ставит курсор на ПУСТУЮ долю — Ctrl+Enter кладёт
+        // аккорд туда, а не на долю 1 (slice 12, msg 1598).
+        let mut d = empty_doc();
+        d.insert_chord("C", ""); // (1, 1)
+        d.beat = 2; // встали на пустую долю 2 (Alt+→ с доли 1)
+        d.insert_chord("G7", "");
+        let beats: Vec<i32> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.beat)
+            .collect();
+        assert_eq!(beats, vec![1, 2], "аккорд встал на долю 2, не заменив долю 1");
+        assert_eq!(d.cp.find_chords_in_measure(1).len(), 2);
+        // Ctrl+V на пустой доле тоже встаёт туда же.
+        d.copy_chord();
+        d.beat = 3;
+        d.paste_chord();
+        let beats: Vec<i32> = d
+            .measure_view(1)
+            .chords
+            .iter()
+            .map(|c| c.beat)
+            .collect();
+        assert_eq!(beats, vec![1, 2, 3]);
     }
 }
 
