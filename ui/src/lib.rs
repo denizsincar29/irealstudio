@@ -37,6 +37,126 @@ pub struct MeasureView {
     pub chords: Vec<ChordCell>,
 }
 
+/// Диапазон допустимого BPM новой цифровки — как в python
+/// (`dialogs.py`: BPM_MIN/BPM_MAX); вне диапазона остаётся дефолт 120.
+pub const BPM_MIN: i32 = 40;
+pub const BPM_MAX: i32 = 240;
+
+/// Параметры новой цифровки из диалога «Новая цифровка» (Ctrl+N).
+/// Поля повторяют python-эталон `new_project_dialog` (dialogs.py:99) и
+/// `new_project` (app_io.py:340). `template` — имя шаблона как в python:
+/// `""` (без шаблона), `"Blues"`, либо AABA-семейство
+/// `"AABA"/"ABAC"/"ABAB"/"ABCD"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewChart {
+    /// Название цифровки (python-дефолт "My Progression").
+    pub title: String,
+    /// Композитор (python-дефолт "" — пусто, пока не введено).
+    pub composer: String,
+    /// Тональность (дефолт "C").
+    pub key: String,
+    /// Стиль (дефолт "Medium Swing").
+    pub style: String,
+    /// Темп (дефолт 120; вне [BPM_MIN, BPM_MAX] не применяется).
+    pub bpm: i32,
+    /// Имя шаблона: "" / "Blues" / "AABA" / "ABAC" / "ABAB" / "ABCD".
+    pub template: String,
+    /// Тактов блюза — только 12/16/24; иное значение трактуется как 12.
+    pub blues_bars: i32,
+    /// Тактов на секции форм (дефолт 8 на каждую букву).
+    pub bars_a: i32,
+    pub bars_b: i32,
+    pub bars_c: i32,
+    pub bars_d: i32,
+    /// Вступление: метка `*i` + intro_bars тактов перед телом шаблона.
+    pub intro: bool,
+    pub intro_bars: i32,
+    /// Кода: метка `Q` + coda_bars тактов после тела.
+    pub coda: bool,
+    pub coda_bars: i32,
+}
+
+impl NewChart {
+    /// Дефолты python-диалога (app_settings: DEFAULT_*; dialogs.py:99).
+    pub fn defaults() -> Self {
+        NewChart {
+            title: "My Progression".to_string(),
+            composer: String::new(),
+            key: "C".to_string(),
+            style: "Medium Swing".to_string(),
+            bpm: 120,
+            template: String::new(),
+            blues_bars: 12,
+            bars_a: 8,
+            bars_b: 8,
+            bars_c: 8,
+            bars_d: 8,
+            intro: false,
+            intro_bars: 4,
+            coda: false,
+            coda_bars: 4,
+        }
+    }
+}
+
+/// Последовательность секций AABA-семейства по буквам — как `sequences`
+/// в python `_apply_template` (app_io.py:73). Для не-форм — пусто.
+fn form_sequence(template: &str) -> &'static [char] {
+    match template {
+        "AABA" => &['a', 'a', 'b', 'a'],
+        "ABAC" => &['a', 'b', 'a', 'c'],
+        "ABAB" => &['a', 'b', 'a', 'b'],
+        "ABCD" => &['a', 'b', 'c', 'd'],
+        _ => &[],
+    }
+}
+
+/// Наложить шаблон на прогрессию — калька python `_apply_template`
+/// (app_io.py:47-87): вступление (метка `*i`), тело (блюз — просто такты без
+/// меток; AABA-семейство — метка `*A..*D` на первую долю каждой секции), кода
+/// (метка `Q`); затем `total_measures = max(total_measures, курсор-1)`.
+fn apply_template(cp: &mut ChordProgression, spec: &NewChart) {
+    let intro_bars = if spec.intro { spec.intro_bars } else { 0 };
+    let coda_bars = if spec.coda { spec.coda_bars } else { 0 };
+
+    // Курсор (1-based), как в python: куда начнётся следующий фрагмент.
+    let mut cursor = 1;
+
+    if intro_bars > 0 {
+        cp.add_section_mark(cursor, "*i");
+        cursor += intro_bars;
+    }
+
+    if spec.template == "Blues" {
+        // Блюз без репетиционных меток; недопустимое число тактов → 12.
+        let bars = if matches!(spec.blues_bars, 12 | 16 | 24) {
+            spec.blues_bars
+        } else {
+            12
+        };
+        cursor += bars;
+    } else {
+        for &letter in form_sequence(&spec.template) {
+            let (mark, bars) = match letter {
+                'a' => ("*A", spec.bars_a),
+                'b' => ("*B", spec.bars_b),
+                'c' => ("*C", spec.bars_c),
+                'd' => ("*D", spec.bars_d),
+                _ => ("", 0),
+            };
+            cp.add_section_mark(cursor, mark);
+            cursor += bars;
+        }
+    }
+
+    if coda_bars > 0 {
+        cp.add_section_mark(cursor, "Q");
+        cursor += coda_bars;
+    }
+
+    cp.total_measures = cp.total_measures.max(cursor - 1);
+}
+
 impl Doc {
     /// Демо-цифровка: 12 тактов, две секции (*A / *B), N.C. в конце.
     /// Строится API core — как будет строиться документ из файла позже.
@@ -84,9 +204,27 @@ impl Doc {
         Doc { cp, cursor: 1.min(last.max(1)) }
     }
 
-    /// Последний такт документа (не ниже 1).
+    /// Новая цифровка из данных формы (Ctrl+N) — как python `new_project`
+    /// (app_io.py:340): пустая прогрессия на 4/4 с полями формы, затем шаблон
+    /// (`apply_template`). Без шаблона документ пуст — такты появятся по мере
+    /// ввода аккордов (как в python).
+    pub fn new_chart(spec: &NewChart) -> Self {
+        let ts = TimeSignature::new(4, 4); // python: DEFAULT_TIME_SIG = (4, 4)
+        let mut cp = ChordProgression::new(&spec.title, ts, &spec.key, &spec.style);
+        cp.composer = spec.composer.clone();
+        // BPM вне диапазона python молча игнорирует — остаётся дефолт 120.
+        if (BPM_MIN..=BPM_MAX).contains(&spec.bpm) {
+            cp.bpm = spec.bpm;
+        }
+        apply_template(&mut cp, spec);
+        Doc { cp, cursor: 1 }
+    }
+
+    /// Последний такт документа (не ниже 1). Длина песни — это `total_measures`
+    /// (как в python): у новой цифровки с шаблоном такты есть, даже если они
+    /// пока пустые (метки/аккорды появятся при вводе).
     pub fn last_measure(&self) -> i32 {
-        self.cp.last_measure().max(1)
+        self.cp.last_measure().max(self.cp.total_measures).max(1)
     }
 
     /// Курсор вправо (не дальше конца документа).
@@ -291,5 +429,119 @@ mod tests {
             !a1.contains("B-7"),
             "озвучка не должна содержать сырые символы аккордов: {a1}"
         );
+    }
+
+    // --- Новая цифровка из формы (Ctrl+N): калька python new_project/_apply_template ---
+
+    #[test]
+    fn new_chart_assigns_fields_and_bpm() {
+        let mut s = NewChart::defaults();
+        s.title = "Blue Bossa".into();
+        s.composer = "Kenny Dorham".into();
+        s.key = "C-".into();
+        s.style = "Bossa Nova".into();
+        s.bpm = 200;
+        let d = Doc::new_chart(&s);
+        assert_eq!(d.cp.title, "Blue Bossa");
+        assert_eq!(d.cp.composer, "Kenny Dorham");
+        assert_eq!(d.cp.key, "C-");
+        assert_eq!(d.cp.style, "Bossa Nova");
+        assert_eq!(d.cp.bpm, 200, "bpm в диапазоне применяется");
+        assert_eq!(d.cursor, 1, "курсор новой цифровки — на первом такте");
+    }
+
+    #[test]
+    fn new_chart_out_of_range_bpm_keeps_default() {
+        let mut s = NewChart::defaults();
+        s.bpm = 300;
+        assert_eq!(Doc::new_chart(&s).cp.bpm, 120, "выше BPM_MAX — python игнорирует");
+        s.bpm = 20;
+        assert_eq!(Doc::new_chart(&s).cp.bpm, 120, "ниже BPM_MIN — python игнорирует");
+        s.bpm = 100;
+        assert_eq!(Doc::new_chart(&s).cp.bpm, 100);
+    }
+
+    #[test]
+    fn new_chart_empty_template_is_empty_document() {
+        let d = Doc::new_chart(&NewChart::defaults());
+        assert_eq!(d.cp.total_measures, 0, "без шаблона тактов нет, как в python");
+        assert!(d.cp.section_marks.is_empty());
+        assert_eq!(d.cp.last_measure(), 1, "пустой документ держится на такте 1");
+    }
+
+    #[test]
+    fn new_chart_blues_twelve_no_section_marks() {
+        let mut s = NewChart::defaults();
+        s.template = "Blues".into();
+        let d = Doc::new_chart(&s);
+        assert_eq!(d.last_measure(), 12);
+        assert!(d.cp.section_marks.is_empty(), "блюз без репетиционных меток");
+    }
+
+    #[test]
+    fn new_chart_blues_bars_choice_and_coercion() {
+        let mut s = NewChart::defaults();
+        s.template = "Blues".into();
+        s.blues_bars = 24;
+        assert_eq!(Doc::new_chart(&s).last_measure(), 24);
+        s.blues_bars = 99;
+        assert_eq!(Doc::new_chart(&s).last_measure(), 12, "не 12/16/24 → 12, как python");
+    }
+
+    #[test]
+    fn new_chart_aaba_defaults_thirty_two_bars() {
+        let mut s = NewChart::defaults();
+        s.template = "AABA".into();
+        let d = Doc::new_chart(&s);
+        assert_eq!(d.last_measure(), 32);
+        assert_eq!(d.cp.get_section_mark(1), Some("*A"));
+        assert_eq!(d.cp.get_section_mark(9), Some("*A"), "повтор A");
+        assert_eq!(d.cp.get_section_mark(17), Some("*B"));
+        assert_eq!(d.cp.get_section_mark(25), Some("*A"), "финальный A");
+        assert_eq!(d.cp.get_section_mark(2), None, "внутри секции меток нет");
+    }
+
+    #[test]
+    fn new_chart_aaba_with_intro_and_coda() {
+        let mut s = NewChart::defaults();
+        s.template = "AABA".into();
+        s.intro = true;
+        s.intro_bars = 4;
+        s.coda = true;
+        s.coda_bars = 4;
+        let d = Doc::new_chart(&s);
+        assert_eq!(d.cp.get_section_mark(1), Some("*i"), "вступление");
+        assert_eq!(d.cp.get_section_mark(5), Some("*A"), "A после 4 тактов вступления");
+        assert_eq!(d.cp.get_section_mark(13), Some("*A"), "второй A");
+        assert_eq!(d.cp.get_section_mark(21), Some("*B"));
+        assert_eq!(d.cp.get_section_mark(29), Some("*A"), "финальный A");
+        assert_eq!(d.cp.get_section_mark(37), Some("Q"), "кода после последней секции");
+        assert_eq!(d.cp.total_measures, 40, "4 вступления + 32 формы + 4 коды");
+        assert_eq!(d.last_measure(), 40);
+    }
+
+    #[test]
+    fn new_chart_abac_custom_section_bars() {
+        let mut s = NewChart::defaults();
+        s.template = "ABAC".into();
+        s.bars_a = 8;
+        s.bars_b = 4;
+        let d = Doc::new_chart(&s);
+        // A(8) → *B на 9; B(4) → *A на 13; A(8) → *C на 21; C(8) → всего 28.
+        assert_eq!(d.cp.get_section_mark(1), Some("*A"));
+        assert_eq!(d.cp.get_section_mark(9), Some("*B"));
+        assert_eq!(d.cp.get_section_mark(13), Some("*A"));
+        assert_eq!(d.cp.get_section_mark(21), Some("*C"));
+        assert_eq!(d.cp.total_measures, 28);
+        assert_eq!(d.last_measure(), 28);
+    }
+
+    #[test]
+    fn new_chart_announces_first_section() {
+        let mut s = NewChart::defaults();
+        s.template = "AABA".into();
+        let d = Doc::new_chart(&s);
+        let a1 = d.announce_measure(1);
+        assert!(a1.contains("секция A"), "озвучка метки секции: {a1}");
     }
 }
