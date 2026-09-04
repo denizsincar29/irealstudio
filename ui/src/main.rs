@@ -18,7 +18,7 @@ use wxdragon::keycode::{WXK_END, WXK_HOME, WXK_LEFT, WXK_RIGHT};
 use wxdragon::prelude::*;
 
 use irealwx_speech::{default_speak, Speak};
-use irealwx_ui::Doc;
+use irealwx_ui::{BPM_MAX, BPM_MIN, Doc, NewChart};
 
 // --- ID пунктов меню (кроме ID_EXIT/ID_ABOUT из прелюда) ---
 const ID_NEW: i32 = 1001;
@@ -152,6 +152,243 @@ fn announce(doc: &Doc, speaker: &dyn Speak, frame: &Frame) {
     );
 }
 
+// --- Форма «Новая цифровка» (Ctrl+N) ---
+//
+// Калька python `_NewProjectDlg` (dialogs.py:240) в реальный wxDialog: NVDA
+// объявляет его как диалог, табы идут по порядку создания контролов (как в
+// wxPython-версии). Поля формы собирают `NewChart`, дальше его строит
+// `Doc::new_chart` в lib (тот же путь, что python `new_project`).
+
+/// 12 хроматических корней — порядок python `KEY_ROOT_NOTES` (dialogs.py:27).
+const KEY_ROOTS: [&str; 12] = [
+    "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+];
+
+/// iReal-имя минора по корню — python `_MINOR_KEY_MAP` (dialogs.py:31):
+/// часть корней в миноре пишется с диезами (Db → C#-, Gb → F#-, …).
+const ROOT_MINOR: [(&str, &str); 12] = [
+    ("C", "C-"),
+    ("Db", "C#-"),
+    ("D", "D-"),
+    ("Eb", "Eb-"),
+    ("E", "E-"),
+    ("F", "F-"),
+    ("Gb", "F#-"),
+    ("G", "G-"),
+    ("Ab", "G#-"),
+    ("A", "A-"),
+    ("Bb", "Bb-"),
+    ("B", "B-"),
+];
+
+/// Все 50 стилей iReal — порядок python `STYLES_ALL` (pyrealpro.py:25).
+const STYLES_ALL: [&str; 50] = [
+    "Afro 12/8",
+    "Ballad Double Time Feel",
+    "Ballad Even",
+    "Ballad Melodic",
+    "Ballad Swing",
+    "Blue Note",
+    "Bossa Nova",
+    "Doo Doo Cats",
+    "Double Time Swing",
+    "Even 8ths",
+    "Even 8ths Open",
+    "Even 16ths",
+    "Guitar Trio",
+    "Gypsy Jazz",
+    "Latin",
+    "Latin/Swing",
+    "Long Notes",
+    "Medium Swing",
+    "Medium Up Swing",
+    "Medium Up Swing 2",
+    "New Orleans Swing",
+    "Second Line",
+    "Slow Swing",
+    "Swing Two/Four",
+    "Trad Jazz",
+    "Up Tempo Swing",
+    "Up Tempo Swing 2",
+    "Argentina: Tango",
+    "Brazil: Bossa Acoustic",
+    "Brazil: Bossa Electric",
+    "Brazil: Samba",
+    "Cuba: Bolero",
+    "Cuba: Cha Cha Cha",
+    "Cuba: Son Montuno 2-3",
+    "Cuba: Son Montuno 3-2",
+    "Bluegrass",
+    "Country",
+    "Disco",
+    "Funk",
+    "Glam Funk",
+    "House",
+    "Reggae",
+    "Rock",
+    "Rock 12/8",
+    "RnB",
+    "Shuffle",
+    "Slow Rock",
+    "Smooth",
+    "Soul",
+    "Virtual Funk",
+];
+
+/// Шаблоны формы: индексы совпадают у меток (`TEMPLATE_LABELS`) и ключей
+/// (`TEMPLATE_KEYS`) — первый пункт «без шаблона» даёт пустой `NewChart.template`.
+const TEMPLATE_LABELS: [&str; 6] =
+    ["Без шаблона", "Blues", "AABA", "ABAC", "ABAB", "ABCD"];
+const TEMPLATE_KEYS: [&str; 6] = ["", "Blues", "AABA", "ABAC", "ABAB", "ABCD"];
+
+/// Ряд «метка + расширяемый контрол» в вертикальную колонку формы.
+fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl: &W) {
+    let row = BoxSizer::builder(Orientation::Horizontal).build();
+    let lab = StaticText::builder(panel).with_label(label).build();
+    row.add(&lab, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 8);
+    row.add(ctrl, 1, SizerFlag::Expand | SizerFlag::AlignCenterVertical, 0);
+    col.add_sizer(&row, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top, 4);
+}
+
+/// iReal-ключ из корня и лада — как python `root_mode_to_key` (dialogs.py:54).
+fn key_from_root_mode(root: &str, minor: bool) -> String {
+    if minor {
+        ROOT_MINOR
+            .iter()
+            .find(|(r, _)| *r == root)
+            .map(|(_, k)| k.to_string())
+            .unwrap_or_else(|| format!("{root}-"))
+    } else {
+        root.to_string()
+    }
+}
+
+/// Модальный диалог новой цифровки. Возвращает `NewChart` при OK,
+/// `None` при отмене — как python `new_project_dialog` (dict/None).
+fn show_new_chart_dialog(parent: &Frame) -> Option<NewChart> {
+    // wxDialog с нативной ролью диалога для NVDA (как в python-версии).
+    let dialog = Dialog::builder(parent, "Новая цифровка")
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+
+    // --- Поля: порядок создания = порядок табов (как в python-форме) ---
+    // Название / композитор / темп — текстовые поля.
+    let title_ctrl = TextCtrl::builder(&panel).with_value("My Progression").build();
+    let composer_ctrl = TextCtrl::builder(&panel).with_value("").build();
+    let bpm_spin = SpinCtrl::builder(&panel)
+        .with_range(BPM_MIN, BPM_MAX)
+        .with_initial_value(120)
+        .build();
+
+    // Тональность: корень + лад (два комбобокса, как в python-сетке).
+    let key_default = "C";
+    let root_choice = Choice::builder(&panel)
+        .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
+        .with_selection(Some(KEY_ROOTS.iter().position(|r| *r == key_default).unwrap_or(0) as u32))
+        .build();
+    let mode_choice = Choice::builder(&panel)
+        .with_choices(vec!["мажор".to_string(), "минор".to_string()])
+        .with_selection(Some(0))
+        .build();
+
+    // Стиль: все 50 стилей iReal, по умолчанию «Medium Swing».
+    let style_default = "Medium Swing";
+    let style_choice = Choice::builder(&panel)
+        .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
+        .with_selection(
+            Some(
+                STYLES_ALL
+                    .iter()
+                    .position(|s| *s == style_default)
+                    .unwrap_or(0) as u32,
+            ),
+        )
+        .build();
+
+    // Шаблон структуры (в этом slice — без динамических подпанелей: блюз
+    // по умолчанию 12 тактов, AABA-семейство по 8 тактов на секцию).
+    let template_choice = Choice::builder(&panel)
+        .with_choices(TEMPLATE_LABELS.iter().map(|s| s.to_string()).collect())
+        .with_selection(Some(0))
+        .build();
+
+    // --- Раскладка: колонка из рядов «метка + контрол» ---
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    add_labeled_row(&col, &panel, "Название:", &title_ctrl);
+    add_labeled_row(&col, &panel, "Композитор:", &composer_ctrl);
+    add_labeled_row(&col, &panel, "Темп (BPM):", &bpm_spin);
+    add_labeled_row(&col, &panel, "Тональность:", &root_choice);
+    add_labeled_row(&col, &panel, "Лад:", &mode_choice);
+    add_labeled_row(&col, &panel, "Стиль:", &style_choice);
+    add_labeled_row(&col, &panel, "Шаблон:", &template_choice);
+
+    // --- Кнопки ОК / Отмена (справа) ---
+    let ok_button = Button::builder(&panel)
+        .with_id(ID_OK)
+        .with_label("ОК")
+        .build();
+    let cancel_button = Button::builder(&panel)
+        .with_id(ID_CANCEL)
+        .with_label("Отмена")
+        .build();
+    ok_button.set_default();
+
+    let ok_dlg = dialog;
+    ok_button.on_click(move |_| {
+        ok_dlg.end_modal(ID_OK);
+    });
+    let cancel_dlg = dialog;
+    cancel_button.on_click(move |_| {
+        cancel_dlg.end_modal(ID_CANCEL);
+    });
+
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(
+        &buttons,
+        0,
+        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
+        8,
+    );
+
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    let result = dialog.show_modal();
+    let spec = if result == ID_OK {
+        // Читаем значения ПОСЛЕ закрытия модального цикла, но ДО destroy.
+        let mut spec = NewChart::defaults();
+        let raw_title = title_ctrl.get_value();
+        if !raw_title.is_empty() {
+            spec.title = raw_title;
+        }
+        spec.composer = composer_ctrl.get_value();
+        let root_idx = root_choice.get_selection().unwrap_or(0) as usize;
+        let root = KEY_ROOTS.get(root_idx).copied().unwrap_or("C");
+        let minor = mode_choice.get_selection() == Some(1);
+        spec.key = key_from_root_mode(root, minor);
+        spec.style = style_choice
+            .get_string_selection()
+            .unwrap_or_else(|| style_default.to_string());
+        spec.bpm = bpm_spin.value();
+        let tpl_idx = template_choice.get_selection().unwrap_or(0) as usize;
+        spec.template = TEMPLATE_KEYS
+            .get(tpl_idx)
+            .copied()
+            .unwrap_or("")
+            .to_string();
+        Some(spec)
+    } else {
+        None
+    };
+    dialog.destroy();
+    spec
+}
+
 /// Клавиатурная навигация: один обработчик для frame и для панели тактов
 /// (фокус может быть у любого из них — панель без a11y, но ловит клавиши).
 fn handle_key(
@@ -224,13 +461,13 @@ fn main() {
 
         // --- Главное окно ---
         let frame = Frame::builder()
-            .with_title("irealstudio — Rust (slice 1: окно, меню, панель тактов)")
+            .with_title("irealstudio — Rust (slice 2: окно, меню, панель тактов, форма Ctrl+N)")
             .with_size(Size::new(920, 640))
             .build();
 
         // --- Менюбар ---
         let file_menu = Menu::builder()
-            .append_item(ID_NEW, "&Новая цифровка…\tCtrl+N", "Сбросить к демо")
+            .append_item(ID_NEW, "&Новая цифровка…\tCtrl+N", "Создать новую цифровку")
             .append_separator()
             .append_item(ID_EXIT, "&Выход", "Закрыть программу")
             .build();
@@ -281,11 +518,20 @@ fn main() {
         let panel_menu = grid_panel.clone();
         frame.on_menu_selected(move |event| match event.get_id() {
             ID_NEW => {
-                let mut d = doc_menu.borrow_mut();
-                *d = Doc::new_demo();
-                let dref = &*d;
-                sync_grid(dref, &state_menu, &panel_menu);
-                announce(dref, &*spk_menu.borrow(), &frame_menu);
+                // Модальная форма (wxDialog). None — пользователь нажал Отмена.
+                if let Some(spec) = show_new_chart_dialog(&frame_menu) {
+                    let mut d = doc_menu.borrow_mut();
+                    *d = Doc::new_chart(&spec);
+                    let dref = &*d;
+                    sync_grid(dref, &state_menu, &panel_menu);
+                    // Как python new_project: озвучить «Новая цифровка: <название>».
+                    let spk = spk_menu.borrow();
+                    spk.speak(&format!("Новая цифровка: {}", spec.title));
+                    frame_menu.set_status_text(
+                        &format!("Такт {} из {}", dref.cursor, dref.last_measure()),
+                        0,
+                    );
+                }
             }
             ID_SPEAK => {
                 let d = doc_menu.borrow();
@@ -313,7 +559,7 @@ fn main() {
             }
             ID_ABOUT => {
                 frame_menu.set_status_text(
-                    "irealstudio (Rust), slice 1 — wxDragon 0.9.21 / wxWidgets 3.3.3",
+                    "irealstudio (Rust), slice 2 — wxDragon 0.9.21 / wxWidgets 3.3.3",
                     0,
                 )
             }
