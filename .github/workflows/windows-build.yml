@@ -1,0 +1,53 @@
+name: irealwx windows build
+
+# Компиляционный контроль wxDragon-слоя на Windows.
+# Контейнер Дениза не может собрать ui (wxWidgets/C++), поэтому единственная
+# реальная проверка main.rs — сборка на Windows. Этот workflow делает её
+# автоматической: каждый пуш на ветку rust собирает `irealwx_ui` на
+# windows-раннере и подсвечивает ошибки типов GUI-оболочки до ручного теста.
+#
+# Первый прогон долгий (wxDragon впервые собирает wxWidgets 3.3.3 через CMake,
+# 10–30 мин) — это разово. Для повторного запуска без пуша — workflow_dispatch.
+#
+# NB: Actions на public-репо личные минуты не тратит.
+
+on:
+  push:
+    branches: [ rust ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # cl.exe/link.exe из VS2022 в env для последующих шагов (нужны CMake-сборке wxWidgets).
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache cargo + wxWidgets build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      # windows-latest уже содержит CMake и Ninja на PATH — их хватает wxDragon-sys.
+      - name: Build UI (wxDragon)
+        shell: pwsh
+        run: cargo build -p irealwx_ui
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: irealwx_ui
+          path: target/debug/irealwx_ui.exe
+          if-no-files-found: error

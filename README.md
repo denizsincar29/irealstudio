@@ -166,3 +166,12 @@ export CARGO_TARGET_DIR=$PWD/irealwx/target
 RUSTFLAGS="-C linker=${TC}lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld" \
   cargo test --target x86_64-unknown-linux-musl
 ```
+
+### Авто-сборка UI на Windows (GitHub Actions)
+
+main.rs в контейнере не типизируется (wxDragon тянет wxWidgets), поэтому
+`.github/workflows/windows-build.yml` собирает `irealwx_ui` на windows-раннере
+на каждый пуш в `rust` (и по `workflow_dispatch`): компиляционные ошибки
+wx-слоя всплывают автоматически, не дожидаясь ручной сборки. Первый прогон
+долгий (wxWidgets 3.3.3 через CMake, 10–30 мин), бинарь выкладывается
+артефактом. Валидация GUI-поведения остаётся ручной (NVDA-проверка на машине).
