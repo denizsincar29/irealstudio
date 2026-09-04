@@ -6,6 +6,7 @@ pub mod identify;
 pub mod ireal;
 pub mod model;
 pub mod notes;
+pub mod persist;
 pub mod progression;
 pub mod spoken;
 pub mod transpose;

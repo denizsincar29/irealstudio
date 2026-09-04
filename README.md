@@ -1,6 +1,6 @@
 # irealwx — переписывание irealstudio на Rust
 
-Статус: **этап 1 — порт чистого ядра**: irealb-кодек готов и сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs` — читаемый `irealbook://` + современный `irealb://` URL: pyrealpro Song/Measure/TimeSignature, `Y`-переносы строк, стили/тональности iReal Pro) и **озвучка аккордов по-русски** (`core/src/chords/spoken.rs` — `chord_name_to_spoken`, ru-каталог вендорен в `spoken_i18n.rs`). Дальше по этапу 1: JSON-персистентность (отдельный крейт хранения). GUI/wxDragon — этап 2.
+Статус: **этап 1 — порт чистого ядра завершён**: irealb-кодек готов и сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs` — читаемый `irealbook://` + современный `irealb://` URL: pyrealpro Song/Measure/TimeSignature, `Y`-переносы строк, стили/тональности iReal Pro), **озвучка аккордов по-русски** (`core/src/chords/spoken.rs` — `chord_name_to_spoken`, ru-каталог вендорен в `spoken_i18n.rs`) и **JSON-персистентность** (`core/src/chords/persist.rs` — `to_json`/`from_json`, 6 сценариев байтово против `json.dumps(indent=2, ensure_ascii)`, ручной кодек без serde — core остаётся dep-free). GUI/wxDragon — этап 2.
 
 ## Зачем
 
@@ -41,6 +41,11 @@ irealstudio — ~13k строк wxPython-приложения Дениза дл�
 - `spoken_golden.rs` — 485 кейсов озвучки аккордов: `chord_name_to_spoken`
   против chords.py под ru-каталогом irealstudio (ровно то, что слышит
   пользователь). ru-переводы фраз вендорены в `core/src/chords/spoken_i18n.rs`.
+- `json_golden.rs` — 6 сценариев `to_json`/`from_json` побайтово против
+  chords.py (`json.dumps(indent=2, ensure_ascii)`): кириллица/«ёлочки»,
+  emoji (суррогатная пара), управляющие символы, пустые контейнеры, вольты,
+  транспонирование (мутация key), многотактовый порядок, дубли N.C.
+  Парсер и принтер — ручные (`core/src/chords/persist.rs`), без serde.
 
 Генераторы: `core/tests/gen_*_golden.py` (запуск из папки тестов при эталоне
 `irealstudio/` рядом с workspace).
