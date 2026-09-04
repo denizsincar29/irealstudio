@@ -110,13 +110,24 @@ const EXT: &[(&str, &str)] = &[
 ];
 
 /// Разговорная форма корня: `C#` → «до диез», `Bb` → «си бемоль», `G` → «соль».
+///
+/// Не-корень не парсим и не роняем процесс: пустая строка → пусто, первый
+/// символ не ASCII-буква (кириллица, цифра, мусор) → строка как есть. Раньше
+/// `&root[..1]` паниковал на пустом/многобайтовом корне, и речь умирала.
 fn spoken_root(root: &str) -> String {
-    let letter = &root[..1];
-    let letter_spoken = tr(letter);
+    let mut chars = root.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    if !first.is_ascii_alphabetic() {
+        return root.to_string();
+    }
+    let letter_spoken = tr(&first.to_string());
     if root.ends_with('#') {
         return format!("{letter_spoken} {}", tr("sharp"));
     }
-    if root.len() == 2 && root.as_bytes()[1] == b'b' {
+    // Хвост после первой ASCII-буквы — граница байтов целая.
+    if &root[1..] == "b" {
         return format!("{letter_spoken} {}", tr("flat"));
     }
     letter_spoken
@@ -195,6 +206,17 @@ pub fn chord_name_to_spoken(name: &str, bass_note: &str) -> String {
     }
 
     let root = root_prefix(name);
+    if root.is_empty() {
+        // Корень не распознан (кириллица/опечатка в имени, напр. «С6» вместо
+        // «C6») — разбирать нечего: читаем имя как есть. Без этой ветки
+        // нижестоящий spoken_root("") паниковал, и речь умирала после вставки
+        // такого аккорда (regression).
+        return if bass_note.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", name, bass_note)
+        };
+    }
     let mut quality_and_ext = &name[root.len()..];
 
     // Слэш-инверсия, встроенная в имя: '/' перед заглавной — бас (`C/E`),
@@ -262,5 +284,17 @@ mod tests {
         assert_eq!(spoken_root("C#"), "до диез");
         assert_eq!(spoken_root("Bb"), "си бемоль");
         assert_eq!(spoken_root("F"), "фа");
+    }
+
+    #[test]
+    fn unknown_root_never_panics() {
+        // regression: «C6», набранный в русской раскладке (кириллическая С),
+        // давал пустой root_prefix → spoken_root("") паниковал (byte index 1
+        // out of bounds) и речь умирала после вставки такого аккорда.
+        assert_eq!(spoken_root(""), "");
+        assert_eq!(chord_name_to_spoken("С6", ""), "С6");
+        assert_eq!(chord_name_to_spoken("6", ""), "6");
+        assert_eq!(chord_name_to_spoken("", ""), "");
+        assert_eq!(chord_name_to_spoken("С6", "A"), "С6/A");
     }
 }

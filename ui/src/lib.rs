@@ -532,16 +532,12 @@ impl Doc {
         }
     }
 
-    /// Озвучка после простого шага стрелкой (`go_chord_left/right`): такт
-    /// сменился — целиком новый такт (секция, все аккорды); остались в том же
-    /// такте (шаг на второй аккорд) — только клетку с долей. `from_measure` —
-    /// такт ДО шага.
-    pub fn announce_after_chord_step(&self, from_measure: i32) -> String {
-        if self.cursor != from_measure {
-            self.announce_current()
-        } else {
-            self.announce_beat_cell()
-        }
+    /// Озвучка после простого шага стрелкой (`go_chord_left/right`): всегда
+    /// позиция-клетка «аккорд такт N доля M» — и внутри такта, и при переходе
+    /// на новый такт (msg 1602: «пусть озвучивает так же текущий элемент, а не
+    /// блин весь такт»). `from_measure` оставлен для совместимости вызова.
+    pub fn announce_after_chord_step(&self, _from_measure: i32) -> String {
+        self.announce_beat_cell()
     }
 
     /// Озвучка всей песни: по такту на строку.
@@ -1640,7 +1636,7 @@ mod tests {
     }
 
     #[test]
-    fn chord_step_announce_measure_vs_beat() {
+    fn chord_step_announce_cell_always() {
         let mut d = nav_doc();
         // Шаг внутри такта → озвучка позиции: аккорд первым, без запятых
         // (msg 1598: «E-7 такт 1 доля 3», не «такт 1, доля 3, E-7»).
@@ -1649,16 +1645,16 @@ mod tests {
         let s = d.announce_after_chord_step(from);
         assert!(s.ends_with("такт 1 доля 3"), "клетка: {s}");
         assert!(!s.contains(','), "без запятых: {s}");
-        // Шаг на новый такт → озвучка такта целиком.
+        // Шаг на НОВЫЙ такт — тоже элемент, а не весь такт (msg 1602).
         let from = d.cursor;
         d.go_chord_right();
         let s = d.announce_after_chord_step(from);
-        assert!(s.starts_with("такт 3"), "целый такт: {s}");
-        assert!(!s.contains("доля"), "целый такт без доли: {s}");
+        assert!(s.ends_with("такт 3 доля 1"), "элемент нового такта: {s}");
+        assert!(!s.contains(','), "без запятых: {s}");
         // Пустая доля в пустом такте → «такт N доля M пусто».
         d.cursor = 2;
         d.beat = 1;
-        assert_eq!(d.announce_beat_cell(), "такт 2 доля 1 пусто");
+        assert_eq!(d.announce_after_chord_step(2), "такт 2 доля 1 пусто");
     }
 
     #[test]
@@ -1736,6 +1732,24 @@ mod edit_tests {
         assert_eq!(v.chords.len(), 1);
         assert_eq!(v.chords[0].symbol, "G7");
         assert_eq!(d.last_measure(), 1, "вставка создала такт");
+    }
+
+    #[test]
+    fn unknown_chord_name_is_echoed_without_panic() {
+        // regression (msg 1602): «C6», введённый в русской раскладке (кириллица),
+        // не имеет распознанного корня → раньше announce паниковал в spoken.rs и
+        // речь умирала. Теперь имя хранится как есть и читается как есть.
+        let mut d = empty_doc();
+        let msg = d.insert_chord("С6", "");
+        assert_eq!(msg, "Вставлен аккорд: С6");
+        let m = d.measure_view(1);
+        assert_eq!(m.chords[0].symbol, "С6");
+        assert_eq!(m.chords[0].spoken, "С6");
+        let a = d.announce_measure(1);
+        assert!(a.contains("С6"), "имя читается в озвучке такта: {a}");
+        assert_eq!(d.announce_beat_cell(), "С6 такт 1 доля 1");
+        // Сетка не паникует и несёт то же сырое имя.
+        assert_eq!(d.grid_cell_text(1), "С6");
     }
 
     #[test]
