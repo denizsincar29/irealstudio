@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["core", "audio", "midi", "speech", "ui"]
+default-members = ["core", "audio", "midi", "speech"]
+
+# irealstudio rewrite — Rust workspace.
+#
+# Каждый слой — отдельный крейт, чтобы чинить/менять независимо:
+#   core    — чистая логика (irealb-кодек, гармония). Тестируется где угодно.
+#   audio   — метроном/клик, cpal (Windows-таргет).
+#   midi    — MIDI-выход, midir (Windows-таргет).
+#   speech  — речь в скринридер (NVDA ControllerClient), аналог accessible_output3.
+#   ui      — wxDragon GUI (Windows-only, НЕ в default-members: тянет wxWidgets).
+#
+# `cargo test` собирает только default-members, поэтому на любом хосте зелёно.
+# Полный workspace (с wx-сборкой) собирается на Windows: cargo build -p irealwx_ui.

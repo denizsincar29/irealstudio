@@ -1,0 +1,11 @@
+[package]
+name = "irealwx_audio"
+version = "0.1.0"
+edition = "2021"
+description = "Звук: метроном/клик через cpal (Windows-таргет). Граница крейта: аудио-выход, ничего общего с GUI/речью."
+
+[dependencies]
+# cpal подключается на этапе реального порта (Windows / целевая платформа).
+# Стаб держим без внешних зависимостей, чтобы workspace собирался на любом хосте.
+
+[dev-dependencies]

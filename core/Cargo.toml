@@ -1,0 +1,9 @@
+[package]
+name = "irealwx_core"
+version = "0.1.0"
+edition = "2021"
+description = "irealstudio core: iReal Pro format codec + chord engine (pure Rust, no GUI)"
+
+[dependencies]
+
+[dev-dependencies]

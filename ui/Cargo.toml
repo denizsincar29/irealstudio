@@ -1,0 +1,13 @@
+[package]
+name = "irealwx_ui"
+version = "0.1.0"
+edition = "2021"
+description = "GUI: wxDragon (Windows). Окно без a11y-контролов, альт-меню, панель тактов (on_paint), форма создания цифровки."
+
+[dependencies]
+# wxDragon (wxdragon-sys) подключается при реальной Windows-сборке:
+# он сам CMake-компилит wxWidgets 3.3.3 и требует MSVC + libclang.
+irealwx_core = { path = "../core" }
+irealwx_speech = { path = "../speech" }
+
+[dev-dependencies]

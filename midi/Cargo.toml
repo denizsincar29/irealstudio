@@ -1,0 +1,9 @@
+[package]
+name = "irealwx_midi"
+version = "0.1.0"
+edition = "2021"
+description = "MIDI-выход через midir (Windows Multimedia). Граница: отправка MIDI-событий, без модели песен/гармонии."
+
+[dependencies]
+
+[dev-dependencies]

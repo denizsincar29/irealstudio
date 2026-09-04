@@ -1,0 +1,9 @@
+[package]
+name = "irealwx_speech"
+version = "0.1.0"
+edition = "2021"
+description = "Речь в скринридер (аутпут через NVDA ControllerClient). Замена accessible_output3.Auto() из irealstudio."
+
+[dependencies]
+
+[dev-dependencies]
