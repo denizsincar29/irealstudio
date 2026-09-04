@@ -43,6 +43,15 @@ const ID_SPEAK: i32 = 2001;
 const ID_SPEAK_ALL: i32 = 2002;
 const ID_GOTO_START: i32 = 2003;
 const ID_GOTO_END: i32 = 2004;
+// Навигация (slice 11, MuseScore): ←/→ по аккордам и пустым тактам,
+// Ctrl+←/→ по тактам. Акселераторы — как у Home/End: клавиши стрелок доходят
+// до окна только через пункты меню (msg 1589: голые стрелки молчали).
+const ID_NAV_CHORD_LEFT: i32 = 2005;
+const ID_NAV_CHORD_RIGHT: i32 = 2006;
+const ID_NAV_MEASURE_LEFT: i32 = 2007;
+const ID_NAV_MEASURE_RIGHT: i32 = 2008;
+// «Закрыть окно» (Ctrl+W) — то же закрытие, что X / Alt+F4 / Ctrl+Q.
+const ID_CLOSE_WINDOW: i32 = 2009;
 // Меню «Правка» (Edit): undo/redo/буфер обмена/транспонирование.
 const ID_UNDO: i32 = 3001;
 const ID_REDO: i32 = 3002;
@@ -196,6 +205,64 @@ fn announce(doc: &Doc, speaker: &dyn Speak, frame: &Frame) {
         &format!("Такт {} из {}", doc.cursor, doc.last_measure()),
         0,
     );
+}
+
+/// Шаг простой стрелкой (slice 11): по событиям — на следующий/предыдущий
+/// аккорд (в т.ч. внутри такта), а если впереди аккордов нет — «в такт» по
+/// пустым. Возвращает готовую строку для озвучки; пустая — курсор не сдвинулся.
+fn nav_chord_step(doc: &mut Doc, left: bool) -> String {
+    let from = doc.cursor;
+    let moved = if left {
+        doc.go_chord_left()
+    } else {
+        doc.go_chord_right()
+    };
+    if moved {
+        doc.announce_after_chord_step(from)
+    } else {
+        String::new()
+    }
+}
+
+/// Шаг Ctrl+стрелка: по тактам, включая пустые (доля сбрасывается). Возвращает
+/// строку для озвучки; пустая — курсор на границе, шага не было.
+fn nav_measure_step(doc: &mut Doc, left: bool) -> String {
+    let before = doc.cursor;
+    if left {
+        doc.go_left();
+    } else {
+        doc.go_right();
+    }
+    if doc.cursor != before {
+        doc.announce_current()
+    } else {
+        String::new()
+    }
+}
+
+/// Применить шаг навигации (msg — готовая озвучка; пустая = молчание, шага не
+/// было): перерисовать сетку, проговорить и показать статус «Такт X из Y».
+fn apply_navigation(
+    msg: &str,
+    doc: &Rc<RefCell<Doc>>,
+    speaker: &Rc<RefCell<Box<dyn Speak>>>,
+    state: &Rc<RefCell<GridState>>,
+    panel: &Panel,
+    frame: &Frame,
+) {
+    if msg.is_empty() {
+        return;
+    }
+    {
+        let d = doc.borrow();
+        let dref = &*d;
+        sync_grid(dref, state, panel);
+        frame.set_status_text(
+            &format!("Такт {} из {}", dref.cursor, dref.last_measure()),
+            0,
+        );
+    }
+    speaker.borrow().speak(msg);
 }
 
 /// Диагностика дебаг-клавиши D: строка в консоль (eprintln) и в файл
@@ -622,62 +689,18 @@ enum UnsavedChoice {
 }
 
 /// Показать модальный диалог несохранённых изменений. *message* — уже готовый
-/// текст («…содержит несохранённые изменения.\n\nСохранить …?»). Вопрос лежит в
-/// read-only многострочном поле с начальным фокусом — NVDA гарантированно
-/// озвучит его при открытии (обычный StaticText рядом с кнопками фокус не
-/// получает и может остаться неозвученным). Кнопки Сохранить / Не сохранять /
-/// Отмена; Enter = Сохранить (дефолт, как YES_DEFAULT в python), Esc = Отмена.
+/// текст вопроса («…содержит несохранённые изменения.\n\nСохранить …?»).
+/// Нативный месседж-бокс (slice 11, msg 1587): вопрос — текст диалога, а не
+/// текстовое поле, NVDA читает и текст, и кнопки штатно. Кнопки «Сохранить» /
+/// «Не сохранять» / «Отмена»; Enter = Сохранить (дефолт Yes), Esc = Отмена.
 fn ask_unsaved(parent: &Frame, message: &str) -> UnsavedChoice {
-    let dialog = Dialog::builder(parent, "Несохранённые изменения")
-        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+    let dlg = MessageDialog::builder(parent, message, "Несохранённые изменения")
+        .with_style(
+            MessageDialogStyle::YesNo | MessageDialogStyle::Cancel | MessageDialogStyle::IconWarning,
+        )
         .build();
-    let panel = Panel::builder(&dialog).build();
-    let text = TextCtrl::builder(&panel)
-        .with_value(message)
-        .with_style(TextCtrlStyle::MultiLine | TextCtrlStyle::ReadOnly)
-        .build();
-
-    let save_button = Button::builder(&panel)
-        .with_id(ID_YES)
-        .with_label("Сохранить")
-        .build();
-    let discard_button = Button::builder(&panel)
-        .with_id(ID_NO)
-        .with_label("Не сохранять")
-        .build();
-    let cancel_button = Button::builder(&panel)
-        .with_id(ID_CANCEL)
-        .with_label("Отмена")
-        .build();
-    save_button.set_default();
-
-    let d_save = dialog;
-    save_button.on_click(move |_| d_save.end_modal(ID_YES));
-    let d_discard = dialog;
-    discard_button.on_click(move |_| d_discard.end_modal(ID_NO));
-    let d_cancel = dialog;
-    cancel_button.on_click(move |_| d_cancel.end_modal(ID_CANCEL));
-
-    let col = BoxSizer::builder(Orientation::Vertical).build();
-    // Многострочное поле чуть приподнимем, чтобы текст читался целиком.
-    col.add(&text, 0, SizerFlag::Expand, 4);
-    col.add_spacer(4);
-    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
-    buttons.add(&save_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    buttons.add(&discard_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
-
-    panel.set_sizer(col, true);
-    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
-    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
-    dialog.set_sizer_and_fit(dialog_sizer, true);
-
-    // Начальный фокус в текст вопроса — иначе NVDA на открытии диалога молчит
-    // (тот же урок, что со слайса 2: без фокуса в диалоге нет озвучки).
-    text.set_focus();
-
-    let result = dialog.show_modal();
+    dlg.set_yes_no_labels("Сохранить", "Не сохранять");
+    let result = dlg.show_modal();
     let choice = if result == ID_YES {
         UnsavedChoice::Save
     } else if result == ID_NO {
@@ -685,7 +708,7 @@ fn ask_unsaved(parent: &Frame, message: &str) -> UnsavedChoice {
     } else {
         UnsavedChoice::Cancel
     };
-    dialog.destroy();
+    // MessageDialog уничтожается сам (Drop → destroy_once).
     choice
 }
 
@@ -704,7 +727,9 @@ fn veto_close(event: &WindowEventData) {
 //
 // Калька python `_show_keyboard_shortcuts` (app_io.py:521): read-only
 // многострочный текст со всеми хоткеями и одно «ОК». Текст в поле с начальным
-// фокусом — NVDA читает его с открытия (тот же урок, что в ask_unsaved).
+// фокусом — NVDA читает его с открытия (список длинный, и в нативном
+// месседж-боксе он бы не листался). Нативный месседж-бокс — только там, где
+// текста мало и важен вопрос с кнопками (ask_unsaved, msg 1587).
 // Слайс аддитивный: новое меню и диалог, поведение пунктов 1–84 не меняется.
 
 /// Справка построчно (join в диалоге). Сверена с реальными биндингами:
@@ -714,9 +739,10 @@ const HELP_LINES: &[&str] = &[
     "Ctrl+N — новая цифровка",
     "Ctrl+O — открыть из файла .ips",
     "Ctrl+S — сохранить (нет файла — откроется «Сохранить как»)",
-    "Файл → Сохранить как — сохранить в новый файл",
+    "Ctrl+Shift+S — сохранить как (в новый файл)",
     "Ctrl+E — экспорт в iReal Pro",
-    "Ctrl+Q — выход (при правках спросит подтверждение)",
+    "Ctrl+W — закрыть окно, Ctrl+Q — выход",
+    "Закрытие при правках спросит подтверждение",
     "",
     "Правка",
     "Ctrl+Z — отменить, Ctrl+Y — повторить",
@@ -732,11 +758,13 @@ const HELP_LINES: &[&str] = &[
     "Метка части (подменю «Вставка»):",
     "Ctrl+Shift+A/B/C/D — Части A, B, C, D",
     "Ctrl+Shift+V — Куплет, Ctrl+Shift+I — Вступление",
-    "Ctrl+Shift+S — Сеньо, Ctrl+Shift+Q — Кода",
+    "Сеньо — через «Вставка → Метка части» (без хоткея)",
+    "Ctrl+Shift+Q — Кода",
     "Басовая нота — «Вставка → Басовая нота…»",
     "",
-    "Песня",
-    "← / → — предыдущий / следующий такт",
+    "Песня (навигация как в MuseScore)",
+    "← / → — по аккордам и пустым тактам (внутри такта — второй аккорд)",
+    "Ctrl+← / Ctrl+→ — по тактам, включая пустые",
     "Alt+← / Alt+→ — в начало / конец секции",
     "Home — первый такт, End — последний такт",
     "Del / Backspace — удалить аккорд",
@@ -757,7 +785,12 @@ const HELP_LINES: &[&str] = &[
     "В диалогах: Enter — подтвердить (кнопка по умолчанию), Esc — отмена.",
 ];
 
-/// Показать модальный диалог со списком горячих клавиш.
+/// Показать модальный диалог со списком горячих клавиш. Read-only многострочный
+/// текст в реальном wxDialog (slice 9, калька python `_show_keyboard_shortcuts`):
+/// список длинный (~45 строк) — для NVDA такой текст читается и листается
+/// стрелками целиком, в отличие от нативного месседж-бокса. Поле read-only,
+/// начальный фокус в него. (msg 1587 был про текст вопроса в поле — его
+/// исправлен нативный ask_unsaved; справка осталась текстом, как в python.)
 fn show_help_dialog(parent: &Frame) {
     let dialog = Dialog::builder(parent, "Клавиатурные сокращения — irealstudio")
         .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
@@ -863,6 +896,12 @@ const TEMPLATE_LABELS: [&str; 6] =
 const TEMPLATE_KEYS: [&str; 6] = ["", "Blues", "AABA", "ABAC", "ABAB", "ABCD"];
 
 /// Ряд «метка + расширяемый контрол» в вертикальную колонку формы.
+///
+/// NVDA-лейбл контрола (slice 11, msg 1585): имя задаётся контролу явно через
+/// `set_name` (текст метки без двоеточия). Слепой эвристике MSAA «статик слева
+/// от поля = имя» доверять нельзя — метки в python-формах рождались до контролов
+/// (dialogs.py), а здесь контролы создаются до меток, и NVDA читала просто тип
+/// («Редактор», «Комбобокс»). Явное имя чинит все формы сразу.
 fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl: &W) {
     let row = BoxSizer::builder(Orientation::Horizontal).build();
     let lab = StaticText::builder(panel).with_label(label).build();
@@ -873,6 +912,10 @@ fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl
     row.add(&lab, 0, SizerFlag::AlignCenterVertical, 8);
     row.add(ctrl, 1, SizerFlag::Expand, 0);
     col.add_sizer(&row, 0, SizerFlag::Expand, 4);
+    let name = label.trim_end_matches(':').trim();
+    if !name.is_empty() {
+        ctrl.set_name(name);
+    }
 }
 
 /// Модальный диалог новой цифровки. Возвращает `NewChart` при OK,
@@ -1146,14 +1189,35 @@ fn handle_key(
         // повторы), как python.
         let mut edited: Option<String> = None;
         match code {
+            // Простые стрелки — по событиям (MuseScore, slice 11): на аккорд
+            // (в т.ч. на второй аккорд того же такта) или «в такт» по пустым,
+            // как python by-chord (msg 1594). На границе — беззвучный no-op.
             WXK_LEFT if !alt && !ctrl => {
-                d.go_left();
-                changed = true;
+                let msg = nav_chord_step(&mut d, true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
             }
             WXK_RIGHT if !alt && !ctrl => {
-                d.go_right();
-                changed = true;
+                let msg = nav_chord_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
             }
+            // Ctrl+стрелки — по тактам, включая пустые (доля сбрасывается на 1).
+            WXK_LEFT if ctrl && !alt => {
+                let msg = nav_measure_step(&mut d, true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if ctrl && !alt => {
+                let msg = nav_measure_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            // Alt+стрелки — структурная навигация по секциям (проверено: доходит).
             WXK_LEFT if alt => {
                 let before = d.cursor;
                 d.go_prev_structural();
@@ -1166,10 +1230,12 @@ fn handle_key(
             }
             WXK_HOME => {
                 d.cursor = 1;
+                d.beat = 1;
                 changed = true;
             }
             WXK_END => {
                 d.cursor = d.last_measure();
+                d.beat = 1;
                 changed = true;
             }
             // Del/Backspace — удалить аккорд; Ctrl+Del/Ctrl+Backspace — только
@@ -1266,7 +1332,13 @@ fn main() {
             .append_separator()
             .append_item(ID_OPEN, "&Открыть…\tCtrl+O", "Открыть цифровку из файла .ips")
             .append_item(ID_SAVE, "&Сохранить\tCtrl+S", "Сохранить цифровку в файл .ips")
-            .append_item(ID_SAVE_AS, "Сохранить &как…", "Сохранить цифровку в новый файл")
+            // Слайс 11 (msg 1585): Ctrl+Shift+S — «Сохранить как» (как python);
+            // у «Сеньо» в подменю «Метка части» хоткея больше нет.
+            .append_item(
+                ID_SAVE_AS,
+                "Сохранить &как…\tCtrl+Shift+S",
+                "Сохранить цифровку в новый файл",
+            )
             .append_separator()
             .append_item(
                 ID_EXPORT,
@@ -1274,7 +1346,12 @@ fn main() {
                 "Сохранить HTML/текст с irealb-ссылкой для iReal Pro",
             )
             .append_separator()
-            .append_item(ID_EXIT, "&Выход\tCtrl+Q", "Закрыть программу")
+            .append_item(
+                ID_CLOSE_WINDOW,
+                "&Закрыть окно\tCtrl+W",
+                "Закрыть окно (при правках спросит подтверждение)",
+            )
+            .append_item(ID_EXIT, "&Выход\tCtrl+Q", "Выйти из программы")
             .build();
 
         // --- Правка (Edit): undo/redo, буфер обмена, транспонирование ---
@@ -1302,7 +1379,7 @@ fn main() {
             .append_separator()
             .append_item(ID_SM_V, "Куплет\tCtrl+Shift+V", "Метка «Куплет»")
             .append_item(ID_SM_I, "Вступление\tCtrl+Shift+I", "Метка «Вступление»")
-            .append_item(ID_SM_S, "Сеньо\tCtrl+Shift+S", "Метка «Сеньо»")
+            .append_item(ID_SM_S, "Сеньо", "Метка «Сеньо» (без хоткея)")
             .append_item(ID_SM_Q, "Кода\tCtrl+Shift+Q", "Метка «Кода»")
             .build();
         let insert_menu = Menu::builder()
@@ -1351,6 +1428,31 @@ fn main() {
                 "Прочитать цифровку целиком",
             )
             .append_separator()
+            // Простые стрелки идут через акселераторы меню (slice 11): голые
+            // стрелки до окна не доходили (msg 1589) — а пункты меню, как F5
+            // и Home, доходят всегда. Шаг по аккордам и пустым тактам (←/→)
+            // и по тактам (Ctrl+←/→).
+            .append_item(
+                ID_NAV_CHORD_LEFT,
+                "← к аккорду\tLeft",
+                "На предыдущий аккорд (нет — на пустой такт)",
+            )
+            .append_item(
+                ID_NAV_CHORD_RIGHT,
+                "→ к аккорду\tRight",
+                "На следующий аккорд (нет — на пустой такт)",
+            )
+            .append_item(
+                ID_NAV_MEASURE_LEFT,
+                "Ctrl+← по такту\tCtrl+Left",
+                "Предыдущий такт",
+            )
+            .append_item(
+                ID_NAV_MEASURE_RIGHT,
+                "Ctrl+→ по такту\tCtrl+Right",
+                "Следующий такт",
+            )
+            .append_separator()
             .append_item(ID_GOTO_START, "В &начало\tHome", "Первый такт")
             .append_item(ID_GOTO_END, "В &конец\tEnd", "Последний такт")
             .append_item(
@@ -1393,7 +1495,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт, Ctrl+P — настройки цифровки. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор. Вольта/повтор: [ — начало, ] — конец, V — окончание 1.",
+                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+Shift+S — сохранить как, Ctrl+E — экспорт, Ctrl+P — настройки. ←/→ — по аккордам и пустым тактам, Ctrl+←/→ — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор. Вольта: [ — начало, ] — конец, V — окончание 1. Ctrl+W — закрыть окно.",
             )
             .build();
 
@@ -1660,9 +1762,41 @@ fn main() {
                 let spk = spk_menu.borrow();
                 spk.speak(&d.announce_song());
             }
+            // Шаг по аккордам/тактам (акселераторы ← / → / Ctrl+← / Ctrl+→,
+            // slice 11). Озвучка как при хоткее: сменился такт — целиком,
+            // шаг внутри такта — «такт N, доля M, аккорд».
+            ID_NAV_CHORD_LEFT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_chord_step(&mut d, true)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_NAV_CHORD_RIGHT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_chord_step(&mut d, false)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_NAV_MEASURE_LEFT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_measure_step(&mut d, true)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
+            ID_NAV_MEASURE_RIGHT => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    nav_measure_step(&mut d, false)
+                };
+                apply_navigation(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
             ID_GOTO_START => {
                 let mut d = doc_menu.borrow_mut();
                 d.cursor = 1;
+                d.beat = 1;
                 let dref = &*d;
                 sync_grid(dref, &state_menu, &panel_menu);
                 announce(dref, &**spk_menu.borrow(), &frame_menu);
@@ -1670,6 +1804,7 @@ fn main() {
             ID_GOTO_END => {
                 let mut d = doc_menu.borrow_mut();
                 d.cursor = d.last_measure();
+                d.beat = 1;
                 let dref = &*d;
                 sync_grid(dref, &state_menu, &panel_menu);
                 announce(dref, &**spk_menu.borrow(), &frame_menu);
@@ -1691,6 +1826,7 @@ fn main() {
                 if let Some(target) = target {
                     let mut d = doc_menu.borrow_mut();
                     d.cursor = target.max(1).min(d.last_measure());
+                    d.beat = 1;
                     let dref = &*d;
                     sync_grid(dref, &state_menu, &panel_menu);
                     announce(dref, &**spk_menu.borrow(), &frame_menu);
@@ -1706,10 +1842,12 @@ fn main() {
                     0,
                 )
             }
-            // «Выход»/Ctrl+Q идёт через то же закрытие окна, что X / Alt+F4
-            // (python `_on_quit` → `self._frame.Close()` без force): EVT_CLOSE
-            // попадает в on_close ниже, где стоит вопрос о несохранённых правках
-            // и можно отменить (veto). force=true этого бы не позволил.
+            // «Закрыть окно» (Ctrl+W), «Выход» (Ctrl+Q) идут через то же
+            // закрытие окна, что X / Alt+F4 (python `_on_quit` →
+            // `self._frame.Close()` без force): EVT_CLOSE попадает в on_close
+            // ниже, где стоит вопрос о несохранённых правках и можно отменить
+            // (veto). force=true этого бы не позволил.
+            ID_CLOSE_WINDOW => frame_menu.close(false),
             ID_EXIT => frame_menu.close(false),
             _ => {}
         });
