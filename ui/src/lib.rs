@@ -468,6 +468,102 @@ pub const BASS_SPELLINGS: [&str; 17] = [
     "C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B",
 ];
 
+/// Корни для выбора тональности — как python `KEY_ROOT_NOTES` (dialogs.py):
+/// 12 энгармонически «бемольных» написаний.
+pub const KEY_ROOTS: [&str; 12] = [
+    "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+];
+
+/// iReal-имя минора по корню — python `_MINOR_KEY_MAP` (dialogs.py:31):
+/// бемольный корень → диезное имя минора (Db→C#-), остальные → «{root}-».
+pub const ROOT_MINOR: [(&str, &str); 12] = [
+    ("C", "C-"),
+    ("Db", "C#-"),
+    ("D", "D-"),
+    ("Eb", "Eb-"),
+    ("E", "E-"),
+    ("F", "F-"),
+    ("Gb", "F#-"),
+    ("G", "G-"),
+    ("Ab", "G#-"),
+    ("A", "A-"),
+    ("Bb", "Bb-"),
+    ("B", "B-"),
+];
+
+/// Собрать iReal-имя тональности из корня и лада — как python
+/// `root_mode_to_key` (dialogs.py): мажор = корень как есть; минор — из
+/// ROOT_MINOR (неизвестный корень → «{root}-»).
+pub fn key_from_root_mode(root: &str, minor: bool) -> String {
+    if minor {
+        ROOT_MINOR
+            .iter()
+            .find(|(r, _)| *r == root)
+            .map(|(_, k)| k.to_string())
+            .unwrap_or_else(|| format!("{root}-"))
+    } else {
+        root.to_string()
+    }
+}
+
+/// Разобрать iReal-имя тональности на (корень, лад) для диалога — обратная к
+/// `key_from_root_mode`. «B-» → («B», минор), «C#-» → («Db», минор), «Bb» →
+/// («Bb», мажор). Незнакомый ключ → («C», мажор).
+pub fn key_to_root_mode(key: &str) -> (String, bool) {
+    if let Some(stripped) = key.strip_suffix('-') {
+        for (r, k) in ROOT_MINOR {
+            if k == key {
+                return (r.to_string(), true);
+            }
+        }
+        // Минора из знакомой таблицы нет (напр. файл с диезным корнем) —
+        // берём корень как записан.
+        (stripped.to_string(), true)
+    } else if KEY_ROOTS.contains(&key) {
+        (key.to_string(), false)
+    } else {
+        ("C".to_string(), false)
+    }
+}
+
+/// Поля формы «Настройки цифровки» (Ctrl+P) — калька python
+/// `project_settings_dialog` (dialogs.py:562). `time_sig` — строка вида «4/4».
+#[derive(Clone, Default)]
+pub struct ProjectSettings {
+    pub title: String,
+    pub composer: String,
+    pub bpm: i32,
+    pub key: String,
+    pub style: String,
+    pub time_sig: String,
+}
+
+impl ProjectSettings {
+    /// Значения по умолчанию для формы: текущие поля прогрессии.
+    pub fn from_cp(cp: &ChordProgression) -> Self {
+        ProjectSettings {
+            title: cp.title.clone(),
+            composer: cp.composer.clone(),
+            bpm: cp.bpm,
+            key: cp.key.clone(),
+            style: cp.style.clone(),
+            time_sig: cp.time_signature.to_string(),
+        }
+    }
+}
+
+/// Разобрать «4/4» на размер такта. Не «N/D» двумя целыми → None (как python,
+/// который ловит ValueError/AttributeError и молча пропускает).
+fn parse_time_sig(s: &str) -> Option<TimeSignature> {
+    let mut it = s.trim().split('/');
+    let num: i32 = it.next()?.trim().parse().ok()?;
+    let den: i32 = it.next()?.trim().parse().ok()?;
+    if it.next().is_some() || num < 1 || den < 1 {
+        return None;
+    }
+    Some(TimeSignature::new(num, den))
+}
+
 impl Doc {
     /// Виртуальный такт → реальный (для правок внутри повторов/вольт), как
     /// python `progression.resolve_virtual_measure(cursor.measure)`.
@@ -787,6 +883,62 @@ impl Doc {
             "Транспонировано на {semitones} {unit}, новая тональность: {}",
             self.cp.key
         )
+    }
+
+    /// Применить форму «Настройки цифровки» (Ctrl+P) — калька python
+    /// `_open_project_settings` (app_io.py:562). Python-семантика:
+    ///   - меняются только изменившиеся поля; пустой title/composer после
+    ///     обрезки считается «не задан» (не меняет, в changed не участвует);
+    ///   - смена тональности НЕ транспонирует аккорды (как в python);
+    ///   - bpm вне [BPM_MIN, BPM_MAX] не применяется;
+    ///   - размер такта — строго «N/D»: мусор молча пропускается, как
+    ///     python try/except вокруг `TimeSignature.from_string`;
+    ///   - ничего не изменилось → тишина (пустая строка).
+    /// Изменения кладут снимок в undo и ставят dirty. Отдаёт
+    /// «Settings updated: {title}». (recording_bpm из python-формы не входит —
+    /// подсистемы записи в этой версии нет.)
+    pub fn apply_settings(&mut self, s: &ProjectSettings) -> String {
+        let title = s.title.trim();
+        let composer = s.composer.trim();
+        let ts_str = s.time_sig.trim();
+        let bpm_ok = (BPM_MIN..=BPM_MAX).contains(&s.bpm);
+        // changed-детект для размера — по строке, ДО разбора (как python:
+        // мусорный размер всё равно открывает undo и озвучку).
+        let ts_changed = !ts_str.is_empty() && ts_str != self.cp.time_signature.to_string();
+
+        let changed = (!title.is_empty() && title != self.cp.title)
+            || (!composer.is_empty() && composer != self.cp.composer)
+            || (!s.key.is_empty() && s.key != self.cp.key)
+            || (!s.style.is_empty() && s.style != self.cp.style)
+            || (bpm_ok && s.bpm != self.cp.bpm)
+            || ts_changed;
+        if !changed {
+            return String::new();
+        }
+
+        self.push_undo();
+        if !title.is_empty() {
+            self.cp.title = title.to_string();
+        }
+        if !composer.is_empty() {
+            self.cp.composer = composer.to_string();
+        }
+        if !s.key.is_empty() {
+            self.cp.key = s.key.clone();
+        }
+        if !s.style.is_empty() {
+            self.cp.style = s.style.clone();
+        }
+        if bpm_ok {
+            self.cp.bpm = s.bpm;
+        }
+        if ts_changed {
+            if let Some(ts) = parse_time_sig(ts_str) {
+                self.cp.time_signature = ts;
+            }
+        }
+        self.dirty = true;
+        format!("Settings updated: {}", self.cp.title)
     }
 }
 
@@ -1331,5 +1483,117 @@ mod edit_tests {
         let view = d.measure_view(1);
         let syms: Vec<String> = view.chords.iter().map(|c| c.symbol.clone()).collect();
         assert_eq!(syms, vec!["E-7"], "удалена первая доля, вторая осталась");
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    fn demo() -> Doc {
+        Doc::new_demo()
+    }
+
+    #[test]
+    fn key_helpers_roundtrip_all_roots() {
+        // Мажор: корень как записан; минор: имя из ROOT_MINOR; туда-обратно.
+        for r in KEY_ROOTS {
+            assert_eq!(key_from_root_mode(r, false), r);
+            assert_eq!(key_to_root_mode(r), (r.to_string(), false), "мажор {r}");
+        }
+        for (r, k) in ROOT_MINOR {
+            assert_eq!(key_from_root_mode(r, true), k, "минор от {r}");
+            let (back, minor) = key_to_root_mode(k);
+            assert_eq!((back.as_str(), minor), (r, true), "обратно из {k}");
+        }
+    }
+
+    #[test]
+    fn key_helpers_fallbacks() {
+        // Незнакомый ключ/корень — дефолты, как в python-выборе.
+        assert_eq!(key_to_root_mode("H"), ("C".to_string(), false));
+        assert_eq!(key_to_root_mode(""), ("C".to_string(), false));
+        assert_eq!(key_from_root_mode("X", true), "X-");
+        // G#- — знакомый минор (из бемольного корня Ab): корень бемольный.
+        assert_eq!(key_to_root_mode("G#-"), ("Ab".to_string(), true));
+        // Диезное имя минора вне ROOT_MINOR (D# нет в таблице) — корень как есть.
+        assert_eq!(key_to_root_mode("D#-"), ("D#".to_string(), true));
+    }
+
+    #[test]
+    fn apply_settings_changes_fields_no_transpose() {
+        let mut d = demo();
+        let before = d.to_json();
+        // Ключ меняется, но аккорды python НЕ транспонирует.
+        let s = ProjectSettings {
+            title: "  Rhythm Changes (демо)  ".into(), // трим → тот же → не менять
+            composer: "Gershwin".into(),
+            bpm: 200,
+            key: "G".into(),
+            style: "Bossa Nova".into(),
+            time_sig: "3/4".into(),
+        };
+        let msg = d.apply_settings(&s);
+        assert_eq!(msg, "Settings updated: Rhythm Changes (демо)");
+        assert_eq!(d.cp.title, "Rhythm Changes (демо)", "титул не тронут");
+        assert_eq!(d.cp.composer, "Gershwin");
+        assert_eq!(d.cp.bpm, 200);
+        assert_eq!(d.cp.key, "G");
+        assert_eq!(d.cp.style, "Bossa Nova");
+        assert_eq!(d.cp.time_signature.to_string(), "3/4");
+        // Первая доля такта 1 как была B-7 — смена ключа не транспонирует.
+        let view = d.measure_view(1);
+        assert_eq!(view.chords[0].symbol, "B-7");
+        assert!(d.dirty);
+        assert_eq!(d.undo_stack.len(), 1, "снимок до правок");
+        // Отмена возвращает и ключ, и аккорды.
+        d.undo();
+        assert_eq!(d.cp.key, "B-");
+        assert_eq!(d.to_json(), before);
+    }
+
+    #[test]
+    fn apply_settings_noop_is_silent() {
+        let mut d = demo();
+        let s = ProjectSettings::from_cp(&d.cp);
+        assert_eq!(d.apply_settings(&s), "", "ничего не менялось — тишина");
+        assert!(!d.dirty);
+        assert!(d.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn apply_settings_empty_title_not_applied() {
+        let mut d = demo();
+        let mut s = ProjectSettings::from_cp(&d.cp);
+        s.title = "   ".into();
+        s.composer = "Виноградов".into();
+        let msg = d.apply_settings(&s);
+        assert_eq!(msg, "Settings updated: Rhythm Changes (демо)");
+        assert_eq!(d.cp.title, "Rhythm Changes (демо)", "пустой титул не стирает старый");
+        assert_eq!(d.cp.composer, "Виноградов");
+    }
+
+    #[test]
+    fn apply_settings_bpm_out_of_range_ignored() {
+        let mut d = demo();
+        let mut s = ProjectSettings::from_cp(&d.cp);
+        s.bpm = 300;
+        assert_eq!(d.apply_settings(&s), "", "один вне-диапазона bpm — тишина");
+        assert_eq!(d.cp.bpm, 160);
+        assert!(!d.dirty);
+    }
+
+    #[test]
+    fn apply_settings_bad_time_signature_quirk() {
+        // Python-парадокс: мусорный размер открывает changed (undo+dirty+озвучка),
+        // но сам не применяется (try/except вокруг from_string молча глотает).
+        let mut d = demo();
+        let mut s = ProjectSettings::from_cp(&d.cp);
+        s.time_sig = "abc".into();
+        let msg = d.apply_settings(&s);
+        assert_eq!(msg, "Settings updated: Rhythm Changes (демо)");
+        assert_eq!(d.cp.time_signature.to_string(), "4/4", "мусор не применился");
+        assert!(d.dirty, "python всё равно ставит dirty и undo");
+        assert_eq!(d.undo_stack.len(), 1);
     }
 }

@@ -9,7 +9,8 @@
 // (Ctrl+E — HTML/текст с irealb-ссылкой) и правка (slice 5): аккорд/правка/
 // бас (Ctrl+Enter / F2 / поле), N.C. (N), метки частей (Ctrl+Shift+буква),
 // удаление (Del/Ctrl+Del), буфер обмена (Ctrl+X/C/V), отмена/повтор (Ctrl+Z/Y),
-// транспонирование (Ctrl+T), переход к такту (Ctrl+F).
+// транспонирование (Ctrl+T), переход к такту (Ctrl+F), настройки цифровки
+// (Ctrl+P — название/композитор/темп/тональность/размер/стиль), Выход (Ctrl+Q).
 //
 // Сборка на любом хосте с тулчейном wxDragon (см. README): cargo build -p irealwx_ui.
 // Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
@@ -28,7 +29,8 @@ use wxdragon::prelude::*;
 
 use irealwx_speech::{default_speak, Speak};
 use irealwx_ui::{
-    export_ireal_html, safe_file_base, BPM_MAX, BPM_MIN, Doc, NewChart,
+    export_ireal_html, key_from_root_mode, key_to_root_mode, safe_file_base,
+    BPM_MAX, BPM_MIN, Doc, NewChart, ProjectSettings, KEY_ROOTS,
 };
 
 // --- ID пунктов меню (кроме ID_EXIT/ID_ABOUT из прелюда) ---
@@ -65,6 +67,8 @@ const ID_SM_S: i32 = 3017;
 const ID_SM_Q: i32 = 3018;
 // Меню «Песня»: переход к такту по номеру.
 const ID_GOTO_MEASURE: i32 = 3019;
+// Меню «Настройки»: свойства цифровки.
+const ID_PROJ_SETTINGS: i32 = 4001;
 
 /// Состояние панели тактов: короткие строки-ячейки + курсор.
 struct GridState {
@@ -540,28 +544,6 @@ fn modal_spin(
 // wxPython-версии). Поля формы собирают `NewChart`, дальше его строит
 // `Doc::new_chart` в lib (тот же путь, что python `new_project`).
 
-/// 12 хроматических корней — порядок python `KEY_ROOT_NOTES` (dialogs.py:27).
-const KEY_ROOTS: [&str; 12] = [
-    "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
-];
-
-/// iReal-имя минора по корню — python `_MINOR_KEY_MAP` (dialogs.py:31):
-/// часть корней в миноре пишется с диезами (Db → C#-, Gb → F#-, …).
-const ROOT_MINOR: [(&str, &str); 12] = [
-    ("C", "C-"),
-    ("Db", "C#-"),
-    ("D", "D-"),
-    ("Eb", "Eb-"),
-    ("E", "E-"),
-    ("F", "F-"),
-    ("Gb", "F#-"),
-    ("G", "G-"),
-    ("Ab", "G#-"),
-    ("A", "A-"),
-    ("Bb", "Bb-"),
-    ("B", "B-"),
-];
-
 /// Все 50 стилей iReal — порядок python `STYLES_ALL` (pyrealpro.py:25).
 const STYLES_ALL: [&str; 50] = [
     "Afro 12/8",
@@ -629,19 +611,6 @@ fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl
     row.add(&lab, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 8);
     row.add(ctrl, 1, SizerFlag::Expand | SizerFlag::AlignCenterVertical, 0);
     col.add_sizer(&row, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top, 4);
-}
-
-/// iReal-ключ из корня и лада — как python `root_mode_to_key` (dialogs.py:54).
-fn key_from_root_mode(root: &str, minor: bool) -> String {
-    if minor {
-        ROOT_MINOR
-            .iter()
-            .find(|(r, _)| *r == root)
-            .map(|(_, k)| k.to_string())
-            .unwrap_or_else(|| format!("{root}-"))
-    } else {
-        root.to_string()
-    }
 }
 
 /// Модальный диалог новой цифровки. Возвращает `NewChart` при OK,
@@ -770,6 +739,132 @@ fn show_new_chart_dialog(parent: &Frame) -> Option<NewChart> {
     spec
 }
 
+// --- Форма «Настройки цифровки» (Ctrl+P) ---
+//
+// Калька python `project_settings_dialog` (dialogs.py:562): те же поля, что в
+// «Новой цифровке», но предзаполнены текущей цифровкой и без шаблона. Поле
+// Recording BPM из python не переносим — подсистемы записи в этой версии нет.
+// Собранный `ProjectSettings` применяет `Doc::apply_settings` в lib (тот же
+// путь, что python `_open_project_settings`); смена тональности аккорды НЕ
+// транспонирует.
+
+/// Модальный диалог настроек цифровки. OK → `ProjectSettings`, отмена → None.
+fn show_project_settings_dialog(
+    parent: &Frame,
+    defaults: &ProjectSettings,
+) -> Option<ProjectSettings> {
+    let dialog = Dialog::builder(parent, "Настройки цифровки")
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+
+    // --- Поля: порядок создания = порядок табов (как в python-форме) ---
+    let title_ctrl = TextCtrl::builder(&panel)
+        .with_value(defaults.title.as_str())
+        .build();
+    let composer_ctrl = TextCtrl::builder(&panel)
+        .with_value(defaults.composer.as_str())
+        .build();
+    let bpm_spin = SpinCtrl::builder(&panel)
+        .with_range(BPM_MIN, BPM_MAX)
+        .with_initial_value(defaults.bpm)
+        .build();
+    let time_ctrl = TextCtrl::builder(&panel)
+        .with_value(defaults.time_sig.as_str())
+        .build();
+
+    // Тональность: текущий ключ разбираем на (корень, лад) обратной функцией.
+    let (root_str, minor) = key_to_root_mode(&defaults.key);
+    let root_choice = Choice::builder(&panel)
+        .with_choices(KEY_ROOTS.iter().map(|s| s.to_string()).collect())
+        .with_selection(Some(
+            KEY_ROOTS.iter().position(|r| *r == root_str).unwrap_or(0) as u32,
+        ))
+        .build();
+    let mode_choice = Choice::builder(&panel)
+        .with_choices(vec!["мажор".to_string(), "минор".to_string()])
+        .with_selection(Some(if minor { 1 } else { 0 }))
+        .build();
+    let style_choice = Choice::builder(&panel)
+        .with_choices(STYLES_ALL.iter().map(|s| s.to_string()).collect())
+        .with_selection(
+            Some(
+                STYLES_ALL
+                    .iter()
+                    .position(|s| *s == defaults.style)
+                    .unwrap_or(0) as u32,
+            ),
+        )
+        .build();
+
+    // --- Раскладка: колонка из рядов «метка + контрол» ---
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    add_labeled_row(&col, &panel, "Название:", &title_ctrl);
+    add_labeled_row(&col, &panel, "Композитор:", &composer_ctrl);
+    add_labeled_row(&col, &panel, "Темп (BPM):", &bpm_spin);
+    add_labeled_row(&col, &panel, "Размер такта:", &time_ctrl);
+    add_labeled_row(&col, &panel, "Тональность:", &root_choice);
+    add_labeled_row(&col, &panel, "Лад:", &mode_choice);
+    add_labeled_row(&col, &panel, "Стиль:", &style_choice);
+
+    // --- Кнопки ОК / Отмена (справа) ---
+    let ok_button = Button::builder(&panel)
+        .with_id(ID_OK)
+        .with_label("ОК")
+        .build();
+    let cancel_button = Button::builder(&panel)
+        .with_id(ID_CANCEL)
+        .with_label("Отмена")
+        .build();
+    ok_button.set_default();
+
+    let ok_dlg = dialog;
+    ok_button.on_click(move |_| {
+        ok_dlg.end_modal(ID_OK);
+    });
+    let cancel_dlg = dialog;
+    cancel_button.on_click(move |_| {
+        cancel_dlg.end_modal(ID_CANCEL);
+    });
+
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(
+        &buttons,
+        0,
+        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
+        8,
+    );
+
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    let result = dialog.show_modal();
+    let spec = if result == ID_OK {
+        // Читаем значения ПОСЛЕ закрытия модального цикла, но ДО destroy.
+        let root_idx = root_choice.get_selection().unwrap_or(0) as usize;
+        let root = KEY_ROOTS.get(root_idx).copied().unwrap_or("C");
+        let minor = mode_choice.get_selection() == Some(1);
+        Some(ProjectSettings {
+            title: title_ctrl.get_value(),
+            composer: composer_ctrl.get_value(),
+            bpm: bpm_spin.value(),
+            key: key_from_root_mode(root, minor),
+            style: style_choice
+                .get_string_selection()
+                .unwrap_or_else(|| defaults.style.clone()),
+            time_sig: time_ctrl.get_value(),
+        })
+    } else {
+        None
+    };
+    dialog.destroy();
+    spec
+}
+
 /// Клавиатурная навигация: один обработчик для frame и для панели тактов
 /// (фокус может быть у любого из них — панель без a11y, но ловит клавиши).
 fn handle_key(
@@ -890,7 +985,7 @@ fn main() {
                 "Сохранить HTML/текст с irealb-ссылкой для iReal Pro",
             )
             .append_separator()
-            .append_item(ID_EXIT, "&Выход", "Закрыть программу")
+            .append_item(ID_EXIT, "&Выход\tCtrl+Q", "Закрыть программу")
             .build();
 
         // --- Правка (Edit): undo/redo, буфер обмена, транспонирование ---
@@ -970,6 +1065,15 @@ fn main() {
             )
             .build();
 
+        // --- Настройки: свойства цифровки (Ctrl+P) ---
+        let settings_menu = Menu::builder()
+            .append_item(
+                ID_PROJ_SETTINGS,
+                "Настройки &цифровки…\tCtrl+P",
+                "Изменить название, композитора, темп, тональность, размер, стиль",
+            )
+            .build();
+
         let help_menu = Menu::builder()
             .append_item(ID_ABOUT, "О &программе", "Информация о сборке")
             .build();
@@ -979,6 +1083,7 @@ fn main() {
             .append(edit_menu, "&Правка")
             .append(insert_menu, "&Вставка")
             .append(song_menu, "&Песня")
+            .append(settings_menu, "&Настройки")
             .append(help_menu, "&Справка")
             .build();
         frame.set_menu_bar(menu_bar);
@@ -987,7 +1092,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор.",
+                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт, Ctrl+P — настройки цифровки. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор.",
             )
             .build();
 
@@ -1105,6 +1210,20 @@ fn main() {
             }
             ID_EXPORT => {
                 export_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
+            }
+            ID_PROJ_SETTINGS => {
+                // Дефолт формы — текущие поля цифровки (как python defaults=…).
+                let defaults = {
+                    let d = doc_menu.borrow();
+                    ProjectSettings::from_cp(&d.cp)
+                };
+                if let Some(s) = show_project_settings_dialog(&frame_menu, &defaults) {
+                    let msg = {
+                        let mut d = doc_menu.borrow_mut();
+                        d.apply_settings(&s)
+                    };
+                    commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+                }
             }
             // --- Правка / Вставка (slice 5) ---
             ID_UNDO => {
