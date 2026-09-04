@@ -63,6 +63,9 @@ const ID_CUT: i32 = 3003;
 const ID_COPY: i32 = 3004;
 const ID_PASTE: i32 = 3005;
 const ID_TRANSPOSE: i32 = 3006;
+// Аудит python (msg 1612): выделить все аккорды цифровки (python _select_all,
+// main.py:1217) — затем Ctrl+C копирует документ мульти-блоком.
+const ID_SELECT_ALL: i32 = 3021;
 // Меню «Вставка» (Insert): аккорд, правка, N.C., бас, метки частей, вольта.
 const ID_INS_CHORD: i32 = 3007;
 const ID_EDIT_CHORD: i32 = 3008;
@@ -785,13 +788,14 @@ const HELP_LINES: &[&str] = &[
     "",
     "Правка",
     "Ctrl+Z — отменить, Ctrl+Y — повторить",
-    "Ctrl+X — вырезать аккорд, Ctrl+C — копировать, Ctrl+V — вставить",
+    "Ctrl+X — вырезать аккорд или выделение, Ctrl+C — копировать, Ctrl+V — вставить",
     "Ctrl+T — транспонировать всю цифровку",
     "",
     "Вставка",
     "Ctrl+Enter — добавить аккорд в текущий такт (на долю курсора)",
-    "F2 — изменить аккорд под курсором (на его доле)",
-    "N — без аккорда (N.C.) на текущем такте",
+    "F2 — изменить аккорд под курсором (на его доле); можно ввести полный",
+    "символ со слэш-басом: Bb7/G",
+    "N — без аккорда (N.C.) на текущем такте (убрать — Backspace)",
     "V — вольта / окончание",
     "[ — начало повтора, ] — конец повтора",
     "Метка части (подменю «Вставка»):",
@@ -799,7 +803,7 @@ const HELP_LINES: &[&str] = &[
     "Ctrl+Shift+V — Куплет, Ctrl+Shift+I — Вступление",
     "Сеньо — через «Вставка → Метка части» (без хоткея)",
     "Ctrl+Shift+Q — Кода",
-    "Басовая нота — «Вставка → Басовая нота…»",
+    "/ — басовая нота к аккорду (как и «Вставка → Басовая нота…»)",
     "",
     "Песня (навигация как в MuseScore)",
     "← / → — по аккордам и пустым тактам (внутри такта — второй аккорд)",
@@ -807,6 +811,8 @@ const HELP_LINES: &[&str] = &[
     "Alt+← / Alt+→ — по долям в такте; на пустую долю вставить — Ctrl+Enter",
     "Ctrl+Alt+← / Ctrl+Alt+→ — по секциям",
     "Home — первый такт, End — последний такт",
+    "Выделение: Shift+←/→ или Shift+Ctrl+←/→ и др. — расширить диапазон",
+    "(озвучивается число аккордов); Ctrl+C/X/Del действуют на весь диапазон",
     "Del / Backspace — удалить аккорд",
     "Ctrl+Del / Ctrl+Backspace — удалить только метку / повтор / N.C.",
     "F5 — озвучить текущий такт, F6 — озвучить всю цифровку",
@@ -1141,7 +1147,7 @@ fn show_project_settings_dialog(
             .with_initial_value(defaults.bpm)
             .build()
     });
-    let time_ctrl = labeled_row(&col, &panel, "Размер такта:", |p| {
+    let time_ctrl = labeled_row(&col, &panel, "Тактовый размер:", |p| {
         TextCtrl::builder(p).with_value(defaults.time_sig.as_str()).build()
     });
 
@@ -1245,6 +1251,24 @@ fn handle_key(
         let alt = key.alt_down();
         let ctrl = key.control_down();
         let shift = key.shift_down();
+        // '/' (47) — диалог басовой ноты (#51, msg 1607: «басовую ноту можно
+        // вставить, нажав "/"»). Открываем ДО borrow_mut: модальное окно гоняет
+        // вложенные события, и держать RefCell через него нельзя.
+        if code == 47 && !ctrl && !alt {
+            if let Some(note) = modal_text(frame, "Басовая нота", "Нота (например, E):", "") {
+                let msg = doc.borrow_mut().add_bass_note(&note);
+                if !msg.is_empty() {
+                    {
+                        let d = doc.borrow();
+                        sync_grid(&d, state, panel);
+                        speaker.borrow().speak(&msg);
+                        frame.set_status_text(&msg, 0);
+                        frame.set_title(&window_title(&d));
+                    }
+                }
+            }
+            handled = true;
+        }
         let mut d = doc.borrow_mut();
         let mut changed = false;
         // Результат правки (строка для озвучки; пустая = молчание). Меню
@@ -1256,27 +1280,57 @@ fn handle_key(
             // Простые стрелки — по событиям (MuseScore, slice 11): на аккорд
             // (в т.ч. на второй аккорд того же такта) или «в такт» по пустым,
             // как python by-chord (msg 1594). На границе — беззвучный no-op.
-            WXK_LEFT if !alt && !ctrl => {
+            // Обычная навигация снимает выделение; Shift+стрелка (#52) — его
+            // расширяет и озвучивает диапазон («…выделено: N аккордов»).
+            WXK_LEFT if !alt && !ctrl && !shift => {
+                d.clear_selection();
                 let msg = nav_chord_step(&mut d, true);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
-            WXK_RIGHT if !alt && !ctrl => {
+            WXK_RIGHT if !alt && !ctrl && !shift => {
+                d.clear_selection();
                 let msg = nav_chord_step(&mut d, false);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
+            WXK_LEFT if !alt && !ctrl && shift => {
+                let msg = d.extend_chord_step(true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if !alt && !ctrl && shift => {
+                let msg = d.extend_chord_step(false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
             // Ctrl+стрелки — по тактам, включая пустые (доля сбрасывается на 1).
-            WXK_LEFT if ctrl && !alt => {
+            WXK_LEFT if ctrl && !alt && !shift => {
+                d.clear_selection();
                 let msg = nav_measure_step(&mut d, true);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
-            WXK_RIGHT if ctrl && !alt => {
+            WXK_RIGHT if ctrl && !alt && !shift => {
+                d.clear_selection();
                 let msg = nav_measure_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_LEFT if ctrl && !alt && shift => {
+                let msg = d.extend_measure_step(true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if ctrl && !alt && shift => {
+                let msg = d.extend_measure_step(false);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
@@ -1284,14 +1338,28 @@ fn handle_key(
             // Alt+←/→ (slice 12, msg 1598) — по долям внутри такта, как
             // MuseScore, в т.ч. на пустую долю (Ctrl+Enter вставит туда аккорд).
             // Без пункта меню — голый Alt доходит до handle_key (проверено).
-            WXK_LEFT if alt && !ctrl => {
+            WXK_LEFT if alt && !ctrl && !shift => {
+                d.clear_selection();
                 let msg = nav_beat_step(&mut d, true);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
-            WXK_RIGHT if alt && !ctrl => {
+            WXK_RIGHT if alt && !ctrl && !shift => {
+                d.clear_selection();
                 let msg = nav_beat_step(&mut d, false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_LEFT if alt && !ctrl && shift => {
+                let msg = d.extend_beat_step(true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if alt && !ctrl && shift => {
+                let msg = d.extend_beat_step(false);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
@@ -1299,24 +1367,40 @@ fn handle_key(
             // Ctrl+Alt+←/→ — по секциям/вольтам (как раньше Alt; msg 1598).
             // Дублирующий акселератор в меню «Песня» — страховка, если голый
             // Ctrl+Alt+стрелка не дойдёт до handle_key.
-            WXK_LEFT if ctrl && alt => {
+            WXK_LEFT if ctrl && alt && !shift => {
+                d.clear_selection();
                 let msg = nav_section_step(&mut d, true);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
-            WXK_RIGHT if ctrl && alt => {
+            WXK_RIGHT if ctrl && alt && !shift => {
+                d.clear_selection();
                 let msg = nav_section_step(&mut d, false);
                 if !msg.is_empty() {
                     edited = Some(msg);
                 }
             }
+            WXK_LEFT if ctrl && alt && shift => {
+                let msg = d.extend_section_step(true);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
+            WXK_RIGHT if ctrl && alt && shift => {
+                let msg = d.extend_section_step(false);
+                if !msg.is_empty() {
+                    edited = Some(msg);
+                }
+            }
             WXK_HOME => {
+                d.clear_selection();
                 d.cursor = 1;
                 d.beat = 1;
                 changed = true;
             }
             WXK_END => {
+                d.clear_selection();
                 d.cursor = d.last_measure();
                 d.beat = 1;
                 changed = true;
@@ -1445,6 +1529,11 @@ fn main() {
             .append_item(ID_CUT, "&Вырезать\tCtrl+X", "Вырезать аккорд под курсором")
             .append_item(ID_COPY, "&Копировать\tCtrl+C", "Скопировать аккорд под курсором")
             .append_item(ID_PASTE, "В&ставить\tCtrl+V", "Вставить аккорд из буфера")
+            .append_item(
+                ID_SELECT_ALL,
+                "Выделить &всё\tCtrl+A",
+                "Выделить все аккорды цифровки (Ctrl+C копирует весь документ)",
+            )
             .append_separator()
             .append_item(
                 ID_TRANSPOSE,
@@ -1752,6 +1841,13 @@ fn main() {
                 };
                 commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
             }
+            ID_SELECT_ALL => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.select_all()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
+            }
             ID_TRANSPOSE => {
                 // Спин -11..11 как python transpose_dialog; 0 и ±12 — молчание.
                 if let Some(n) = modal_spin(
@@ -1771,6 +1867,8 @@ fn main() {
             }
             ID_INS_CHORD => {
                 // Дефолт поля — аккорд под курсором, иначе C (как python).
+                // Гейт ввода (#46): insert_chord_entry отклоняет аккорды, которых
+                // нет в iReal Pro («Ошибка: …»), и канонизирует дисплейные имена.
                 let initial = {
                     let d = doc_menu.borrow();
                     d.chord_under_cursor()
@@ -1780,7 +1878,7 @@ fn main() {
                 if let Some(name) = modal_text(&frame_menu, "Добавить аккорд", "Аккорд:", &initial) {
                     let msg = {
                         let mut d = doc_menu.borrow_mut();
-                        d.insert_chord(&name, "")
+                        d.insert_chord_entry(&name)
                     };
                     commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
                 }
@@ -1795,13 +1893,17 @@ fn main() {
                         // Правки нет — как python: «No chord to edit».
                         spk_menu.borrow().speak("Нет аккорда для редактирования");
                     }
-                    Some((name, _bass)) => {
-                        if let Some(new_name) =
-                            modal_text(&frame_menu, "Изменить аккорд", "Аккорд:", &name)
+                    Some((name, bass)) => {
+                        // #50: префилл — ПОЛНЫЙ символ «Bb7/G», чтобы можно было
+                        // изменить/снять бас (msg 1607). Правка идёт через
+                        // edit_chord_entry: тот же гейт валидации, что и вставка.
+                        let initial = Doc::full_symbol(&name, &bass);
+                        if let Some(new_symbol) =
+                            modal_text(&frame_menu, "Изменить аккорд", "Аккорд:", &initial)
                         {
                             let msg = {
                                 let mut d = doc_menu.borrow_mut();
-                                d.edit_chord(&new_name)
+                                d.edit_chord_entry(&new_symbol)
                             };
                             commit_edit(
                                 &msg,

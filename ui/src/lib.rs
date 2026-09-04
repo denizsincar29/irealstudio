@@ -10,16 +10,55 @@
 //! строку символов аккордов (для отрисовки панели тактов в `on_paint`).
 
 use irealwx_core::{
-    chord_name_to_spoken, ChordProgression, Position, TimeSignature, VoltaBracket,
+    chord_name_to_spoken, normalize_bass_note, parse_chord_entry, ChordEntryError,
+    ChordProgression, Position, TimeSignature, VoltaBracket,
 };
 
 /// Потолок стека undo — как python `_UNDO_MAX = 50` (main.py).
 pub const UNDO_MAX: usize = 50;
 
 /// Один аккорд в буфере обмена (одиночный: имя + слэш-бас).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipboardItem {
     pub name: String,
     pub bass: String,
+}
+
+/// Аккорд в мульти-буфере выделения (слайс 14, #52): имя + бас + смещение от
+/// первого аккорда выделения в долях (как python `bfs_offset`). При вставке
+/// смещение отсчитывается от целевой доли — весь блок переносится с той же
+/// внутренней геометрией.
+pub struct SelChord {
+    pub bfs_offset: i64,
+    pub name: String,
+    pub bass: String,
+}
+
+/// Диапазон выделения (слайс 14, #52): якорь (`a_*`, где встал первый
+/// Shift+стрелка) и активный край (`b_*`, куда ушёл курсор). Храним физические
+/// такт+долю, как python `_sel_anchor`/`_sel_active` (main.py:1029).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelRange {
+    pub a_m: i32,
+    pub a_b: i32,
+    pub b_m: i32,
+    pub b_b: i32,
+}
+
+impl SelRange {
+    pub fn new(a_m: i32, a_b: i32, b_m: i32, b_b: i32) -> Self {
+        SelRange { a_m, a_b, b_m, b_b }
+    }
+
+    /// Нормированный диапазон (start, end) по порядку (такт, доля).
+    pub fn normalized(&self) -> ((i32, i32), (i32, i32)) {
+        let (a, b) = ((self.a_m, self.a_b), (self.b_m, self.b_b));
+        if b < a {
+            (b, a)
+        } else {
+            (a, b)
+        }
+    }
 }
 
 /// Текущая цифровка + курсор по тактам.
@@ -51,6 +90,18 @@ pub struct Doc {
     /// но не входят в undo-снимок (как в python) и сбрасываются на undo/redo.
     pub pending_repeat_start: Option<i32>,
     pub pending_repeat_end: Option<i32>,
+    /// Активное выделение Shift+стрелки (слайс 14, #52). None — выделения нет.
+    pub selection: Option<SelRange>,
+    /// Мульти-буфер выделенного блока (≥2 аккордов); сдвигается при Ctrl+X/C,
+    /// вставляется как блок. Одиночное копирование кладёт в `clipboard`.
+    pub sel_clipboard: Option<Vec<SelChord>>,
+}
+
+impl Doc {
+    /// Снять выделение (курсор остаётся на месте).
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+    }
 }
 
 /// Один аккорд такта — что рисуем и что озвучиваем.
@@ -246,6 +297,8 @@ impl Doc {
             dirty: false,
             pending_repeat_start: None,
             pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
         }
     }
 
@@ -272,6 +325,8 @@ impl Doc {
             dirty: false,
             pending_repeat_start: None,
             pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
         }
     }
 
@@ -297,6 +352,8 @@ impl Doc {
             dirty: false,
             pending_repeat_start: None,
             pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
         })
     }
 
@@ -376,12 +433,21 @@ impl Doc {
     }
 
     /// Простая стрелка влево — зеркально `go_chord_right`: на предыдущий
-    /// аккорд (в том числе на первый аккорд того же такта), а если левее
-    /// аккордов нет — на предыдущий такт «в такт».
+    /// аккорд (в том числе на первый аккорд того же такта). Из ПУСТОГО такта
+    /// (ушли вправо по паузам) — шаг ровно на один такт назад, а не «магнит»
+    /// к последнему аккорду за километр (msg 1607): право-влево по пустому
+    /// хвосту ходит обратимо, по такту за нажатие.
     pub fn go_chord_left(&mut self) -> bool {
-        self.clamp_beat();
         let start_m = self.cursor;
         let start_b = self.beat;
+        // Пустой такт — на предыдущий такт (как «обратная» правая стрелка).
+        if self.cp.find_chords_in_measure(self.cursor).is_empty() {
+            if self.cursor > 1 {
+                self.cursor -= 1;
+                self.beat = 1;
+            }
+            return self.cursor != start_m || self.beat != start_b;
+        }
         let pos = Position::new(self.cursor, self.beat, self.cp.time_signature);
         if let Some(prev) = self.cp.find_last_chord_to_left(&pos) {
             self.cursor = prev.position.measure;
@@ -774,6 +840,427 @@ impl Doc {
         self.active_chord().map(|(_m, _beat, name, bass)| (name, bass))
     }
 
+    // =======================================================================
+    // Ввод с валидацией (слайс 14, #46/#50) — гейты для диалогов ввода аккорда.
+    // =======================================================================
+
+    /// Полный символ аккорда для предзаполнения форм: имя + слэш-бас
+    /// («Bb7/G»). Именно полный символ редактирует F2 (msg 1607: «пишет Bb7,
+    /// а не Bb7/G — не изменить бас»).
+    pub fn full_symbol(name: &str, bass: &str) -> String {
+        if bass.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name}/{bass}")
+        }
+    }
+
+    /// Текст ошибки ввода (что говорить пользователю — стиль «Ошибка: …»).
+    fn entry_error(e: ChordEntryError, raw: &str) -> String {
+        match e {
+            ChordEntryError::Empty => String::new(),
+            ChordEntryError::Bass => format!(
+                "Ошибка: «{raw}» — после / не нота или такой ноты не существует"
+            ),
+            ChordEntryError::Root | ChordEntryError::Quality => {
+                format!("Ошибка: аккорд «{raw}» не существует в iReal Pro")
+            }
+        }
+    }
+
+    /// Вставить аккорд по полному символу (можно со слэш-басом) — гейт ввода:
+    /// корень и функция обязаны существовать в iReal Pro (msg 1607). Невалидный
+    /// ввод не попадает в цифровку — возвращается «Ошибка: …». Имена
+    /// канонизируются: «B-7» хранится как «Bm7» (запись python/.ips).
+    pub fn insert_chord_entry(&mut self, raw: &str) -> String {
+        let raw = raw.trim().to_string();
+        match parse_chord_entry(&raw) {
+            Err(ChordEntryError::Empty) => String::new(),
+            Err(e) => Self::entry_error(e, &raw),
+            Ok(pc) => {
+                let bass = pc.bass.unwrap_or_default();
+                let base = self.insert_chord(&pc.name, &bass);
+                // insert_chord говорит только имя — при слэш-басе озвучиваем
+                // полный символ («Вставлен аккорд: Bb7/G»), как ввёл пользователь.
+                if bass.is_empty() {
+                    base
+                } else {
+                    format!("Вставлен аккорд: {}", Self::full_symbol(&pc.name, &bass))
+                }
+            }
+        }
+    }
+
+    /// Отредактировать аккорд по полному символу (имя и/или слэш-бас) — гейт
+    /// F2 (#50). Правка меняет и имя, и бас (раньше бас сохранялся, изменить
+    /// его было нельзя). Имя не изменилось → молчание (как python).
+    pub fn edit_chord_entry(&mut self, raw: &str) -> String {
+        let raw = raw.trim().to_string();
+        match self.active_chord() {
+            None => "Нет аккорда для редактирования".to_string(),
+            Some((m, beat, old_name, old_bass)) => {
+                let old_symbol = Self::full_symbol(&old_name, &old_bass);
+                if raw.is_empty() || raw == old_symbol {
+                    return String::new();
+                }
+                match parse_chord_entry(&raw) {
+                    Err(ChordEntryError::Empty) => String::new(),
+                    Err(e) => Self::entry_error(e, &raw),
+                    Ok(pc) => {
+                        let bass = pc.bass.unwrap_or_default();
+                        self.push_undo();
+                        self.cp.add_chord_by_name(&pc.name, m, beat, &bass);
+                        self.dirty = true;
+                        format!(
+                            "Аккорд отредактирован: {}",
+                            Self::full_symbol(&pc.name, &bass)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // =======================================================================
+    // Выделение Shift+стрелки (слайс 14, #52) — порт python main.py:1025.
+    // =======================================================================
+
+    /// Глобальный номер доли (0-based от начала песни) — python
+    /// `Position.beat_from_start`. Используется для смещений мульти-буфера.
+    fn bfs(&self, m: i32, b: i32) -> i64 {
+        let bpm = self.cp.time_signature.numerator.max(1) as i64;
+        (m as i64 - 1) * bpm + b as i64 - 1
+    }
+
+    /// Обратно из глобальной доли в (такт, доля).
+    fn measure_beat_of(&self, bfs: i64) -> (i32, i32) {
+        let bpm = self.cp.time_signature.numerator.max(1) as i64;
+        let m = bfs / bpm;
+        let b = bfs % bpm;
+        ((m + 1) as i32, (b + 1) as i32)
+    }
+
+    /// Реальные аккорды внутри нормированного диапазона выделения, вместе с
+    /// их физическими (такт, доля). Виртуальные повторы не разворачиваем
+    /// (сетка физическая; повтор-зоны — отдельный слайс).
+    fn chords_in_range(
+        &self,
+        start: (i32, i32),
+        end: (i32, i32),
+    ) -> Vec<(i32, i32, String, String)> {
+        let (sm, sb) = start;
+        let (em, eb) = end;
+        let mut out: Vec<(i32, i32, String, String)> = Vec::new();
+        for m in sm..=em {
+            for it in self.cp.find_chords_in_measure(m) {
+                let b = it.position.beat;
+                let inside = if m == sm && m == em {
+                    b >= sb && b <= eb
+                } else if m == sm {
+                    b >= sb
+                } else if m == em {
+                    b <= eb
+                } else {
+                    true
+                };
+                if inside {
+                    out.push((m, b, it.chord.name().to_string(), it.bass_note.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Аккорды активного выделения + глобальная доля первого из них (якорь
+    /// смещений мульти-буфера). None — выделения нет или в нём нет аккордов.
+    fn chords_in_selection(&self) -> Option<(Vec<(i32, i32, String, String)>, i64)> {
+        let sr = self.selection?;
+        let (start, end) = sr.normalized();
+        let chords = self.chords_in_range(start, end);
+        if chords.is_empty() {
+            return None;
+        }
+        let anchor_bfs = self.bfs(chords[0].0, chords[0].1);
+        Some((chords, anchor_bfs))
+    }
+
+    /// Слово «аккорд» по числу (1/2/5) — русская плюрализация.
+    fn chord_word(n: usize) -> String {
+        let n10 = n % 10;
+        let n100 = n % 100;
+        if n10 == 1 && n100 != 11 {
+            "аккорд".to_string()
+        } else if n10 >= 2 && n10 <= 4 && !(n100 >= 12 && n100 <= 14) {
+            "аккорда".to_string()
+        } else {
+            "аккордов".to_string()
+        }
+    }
+
+    /// Озвучка выделения: ведущий аккорд (на активном крае) + число.
+    pub fn selection_announce(&self) -> String {
+        let Some(sr) = self.selection else {
+            return String::new();
+        };
+        let Some((chords, _)) = self.chords_in_selection() else {
+            return "Нет аккордов в выделении".to_string();
+        };
+        let n = chords.len();
+        // Аккорд на активном крае (под курсором), иначе первый в диапазоне.
+        let edge_pos = (sr.b_m, sr.b_b);
+        let edge_name = chords
+            .iter()
+            .find(|(m, b, _, _)| (*m, *b) == edge_pos)
+            .or_else(|| chords.first())
+            .map(|(_, _, name, _)| name.clone())
+            .unwrap_or_default();
+        let lead = if edge_name.is_empty() {
+            String::new()
+        } else {
+            format!("{} — ", chord_name_to_spoken(&edge_name, ""))
+        };
+        format!("{lead}выделено: {n} {}", Self::chord_word(n))
+    }
+
+    /// Взять якорь, если выделения ещё нет (первое нажатие Shift+стрелка).
+    fn start_selection(&mut self) {
+        if self.selection.is_none() {
+            self.selection =
+                Some(SelRange::new(self.cursor, self.beat, self.cursor, self.beat));
+        }
+    }
+
+    /// Передвинуть активный край выделения на курсор.
+    fn refresh_selection(&mut self) {
+        if let Some(s) = self.selection.as_mut() {
+            s.b_m = self.cursor;
+            s.b_b = self.beat;
+        }
+    }
+
+    /// Shift+←/→ по аккордам: расширяет выделение тем же движением, что и
+    /// простая стрелка. Озвучка — диапазон («… выделено: N аккордов»).
+    pub fn extend_chord_step(&mut self, left: bool) -> String {
+        self.start_selection();
+        let moved = if left {
+            self.go_chord_left()
+        } else {
+            self.go_chord_right()
+        };
+        if !moved {
+            return String::new();
+        }
+        self.refresh_selection();
+        self.selection_announce()
+    }
+
+    /// Shift+Ctrl+←/→ по тактам (включая пустые).
+    pub fn extend_measure_step(&mut self, left: bool) -> String {
+        self.start_selection();
+        let before = self.cursor;
+        if left {
+            self.go_left();
+        } else {
+            self.go_right();
+        }
+        if self.cursor == before {
+            return String::new();
+        }
+        self.refresh_selection();
+        self.selection_announce()
+    }
+
+    /// Shift+Alt+←/→ по долям (включая пустые).
+    pub fn extend_beat_step(&mut self, left: bool) -> String {
+        self.start_selection();
+        let moved = if left {
+            self.go_beat_left()
+        } else {
+            self.go_beat_right()
+        };
+        if !moved {
+            return String::new();
+        }
+        self.refresh_selection();
+        self.selection_announce()
+    }
+
+    /// Shift+Ctrl+Alt+←/→ по секциям/вольтам.
+    pub fn extend_section_step(&mut self, left: bool) -> String {
+        self.start_selection();
+        let before = self.cursor;
+        if left {
+            self.go_prev_structural();
+        } else {
+            self.go_next_structural();
+        }
+        if self.cursor == before {
+            return String::new();
+        }
+        self.refresh_selection();
+        self.selection_announce()
+    }
+
+    /// Выделить всю цифровку от первого до последнего аккорда (python
+    /// `_select_all`, main.py:1217): якорь — первый аккорд, активный край —
+    /// последний, курсор в конец диапазона. Ctrl+C после этого копирует весь
+    /// документ мульти-блоком; в пустой цифровке — сообщение, ничего не трогаем.
+    pub fn select_all(&mut self) -> String {
+        let first = self.cp.items.first().map(|i| (i.position.measure, i.position.beat));
+        let last = self.cp.items.last().map(|i| (i.position.measure, i.position.beat));
+        let (Some((fm, fb)), Some((lm, lb))) = (first, last) else {
+            return "Нет аккордов для выделения".to_string();
+        };
+        self.selection = Some(SelRange::new(fm, fb, lm, lb));
+        self.cursor = lm;
+        self.beat = lb;
+        self.selection_announce()
+    }
+
+    // =======================================================================
+    // Буфер обмена выделения (Ctrl+C/X, Del) + вставка блока (Ctrl+V).
+    // =======================================================================
+
+    /// Скопировать выделение в буфер: один аккорд — одиночный `clipboard`,
+    /// несколько — мульти-блок `sel_clipboard` со смещениями (python
+    /// `_copy_selection`, main.py:1228). Без выделения — одиночное копирование.
+    fn copy_selection(&mut self) -> String {
+        let Some((chords, anchor_bfs)) = self.chords_in_selection() else {
+            return String::new();
+        };
+        if chords.len() == 1 {
+            let (_, _, name, bass) = &chords[0];
+            self.clipboard = Some(ClipboardItem {
+                name: name.clone(),
+                bass: bass.clone(),
+            });
+            self.sel_clipboard = None;
+            format!("Скопировано: {name}")
+        } else {
+            let block = chords
+                .iter()
+                .map(|(m, b, name, bass)| SelChord {
+                    bfs_offset: self.bfs(*m, *b) - anchor_bfs,
+                    name: name.clone(),
+                    bass: bass.clone(),
+                })
+                .collect();
+            self.sel_clipboard = Some(block);
+            self.clipboard = None;
+            let n = chords.len();
+            format!("Скопировано: {n} {}", Self::chord_word(n))
+        }
+    }
+
+    /// Вырезать выделение (копия + удаление реальных аккордов) — python
+    /// `_cut_selection` (main.py:1251). None → одиночное вырезание.
+    fn cut_selection(&mut self) -> String {
+        let Some((chords, anchor_bfs)) = self.chords_in_selection() else {
+            return String::new();
+        };
+        if chords.len() == 1 {
+            let (_, _, name, bass) = &chords[0];
+            self.clipboard = Some(ClipboardItem {
+                name: name.clone(),
+                bass: bass.clone(),
+            });
+            self.sel_clipboard = None;
+            self.remove_chords_at(&chords);
+            let msg = format!("Вырезано: {name}");
+            self.after_selection_removal();
+            msg
+        } else {
+            let block = chords
+                .iter()
+                .map(|(m, b, name, bass)| SelChord {
+                    bfs_offset: self.bfs(*m, *b) - anchor_bfs,
+                    name: name.clone(),
+                    bass: bass.clone(),
+                })
+                .collect();
+            self.sel_clipboard = Some(block);
+            self.clipboard = None;
+            let n = chords.len();
+            self.remove_chords_at(&chords);
+            let msg = format!("Вырезано: {n} {}", Self::chord_word(n));
+            self.after_selection_removal();
+            msg
+        }
+    }
+
+    /// Удалить выделение (без копирования) — python `_delete_selection`
+    /// (main.py:1288). Курсор — на последний аккорд перед диапазоном.
+    pub fn delete_selection(&mut self) -> String {
+        let Some((chords, _)) = self.chords_in_selection() else {
+            self.clear_selection();
+            return "Нет аккордов в выделении".to_string();
+        };
+        let n = chords.len();
+        self.remove_chords_at(&chords);
+        let msg = format!("Удалено: {n} {}", Self::chord_word(n));
+        self.after_selection_removal();
+        msg
+    }
+
+    /// Снять аккорды диапазона (один undo на весь блок).
+    fn remove_chords_at(&mut self, chords: &[(i32, i32, String, String)]) {
+        self.push_undo();
+        for (m, b, _, _) in chords {
+            let pos = Position::new(*m, *b, self.cp.time_signature);
+            self.cp.delete_chord_at(&pos);
+        }
+        self.dirty = true;
+    }
+
+    /// После вырезания/удаления диапазона: курсор — последний аккорд слева от
+    /// старта, выделение снято.
+    fn after_selection_removal(&mut self) {
+        let start_pos = self
+            .selection
+            .and_then(|sr| Some(sr.normalized().0))
+            .map(|(m, b)| Position::new(m, b, self.cp.time_signature));
+        self.clear_selection();
+        match start_pos {
+            Some(pos) => {
+                if let Some(prev) = self.cp.find_last_chord_to_left(&pos) {
+                    let it = prev.clone();
+                    self.cursor = it.position.measure;
+                    self.beat = it.position.beat;
+                } else {
+                    self.cursor = 1;
+                    self.beat = 1;
+                }
+            }
+            None => {
+                self.cursor = 1;
+                self.beat = 1;
+            }
+        }
+    }
+
+    /// Вставить мульти-блок выделения с долей курсора как якорем; без блока
+    /// возвращает None (дальше — одиночная вставка).
+    fn paste_selection_block(&mut self) -> Option<String> {
+        let block: Vec<(i64, String, String)> = self
+            .sel_clipboard
+            .as_ref()?
+            .iter()
+            .map(|sc| (sc.bfs_offset, sc.name.clone(), sc.bass.clone()))
+            .collect();
+        if block.is_empty() {
+            return Some("Буфер обмена пуст".to_string());
+        }
+        let target_bfs = self.bfs(self.real_measure(), self.beat);
+        self.push_undo();
+        for (offset, name, bass) in &block {
+            let (m, b) = self.measure_beat_of(target_bfs + offset);
+            self.cp.add_chord_by_name(name, m, b, bass);
+        }
+        self.dirty = true;
+        let n = block.len();
+        Some(format!("Вставлено: {n} {}", Self::chord_word(n)))
+    }
+
     /// Снимок прогрессии в стек undo (с дедупликацией и потолком), чистит redo.
     fn push_undo(&mut self) {
         let snapshot = self.cp.to_json();
@@ -867,24 +1354,33 @@ impl Doc {
         }
     }
 
-    /// Переключить N.C. на такте — как python `toggle_no_chord` (main.py:843).
+    /// Поставить N.C. на такте — только СТАВИТ, повторное нажатие не убирает
+    /// (msg 1607: «nc можно не убирать по второму нажатию»). Снятие — через
+    /// Backspace (Delete структурного такта `delete_structure_at_measure`).
+    /// Держим имя метода `toggle_no_chord` ради совместимости вызова (клавиша
+    /// N / меню «Вставить N.C.»).
     pub fn toggle_no_chord(&mut self) -> String {
         let m = self.real_measure();
         if self.cp.is_no_chord(m) {
-            self.push_undo();
-            self.cp.remove_no_chord(m);
-            self.dirty = true;
-            format!("N.C. убрано в такте {m}")
-        } else {
-            self.push_undo();
-            self.cp.add_no_chord(m);
-            self.dirty = true;
-            format!("N.C. в такте {m}")
+            return format!("N.C. уже стоит в такте {m}");
         }
+        self.push_undo();
+        self.cp.add_no_chord(m);
+        self.dirty = true;
+        format!("N.C. в такте {m}")
     }
 
-    /// Скопировать аккорд под курсором — как python `copy_chord` (main.py:778).
+    /// Скопировать аккорд/выделение под курсором — как python `copy_chord`
+    /// (main.py:778), который при активном выделении копирует ВЕСЬ диапазон
+    /// (Ctrl+C больше не берёт только первый аккорд — #52).
     pub fn copy_chord(&mut self) -> String {
+        if self.selection.is_some() {
+            let msg = self.copy_selection();
+            if !msg.is_empty() {
+                return msg;
+            }
+            return "Нет аккордов в выделении".to_string();
+        }
         match self.active_chord() {
             Some((_m, _beat, name, bass)) => {
                 self.clipboard = Some(ClipboardItem {
@@ -897,9 +1393,18 @@ impl Doc {
         }
     }
 
-    /// Вырезать аккорд — как python `cut_chord` (main.py:791): копирует в
-    /// буфер и удаляет из прогрессии.
+    /// Вырезать аккорд/выделение — как python `cut_chord` (main.py:791):
+    /// копирует в буфер (одиночный аккорд или блок диапазона) и удаляет из
+    /// прогрессии. При активном выделении — вырезает весь диапазон (#52).
     pub fn cut_chord(&mut self) -> String {
+        if self.selection.is_some() {
+            let msg = self.cut_selection();
+            if !msg.is_empty() {
+                return msg;
+            }
+            self.clear_selection();
+            return "Нет аккордов в выделении".to_string();
+        }
         match self.active_chord() {
             Some((m, beat, name, bass)) => {
                 self.clipboard = Some(ClipboardItem {
@@ -920,8 +1425,12 @@ impl Doc {
     /// Вставить аккорд из буфера на долю курсора (slice 12) — как python
     /// `paste_chord` (main.py:807), который клеил на долю 1. Буфер НЕ очищается
     /// (python читает и хранит дальше) — повторный Ctrl+V клеит тот же аккорд
-    /// в следующий такт/долю. В отличие от python сохраняет и слэш-бас.
+    /// в следующий такт/долю. В отличие от python сохраняет и слэш-бас. Если в
+    /// буфере блок выделения (#52) — вставляет весь блок с внутренней геометрией.
     pub fn paste_chord(&mut self) -> String {
+        if let Some(msg) = self.paste_selection_block() {
+            return msg;
+        }
         let Some(item) = self.clipboard.as_ref() else {
             return "Буфер обмена пуст".to_string();
         };
@@ -939,10 +1448,11 @@ impl Doc {
     /// пуст — к последнему аккорду слева — как python `add_bass_note`
     /// (main.py:1648). Говорит озвученный аккорд с новым басом.
     pub fn add_bass_note(&mut self, root: &str) -> String {
-        let note = root.trim().to_uppercase();
-        if !BASS_SPELLINGS.contains(&note.as_str()) {
+        // Канонизация через core: регистронезависимо («e», «bb»), бемоли и
+        // диезы как в словаре ALL_ROOTS. Одна нота — иначе «Неверная нота».
+        let Some(note) = normalize_bass_note(root) else {
             return "Неверная нота".to_string();
-        }
+        };
         // Аккорд под курсором, иначе последний слева (в т.ч. через повторы).
         let (m, beat, name) = match self.active_chord() {
             Some((m, beat, name, _bass)) => (m, beat, name),
@@ -968,35 +1478,23 @@ impl Doc {
     }
 
     /// Удалить аккорд/структуру на такте под курсором (Del/Backspace) — как
-    /// python `delete_at_cursor` (main.py:1714). Если на такте есть аккорд —
-    /// удаляет его и говорит «Удалено. <озвучка такта под курсором>»; иначе
+    /// python `delete_at_cursor` (main.py:1714). Если активно выделение — удаляет
+    /// выделенный диапазон. Если под курсором аккорд — снимает его и говорит
+    /// «Удалено. <клетка под курсором>», курсор ОСТАЁТСЯ на той же доле (#48:
+    /// «удалил аккорд в доле 3 — остаёмся в доле 3, там пустота, а не чёрная
+    /// дыра»; ни магнита к доле 1, ни перескока к предыдущему аккорду). Иначе
     /// снимает метку секции/знак повтора/N.C. и говорит что удалено.
     pub fn delete_at_cursor(&mut self) -> String {
+        if self.selection.is_some() {
+            return self.delete_selection();
+        }
         match self.active_chord() {
             Some((m, beat, _name, _bass)) => {
                 let pos = Position::new(m, beat, self.cp.time_signature);
                 self.push_undo();
                 self.cp.delete_chord_at(&pos);
                 self.dirty = true;
-                // Пусто в такте? Тогда — на предыдущий аккорд (или такт 1),
-                // как python: иначе остаёмся на том же такте (доля — к норме).
-                if self.cp.find_chords_in_measure(m).is_empty() {
-                    let prev = self.cp.find_last_chord_to_left(&pos);
-                    match prev {
-                        Some(i) => {
-                            let it = i.clone();
-                            self.cursor = it.position.measure;
-                            self.beat = it.position.beat;
-                        }
-                        None => {
-                            self.cursor = 1;
-                            self.beat = 1;
-                        }
-                    }
-                } else {
-                    self.clamp_beat();
-                }
-                format!("Удалено. {}", self.announce_measure(self.cursor))
+                format!("Удалено. {}", self.announce_beat_cell())
             }
             None => self.delete_structure_at_measure(self.real_measure()),
         }
@@ -1592,6 +2090,8 @@ mod tests {
             dirty: false,
             pending_repeat_start: None,
             pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
         }
     }
 
@@ -1684,12 +2184,13 @@ mod tests {
     }
 
     #[test]
-    fn clamp_beat_reanchors_after_deleting_cursor_chord() {
+    fn deleting_cursor_chord_keeps_cursor_beat() {
+        // #48: Del на доле 3 снимает ИМЕННО аккорд доли 3 (slice 12), а курсор
+        // ОСТАЁТСЯ на доле 3 — «там пустота, а не чёрная дыра» (msg 1607),
+        // никакого магнита к доле 1 или к аккорду доли 1.
         let mut d = nav_doc();
         d.go_chord_right(); // на (1, 3) — второй аккорд такта 1
         assert_eq!((d.cursor, d.beat), (1, 3));
-        // Del на доле 3 снимает ИМЕННО аккорд доли 3 (slice 12); аккорд доли 1
-        // цел, и курсор прижимается к нему (доли 3 больше нет → clamp на 1).
         d.delete_at_cursor();
         let syms: Vec<String> = d
             .measure_view(1)
@@ -1698,14 +2199,46 @@ mod tests {
             .map(|c| c.symbol.clone())
             .collect();
         assert_eq!(syms, vec!["B-7"], "удалён только аккорд доли 3");
-        assert_eq!((d.cursor, d.beat), (1, 1), "clamp подтянул beat к аккорду");
-        // Undo вернул E-7 на долю 3 — оба аккорда на месте.
+        assert_eq!((d.cursor, d.beat), (1, 3), "курсор остался на доле удаления");
+        // Undo вернул E-7 на долю 3 — курсор на прежнем месте.
         d.undo();
         assert_eq!(d.cp.find_chords_in_measure(1).len(), 2);
-        assert_eq!((d.cursor, d.beat), (1, 1));
-        // Вправо по аккордам — снова на долю 3.
-        assert!(d.go_chord_right());
         assert_eq!((d.cursor, d.beat), (1, 3));
+        // Стрелка вправо с доли 3 (последний аккорд такта 1) — на следующий
+        // аккорд документа (A-7 в такте 3), пустой такт 2 перешагивается.
+        assert!(d.go_chord_right());
+        assert_eq!((d.cursor, d.beat), (3, 1));
+    }
+
+    #[test]
+    fn left_arrow_from_empty_tail_steps_one_measure() {
+        // #47 (msg 1607): стрелка влево из пустого хвоста идёт по одному такту
+        // назад за нажатие, а НЕ магнитится через километр к последнему аккорду.
+        let ts = TimeSignature::new(4, 4);
+        let mut cp = ChordProgression::new("left", ts, "C", "Swing");
+        cp.add_chord_by_name("C", 1, 1, "");
+        cp.total_measures = 4; // такты 2–4 пустые
+        let mut d = Doc {
+            cp,
+            cursor: 4,
+            beat: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
+            dirty: false,
+            pending_repeat_start: None,
+            pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
+        };
+        // Четыре шага влево — по одному такту, и только потом упираемся в C.
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (3, 1), "такт 3, не прыжок к аккорду");
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (2, 1), "такт 2");
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (1, 1), "такт 1 — аккорд C");
+        assert!(!d.go_chord_left(), "за начало документа шага нет");
     }
 }
 
@@ -1767,27 +2300,33 @@ mod edit_tests {
     }
 
     #[test]
-    fn no_chord_toggle_roundtrip() {
+    fn no_chord_is_set_only() {
+        // #49: N.C. ТОЛЬКО ставится по H/N; повторное нажатие не убирает
+        // (msg 1607) — снятие через Backspace (delete_structure_at_measure).
         let mut d = empty_doc();
         assert!(!d.cp.is_no_chord(1));
         assert_eq!(d.toggle_no_chord(), "N.C. в такте 1");
         assert!(d.cp.is_no_chord(1));
-        assert_eq!(d.toggle_no_chord(), "N.C. убрано в такте 1");
+        assert_eq!(d.toggle_no_chord(), "N.C. уже стоит в такте 1");
+        assert!(d.cp.is_no_chord(1), "повтор не убирает N.C.");
+        // Снятие — структурным удалением (Backspace на такте N.C.).
+        assert_eq!(d.delete_at_cursor(), "Удалено: N.C. в такте 1");
         assert!(!d.cp.is_no_chord(1));
     }
 
     #[test]
-    fn delete_chord_moves_cursor_to_previous() {
+    fn delete_last_chord_stays_on_its_beat() {
+        // #48: удалили последний аккорд песни — остаёмся на его доле (пустота
+        // в такте, куда можно вставить новый аккорд), не прыгаем к предыдущему.
         let mut d = empty_doc();
         d.insert_chord("C", "");
         d.cursor = 2;
         d.insert_chord("G", "");
         assert_eq!(d.active_chord().map(|a| a.2), Some("G".to_string()));
         let msg = d.delete_at_cursor();
-        assert!(msg.starts_with("Удалено. "), "{msg}");
         assert!(d.cp.find_chords_in_measure(2).is_empty(), "аккорд удалён");
-        assert_eq!(d.cursor, 1, "курсор ушёл на предыдущий аккорд");
-        assert!(msg.contains("такт 1"), "озвучка нового такта: {msg}");
+        assert_eq!((d.cursor, d.beat), (2, 1), "курсор остался на доле удаления");
+        assert!(msg.contains("такт 2"), "озвучка места удаления: {msg}");
     }
 
     #[test]
@@ -1841,6 +2380,177 @@ mod edit_tests {
         d.cursor = 2;
         assert_eq!(d.paste_chord(), "Вставлено: D7");
         assert_eq!(d.cp.find_chords_in_measure(2).len(), 1);
+    }
+
+    #[test]
+    fn insert_chord_entry_gate_validates_and_canonicalizes() {
+        // #46: гейт ввода пропускает только валидные для iReal Pro аккорды и
+        // канонизирует запись («B-7» хранится как «Bm7»). Невалидное — ошибка,
+        // в цифровку ничего не попадает.
+        let mut d = empty_doc();
+        assert_eq!(d.insert_chord_entry("B-7"), "Вставлен аккорд: Bm7");
+        assert_eq!(d.measure_view(1).chords[0].symbol, "Bm7", "канонизация на входе");
+        assert_eq!(d.insert_chord_entry("Bb7/G"), "Вставлен аккорд: Bb7/G");
+        // Невалидные: не-корень (в т.ч. кириллица «С6»), не-функция, плохой бас.
+        assert_eq!(
+            d.insert_chord_entry("С6"),
+            "Ошибка: аккорд «С6» не существует в iReal Pro"
+        );
+        assert_eq!(
+            d.insert_chord_entry("H7"),
+            "Ошибка: аккорд «H7» не существует в iReal Pro"
+        );
+        assert_eq!(
+            d.insert_chord_entry("Cm6x"),
+            "Ошибка: аккорд «Cm6x» не существует в iReal Pro"
+        );
+        assert_eq!(
+            d.insert_chord_entry("C/G7"),
+            "Ошибка: «C/G7» — после / не нота или такой ноты не существует"
+        );
+        // Пустой ввод — молчание, не ошибка.
+        assert_eq!(d.insert_chord_entry("   "), "");
+        let n = d.measure_view(1).chords.len();
+        assert_eq!(n, 1, "невалидные вводы не попадают в цифровку: {n}");
+    }
+
+    #[test]
+    fn edit_chord_entry_rewrites_name_and_bass() {
+        // #50: F2 правит ПОЛНЫЙ символ «Bb7/G» — можно изменить/снять бас.
+        let mut d = empty_doc();
+        d.insert_chord("Bb7", "G");
+        assert_eq!(Doc::full_symbol("Bb7", "G"), "Bb7/G", "префилл форм");
+        // Без изменений — молчание.
+        assert_eq!(d.edit_chord_entry("Bb7/G"), "");
+        // Меняем бас.
+        assert_eq!(d.edit_chord_entry("Bb7/D"), "Аккорд отредактирован: Bb7/D");
+        assert_eq!(d.measure_view(1).chords[0].symbol, "Bb7/D");
+        // Снимаем бас целиком.
+        assert_eq!(d.edit_chord_entry("Bb7"), "Аккорд отредактирован: Bb7");
+        assert_eq!(d.measure_view(1).chords[0].symbol, "Bb7");
+        // Невалидные правки — ошибка, аккорд не меняется.
+        assert_eq!(
+            d.edit_chord_entry("Bb7/H"),
+            "Ошибка: «Bb7/H» — после / не нота или такой ноты не существует"
+        );
+        assert_eq!(
+            d.edit_chord_entry("С6"),
+            "Ошибка: аккорд «С6» не существует в iReal Pro"
+        );
+        assert_eq!(d.measure_view(1).chords[0].symbol, "Bb7");
+    }
+
+    #[test]
+    fn bass_note_accepts_lowercase_and_flat_case() {
+        // #51: диалог «/» принимает ноту независимо от регистра и нормализует
+        // в каноническую запись («bb» → «Bb», «e» → «E»).
+        let mut d = empty_doc();
+        d.insert_chord("C", "");
+        d.add_bass_note("e");
+        assert_eq!(d.measure_view(1).chords[0].symbol, "C/E");
+        d.add_bass_note("bb");
+        assert_eq!(d.measure_view(1).chords[0].symbol, "C/Bb");
+        assert_eq!(d.add_bass_note("X"), "Неверная нота");
+    }
+
+    /// Документ с аккордами на (1,1), (1,3), (3,1) и пустым хвостом такта 4 —
+    /// для проверки выделения диапазона Shift+стрелки.
+    fn sel_doc() -> Doc {
+        let mut d = empty_doc();
+        d.cp.add_chord_by_name("C", 1, 1, "");
+        d.cp.add_chord_by_name("G7", 1, 3, "");
+        d.cp.add_chord_by_name("A-7", 3, 1, "");
+        d.cp.total_measures = 4;
+        d.cursor = 1;
+        d.beat = 1;
+        d
+    }
+
+    #[test]
+    fn selection_extend_announces_and_copies_whole_range() {
+        // #52: Shift+→ расширяет выделение от якоря; озвучка — число аккордов;
+        // Ctrl+C копирует ВЕСЬ диапазон (не только первый аккорд).
+        let mut d = sel_doc();
+        let a1 = d.extend_chord_step(false); // (1,1) → (1,3)
+        assert!(a1.contains("выделено: 2 аккорда"), "{a1}");
+        let a2 = d.extend_chord_step(false); // (1,3) → (3,1)
+        assert!(a2.contains("выделено: 3 аккорда"), "{a2}");
+        assert_eq!(d.copy_chord(), "Скопировано: 3 аккорда");
+        let block = d.sel_clipboard.as_ref().expect("блок в буфере");
+        assert_eq!(block.len(), 3, "весь диапазон в мульти-буфере");
+        assert_eq!(d.clipboard, None, "одиночный буфер не используется");
+        // Расширение влево назад до одного аккорда — пересчёт озвучки.
+        let a3 = d.extend_chord_step(true); // (3,1) → (1,3)
+        assert!(a3.contains("выделено: 2 аккорда"), "{a3}");
+    }
+
+    #[test]
+    fn selection_cut_delete_and_block_paste() {
+        // #52: Ctrl+X вырезает весь диапазон в мульти-буфер; Ctrl+V вставляет
+        // блок с той же внутренней геометрией (доли и такты-разрывы сохраняются).
+        let mut d = sel_doc();
+        d.extend_chord_step(false);
+        d.extend_chord_step(false); // выделены C, G7, A-7
+        assert_eq!(d.cut_chord(), "Вырезано: 3 аккорда");
+        assert!(d.cp.find_chords_in_measure(1).is_empty());
+        assert!(d.cp.find_chords_in_measure(3).is_empty());
+        assert_eq!((d.cursor, d.beat), (1, 1), "курсор — до начала диапазона");
+        // Вставляем блок в пустой такт 4: C→(4,1), G7→(4,3), A-7→(5,1).
+        d.cursor = 4;
+        d.beat = 1;
+        assert_eq!(d.paste_chord(), "Вставлено: 3 аккорда");
+        let beats4: Vec<i32> = d
+            .measure_view(4)
+            .chords
+            .iter()
+            .map(|c| c.beat)
+            .collect();
+        assert_eq!(beats4, vec![1, 3], "геометрия внутри блока сохранена: {beats4:?}");
+        // Разрыв: исходный такт 2 был пустым — после вставки в такт 4 пустым
+        // остаётся такт 5, а A-7 ложится в такт 6 (промежуток сохранён).
+        assert!(d.measure_view(5).chords.is_empty(), "пустой такт-разрыв перенесён");
+        assert_eq!(d.measure_view(6).chords[0].symbol, "A-7", "хвост блока на такте 6");
+    }
+
+    #[test]
+    fn delete_selection_removes_range_and_repositions() {
+        // #52: Del при активном выделении удаляет диапазон целиком; курсор —
+        // последний аккорд перед диапазоном (или такт 1).
+        let mut d = sel_doc();
+        d.extend_chord_step(false); // → (1,3)
+        d.extend_chord_step(false); // → (3,1), выделены C, G7, A-7
+        let msg = d.delete_at_cursor();
+        assert_eq!(msg, "Удалено: 3 аккорда");
+        assert!(d.cp.find_chords_in_measure(1).is_empty());
+        assert!(d.cp.find_chords_in_measure(3).is_empty());
+        assert_eq!((d.cursor, d.beat), (1, 1), "до начала диапазона аккордов нет");
+        assert_eq!(d.selection, None, "выделение снято после удаления");
+    }
+
+    #[test]
+    fn select_all_spans_whole_document() {
+        // Аудит python (msg 1612): `_select_all` (main.py:1217) выделяет все
+        // аккорды от первого до последнего; Ctrl+C после этого копирует блоком.
+        let mut d = sel_doc();
+        let msg = d.select_all();
+        assert!(msg.contains("выделено: 3 аккорда"), "{msg}");
+        assert_eq!((d.cursor, d.beat), (3, 1), "курсор — на последний аккорд");
+        assert_eq!(d.copy_chord(), "Скопировано: 3 аккорда");
+        let block = d.sel_clipboard.as_ref().expect("мульти-блок в буфере");
+        assert_eq!(block.len(), 3);
+        // Вставка блока в пустой такт 4 повторяет геометрию исходника.
+        d.cursor = 4;
+        d.beat = 1;
+        assert_eq!(d.paste_chord(), "Вставлено: 3 аккорда");
+        assert_eq!(d.measure_view(4).chords[0].symbol, "C");
+        assert_eq!(d.measure_view(6).chords[0].symbol, "A-7");
+    }
+
+    #[test]
+    fn select_all_on_empty_document_is_quiet() {
+        let mut d = empty_doc();
+        assert_eq!(d.select_all(), "Нет аккордов для выделения");
+        assert_eq!(d.selection, None);
     }
 
     #[test]

@@ -24,6 +24,22 @@ fn tr(en: &str) -> String {
     en.to_string()
 }
 
+/// Привести ведущие дисплейные маркеры iReal Pro к канонической записи
+/// качества: `-7` → `m7` (минор), `^7` → `maj7` (мажор). Канонические формы
+/// (m, maj) не трогаем. Нужно, чтобы сохранённые в дисплейной нотации имена
+/// (например «B-7» из демо/старых цифровок) озвучивались как «си минор 7»,
+/// а не как сырое «си -7». `pub(crate)`: валидатор ввода (input.rs) приводит
+/// качество тем же способом к каноническому виду.
+pub(crate) fn display_to_canonical(q: &str) -> String {
+    if let Some(rest) = q.strip_prefix('-') {
+        return format!("m{rest}");
+    }
+    if let Some(rest) = q.strip_prefix('^') {
+        return format!("maj{rest}");
+    }
+    q.to_string()
+}
+
 /// Только цифры (пробелы между ними допускаются)? Такие фразы не переводятся —
 /// в любой локали остаются цифровой записью.
 fn is_digits(s: &str) -> bool {
@@ -32,7 +48,9 @@ fn is_digits(s: &str) -> bool {
 
 /// Карта качества: (строка качества, разговорная форма). Сверка — точным
 /// равенством, порядок не влияет (дубликаты с общей приставкой различимы).
-const QUALITY: &[(&str, &str)] = &[
+/// `pub(crate)`: валидатор ввода (input.rs) сверяет по тем же ключам, чтобы
+/// «разрешено ввести» совпадало с «умеем произнести/экспортировать».
+pub(crate) const QUALITY: &[(&str, &str)] = &[
     ("mM7", "minor major 7"),
     ("mM7(9)", "minor major 9"),
     ("m7b5", "half diminished"),
@@ -97,7 +115,9 @@ const QUALITY: &[(&str, &str)] = &[
 ];
 
 /// Разговорные формы extension-токенов (порядок важен: длинные раньше).
-const EXT: &[(&str, &str)] = &[
+/// `pub(crate)`: разложение незнакомого качества в input.rs использует те же
+/// токены, что и озвучка, чтобы валидность и произношение не расходились.
+pub(crate) const EXT: &[(&str, &str)] = &[
     ("#11", "sharp 11"),
     ("b13", "flat 13"),
     ("#9", "sharp 9"),
@@ -235,10 +255,13 @@ pub fn chord_name_to_spoken(name: &str, bass_note: &str) -> String {
         bass_note
     };
 
+    // Дисплейные маркеры (`-7`, `^7`) приводим к канонике для сверки с картой.
+    let quality_key = display_to_canonical(quality_and_ext);
+
     // Точное совпадение качества в карте; чисто цифровые формы не переводятся.
     let mut quality_spoken = String::new();
     for (src, dst) in QUALITY {
-        if quality_and_ext == *src {
+        if quality_key == *src {
             quality_spoken = if is_digits(dst) {
                 dst.to_string()
             } else {
@@ -248,8 +271,8 @@ pub fn chord_name_to_spoken(name: &str, bass_note: &str) -> String {
         }
     }
     // Незнакомое непустое качество — longest-prefix + extension-токены.
-    if quality_spoken.is_empty() && !quality_and_ext.is_empty() {
-        quality_spoken = spoken_quality_fallback(quality_and_ext);
+    if quality_spoken.is_empty() && !quality_key.is_empty() {
+        quality_spoken = spoken_quality_fallback(&quality_key);
     }
 
     let mut result = spoken_root(root);
@@ -284,6 +307,20 @@ mod tests {
         assert_eq!(spoken_root("C#"), "до диез");
         assert_eq!(spoken_root("Bb"), "си бемоль");
         assert_eq!(spoken_root("F"), "фа");
+    }
+
+    #[test]
+    fn display_markers_speak_canonical() {
+        // Дисплейная нотация iReal Pro: `-7` = минор, `^7` = мажор. Сохранённые
+        // в такой форме имена (демо/старые цифровки) должны читаться как
+        // канонические, а не как сырое «си -7».
+        assert_eq!(chord_name_to_spoken("B-7", ""), "си минор 7");
+        assert_eq!(chord_name_to_spoken("Em7", ""), "ми минор 7");
+        assert_eq!(chord_name_to_spoken("C^7", ""), "до мэйдж 7");
+        assert_eq!(chord_name_to_spoken("F-7", "Bb"), "фа минор 7 над си бемоль");
+        assert_eq!(chord_name_to_spoken("B-7", ""), chord_name_to_spoken("Bm7", ""));
+        // Дисплейный мажор равен каноническому.
+        assert_eq!(chord_name_to_spoken("C^7", ""), chord_name_to_spoken("Cmaj7", ""));
     }
 
     #[test]
