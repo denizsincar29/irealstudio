@@ -29,11 +29,75 @@ impl Speak for SilentSpeak {
 pub struct NvdaSpeak;
 
 #[cfg(target_os = "windows")]
+mod nvda {
+    //! Динамическая загрузка `nvdaControllerClient.dll` — без внешних крейтов.
+    //! Функции те же, что зовёт accessible_output3 в irealstudio (python).
+    //! DLL ищется рядом с exe, в каталогах NVDA, затем голым именем (путь
+    //! приложения/PATH). Если не найдена или NVDA не запущена — молчаливый no-op.
+
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    type Hmodule = *mut c_void;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn LoadLibraryW(lp_file_name: *const u16) -> Hmodule;
+        fn GetProcAddress(h_module: Hmodule, lp_proc_name: *const u8) -> *mut c_void;
+    }
+
+    type SpeakTextFn = unsafe extern "system" fn(*const u16) -> i32;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn load() -> Option<Hmodule> {
+        let mut candidates: Vec<String> = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(
+                    dir.join("nvdaControllerClient.dll").to_string_lossy().to_string(),
+                );
+            }
+        }
+        candidates.push("C:\\Program Files (x86)\\NVDA\\nvdaControllerClient.dll".to_string());
+        candidates.push("C:\\Program Files\\NVDA\\nvdaControllerClient.dll".to_string());
+        // Голое имя: Windows ищет в каталоге приложения и в PATH.
+        candidates.push("nvdaControllerClient.dll".to_string());
+        for c in &candidates {
+            let w = wide(c);
+            let m = unsafe { LoadLibraryW(w.as_ptr()) };
+            if !m.is_null() {
+                return Some(m);
+            }
+        }
+        None
+    }
+
+    static DLL: OnceLock<Option<Hmodule>> = OnceLock::new();
+
+    fn dll() -> Option<Hmodule> {
+        *DLL.get_or_init(load)
+    }
+
+    pub fn speak(text: &str) {
+        let Some(module) = dll() else { return };
+        let name = b"nvdaController_speakText\0";
+        let proc = unsafe { GetProcAddress(module, name.as_ptr()) };
+        if proc.is_null() {
+            return;
+        }
+        let f: SpeakTextFn = unsafe { std::mem::transmute(proc) };
+        let w = wide(text);
+        unsafe { f(w.as_ptr()) };
+    }
+}
+
+#[cfg(target_os = "windows")]
 impl Speak for NvdaSpeak {
     fn speak(&self, text: &str) {
-        // TODO: FFI к nvdaControllerClient.dll (nvdaController_speakText,
-        // nvdaController_testIfRunning). Данные юникод-строки — wide (UTF-16).
-        let _ = text;
+        nvda::speak(text);
     }
 }
 

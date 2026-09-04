@@ -1,6 +1,6 @@
 # irealwx — переписывание irealstudio на Rust
 
-Статус: **этап 1 — порт чистого ядра завершён**: irealb-кодек готов и сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs` — читаемый `irealbook://` + современный `irealb://` URL: pyrealpro Song/Measure/TimeSignature, `Y`-переносы строк, стили/тональности iReal Pro), **озвучка аккордов по-русски** (`core/src/chords/spoken.rs` — `chord_name_to_spoken`, ru-каталог вендорен в `spoken_i18n.rs`) и **JSON-персистентность** (`core/src/chords/persist.rs` — `to_json`/`from_json`, 6 сценариев байтово против `json.dumps(indent=2, ensure_ascii)`, ручной кодек без serde — core остаётся dep-free). GUI/wxDragon — этап 2.
+Статус: **этап 1 (порт чистого ядра) закрыт, идёт этап 2 (wxDragon GUI)**. Ядро: irealb-кодек сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs`), **озвучка аккордов по-русски** (`core/src/chords/spoken.rs`) и **JSON-персистентность** (`core/src/chords/persist.rs`, 6 сценариев байтово против python, без serde). GUI: **slice 1 (ui-shell) готов к сборке на Windows** — окно + нативное альт-меню + рисованная панель тактов (`on_paint`) + навигация стрелками с озвучкой через NVDA ControllerClient; чистая логика документа в `ui/src/lib.rs` (тесты в контейнере), wxDragon-оболочка в `ui/src/main.rs` (Windows-only).
 
 ## Зачем
 
@@ -18,6 +18,33 @@ irealstudio — ~13k строк wxPython-приложения Дениза дл�
 
 `cargo test` гоняет default-members (core/audio/midi/speech) на любом хосте.
 `ui` тянет wxDragon → собирается на Windows: `cargo build -p irealwx_ui`.
+Собранный exe рядом со скринридером NVDA сам находит `nvdaControllerClient.dll`
+(рядом с exe / в каталогах NVDA / в PATH) — речь работает без доустановки.
+
+## Slice 1 (ui-shell) — что собрать и проверить на Windows
+
+Ветка `rust`, папка `workspace/irealwx/`. В **«x64 Native Tools Command
+Prompt for VS 2022»**:
+
+```sh
+cargo build -p irealwx_ui
+target\debug\irealwx_ui.exe
+```
+
+Ожидаемое поведение (демо — Rhythm Changes, 12 тактов, секции *A/*B):
+
+- **Alt** открывает нативное меню: **Файл** (Новая цифровка Ctrl+N / Выход),
+  **Песня** (Озвучить такт F5 / Озвучить всю цифровку F6 / В начало / В конец),
+  **Справка** (О программе). NVDA читает пункты и их help.
+- **Стрелки ←/→** — по тактам, **Home/End** — первый/последний такт,
+  **Alt+←/Alt+→** — прыжок по секциям; каждый переход озвучивается
+  («такт 3, си-бемоль минор септ, …») и подсвечивает ячейку на сетке.
+- Панель тактов рисуется в `on_paint` (визуально), в дерево a11y не попадает.
+
+Если NVDA не запущена — программа не падает, речь просто молчит (статус-строка
+показывает такт). wxDragon впервые собирает wxWidgets 3.3.3 долго (10–30 мин,
+нужны Ninja/CMake) — это один раз.
+
 
 ## Модель доступности (решение Дениза)
 

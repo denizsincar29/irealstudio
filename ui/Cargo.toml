@@ -4,10 +4,20 @@ version = "0.1.0"
 edition = "2021"
 description = "GUI: wxDragon (Windows). Окно без a11y-контролов, альт-меню, панель тактов (on_paint), форма создания цифровки."
 
+# Этап 2, slice 1: ui-shell — окно + альт-меню + панель тактов (on_paint)
+# + навигация стрелками с озвучкой. Чистая логика — в lib.rs (тестируется
+# в контейнере); wx-оболочка — в src/main.rs.
+#
+# wxDragon подключается ТОЛЬКО под Windows (cfg): на остальных хостах пакет
+# собирается без wx — lib-тесты зелёные где угодно. Сама программа Windows-only:
+#   cargo build -p irealwx_ui   (из "x64 Native Tools Command Prompt for VS 2022")
+# Первая сборка долгая — wxdragon-sys статически собирает wxWidgets 3.3.3.
+
 [dependencies]
-# wxDragon (wxdragon-sys) подключается при реальной Windows-сборке:
-# он сам CMake-компилит wxWidgets 3.3.3 и требует MSVC + libclang.
 irealwx_core = { path = "../core" }
 irealwx_speech = { path = "../speech" }
+
+[target.'cfg(windows)'.dependencies]
+wxdragon = "0.9.21"
 
 [dev-dependencies]
