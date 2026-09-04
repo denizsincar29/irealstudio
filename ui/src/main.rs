@@ -16,7 +16,7 @@
 // Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
 // Данные — Doc из lib.rs (демо-цифровка поверх ChordProgression core).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -345,6 +345,59 @@ fn save_as_progression(
     }
 }
 
+/// «Сохранить текущий документ» для грязных-диалогов (slice 8): в текущий файл,
+/// если он есть; иначе — «Сохранить как». Возвращает true, если документ
+/// сохранён (чистый); false, если сохранение отменено или не удалось — в этом
+/// случае продолжать (закрытие / новая цифровка) нельзя, как python new_project
+/// проверяет `_is_dirty` после `self.save()`.
+fn save_current_or_as(
+    doc: &Rc<RefCell<Doc>>,
+    spk: &Rc<RefCell<Box<dyn Speak>>>,
+    current_file: &Rc<RefCell<Option<PathBuf>>>,
+    frame: &Frame,
+) -> bool {
+    // Клонируем путь из Ref явно (у RefCell::Ref свой Clone — голый .clone()
+    // склонировал бы обёртку, а не Option).
+    let cur = {
+        let cf = current_file.borrow();
+        (*cf).clone()
+    };
+    match cur {
+        Some(path) => {
+            // Текущий файл есть — пишем прямо в него (как python save()).
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let res = {
+                let d = doc.borrow();
+                write_to_path(&path, &d)
+            };
+            match res {
+                Ok(()) => {
+                    doc.borrow_mut().mark_clean();
+                    spk.borrow().speak(&format!("Сохранено: {name}"));
+                    frame.set_status_text(&format!("Сохранено: {name}"), 0);
+                    refresh_title(doc, frame);
+                    true
+                }
+                Err(e) => {
+                    let msg = format!("Не удалось сохранить: {e}");
+                    spk.borrow().speak(&msg);
+                    frame.set_status_text(&msg, 0);
+                    false
+                }
+            }
+        }
+        None => {
+            // Файла нет — как python save() → save_as(); отмена диалога оставляет
+            // документ грязным → false.
+            save_as_progression(doc, spk, current_file, frame);
+            !doc.borrow().dirty
+        }
+    }
+}
+
 // --- Экспорт в iReal Pro (Ctrl+E) ---
 //
 // Калька python `app_io.export_ireal`: сохраняет HTML с авто-редиректом на
@@ -531,6 +584,102 @@ fn modal_spin(
     let value = if result == ID_OK { Some(spin.value()) } else { None };
     dialog.destroy();
     value
+}
+
+// --- Диалог «Несохранённые изменения» (slice 8) ---
+//
+// Калька python `wx.MessageDialog(YES_NO|CANCEL|YES_DEFAULT|ICON_WARNING)` из
+// `_on_close_window` (main.py) и `new_project` (app_io.py): подтверждение перед
+// закрытием окна / созданием новой цифровки, когда есть несохранённые правки.
+
+/// Выбор пользователя в диалоге несохранённых изменений (wx.YES / NO / CANCEL).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UnsavedChoice {
+    /// Сохранить правки (в текущий файл или «Сохранить как»).
+    Save,
+    /// Не сохранять — продолжить действие (закрыть/создать новую).
+    Discard,
+    /// Отмена — вернуться к текущему документу.
+    Cancel,
+}
+
+/// Показать модальный диалог несохранённых изменений. *message* — уже готовый
+/// текст («…содержит несохранённые изменения.\n\nСохранить …?»). Вопрос лежит в
+/// read-only многострочном поле с начальным фокусом — NVDA гарантированно
+/// озвучит его при открытии (обычный StaticText рядом с кнопками фокус не
+/// получает и может остаться неозвученным). Кнопки Сохранить / Не сохранять /
+/// Отмена; Enter = Сохранить (дефолт, как YES_DEFAULT в python), Esc = Отмена.
+fn ask_unsaved(parent: &Frame, message: &str) -> UnsavedChoice {
+    let dialog = Dialog::builder(parent, "Несохранённые изменения")
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+    let text = TextCtrl::builder(&panel)
+        .with_value(message)
+        .with_style(TextCtrlStyle::MultiLine | TextCtrlStyle::ReadOnly)
+        .build();
+
+    let save_button = Button::builder(&panel)
+        .with_id(ID_YES)
+        .with_label("Сохранить")
+        .build();
+    let discard_button = Button::builder(&panel)
+        .with_id(ID_NO)
+        .with_label("Не сохранять")
+        .build();
+    let cancel_button = Button::builder(&panel)
+        .with_id(ID_CANCEL)
+        .with_label("Отмена")
+        .build();
+    save_button.set_default();
+
+    let d_save = dialog;
+    save_button.on_click(move |_| d_save.end_modal(ID_YES));
+    let d_discard = dialog;
+    discard_button.on_click(move |_| d_discard.end_modal(ID_NO));
+    let d_cancel = dialog;
+    cancel_button.on_click(move |_| d_cancel.end_modal(ID_CANCEL));
+
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    // Многострочное поле чуть приподнимем, чтобы текст читался целиком.
+    col.add(&text, 0, SizerFlag::Expand, 4);
+    col.add_spacer(4);
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&save_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&discard_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
+
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    // Начальный фокус в текст вопроса — иначе NVDA на открытии диалога молчит
+    // (тот же урок, что со слайса 2: без фокуса в диалоге нет озвучки).
+    text.set_focus();
+
+    let result = dialog.show_modal();
+    let choice = if result == ID_YES {
+        UnsavedChoice::Save
+    } else if result == ID_NO {
+        UnsavedChoice::Discard
+    } else {
+        UnsavedChoice::Cancel
+    };
+    dialog.destroy();
+    choice
+}
+
+/// Погасить close-событие (окно не закрывается) — как python `event.Veto()`.
+/// CLOSE_WINDOW приходит как `WindowEventData::General(Event)` (в wxdragon у
+/// этого варианта нет отдельной ветки), а veto есть на самом `Event`.
+fn veto_close(event: &WindowEventData) {
+    if let WindowEventData::General(e) = event {
+        if e.can_veto() {
+            e.veto();
+        }
+    }
 }
 
 // --- Форма «Новая цифровка» (Ctrl+N) ---
@@ -1133,24 +1282,54 @@ fn main() {
         let current_menu = current_file.clone();
         frame.on_menu_selected(move |event| match event.get_id() {
             ID_NEW => {
-                // Модальная форма (wxDialog). None — пользователь нажал Отмена.
-                if let Some(spec) = show_new_chart_dialog(&frame_menu) {
-                    // Новая цифровка не связана с файлом — как python new_project:
-                    // self._current_file = None (дальше Ctrl+S предложит «Сохранить как»).
-                    *current_menu.borrow_mut() = None;
-                    let mut d = doc_menu.borrow_mut();
-                    *d = Doc::new_chart(&spec);
-                    let dref = &*d;
-                    sync_grid(dref, &state_menu, &panel_menu);
-                    // Как python new_project: озвучить «Новая цифровка: <название>».
-                    let spk = spk_menu.borrow();
-                    spk.speak(&format!("Новая цифровка: {}", spec.title));
-                    frame_menu.set_status_text(
-                        &format!("Такт {} из {}", dref.cursor, dref.last_measure()),
-                        0,
-                    );
+                // Грязный документ? — спросить, как python new_project (slice 8):
+                // Сохранить (в текущий файл или «Сохранить как»; отмена/ошибка
+                // сохранения отменяет создание новой), Не сохранять — продолжить,
+                // Отмена — ничего не делать. Заметь: «Не сохранять» ещё НЕ стирает
+                // правки — документ заменяется только когда новая цифровка создана
+                // (диалог подтверждён), как в python.
+                let proceed = {
+                    let dirty = doc_menu.borrow().dirty;
+                    if dirty {
+                        let title = doc_menu.borrow().cp.title.clone();
+                        let message = format!(
+                            "«{title}» содержит несохранённые изменения.\n\n\
+                             Сохранить перед созданием новой цифровки?"
+                        );
+                        match ask_unsaved(&frame_menu, &message) {
+                            UnsavedChoice::Save => save_current_or_as(
+                                &doc_menu,
+                                &spk_menu,
+                                &current_menu,
+                                &frame_menu,
+                            ),
+                            UnsavedChoice::Discard => true,
+                            UnsavedChoice::Cancel => false,
+                        }
+                    } else {
+                        true
+                    }
+                };
+                if proceed {
+                    // Модальная форма (wxDialog). None — пользователь нажал Отмена.
+                    if let Some(spec) = show_new_chart_dialog(&frame_menu) {
+                        // Новая цифровка не связана с файлом — как python new_project:
+                        // self._current_file = None (дальше Ctrl+S предложит «Сохранить как»).
+                        *current_menu.borrow_mut() = None;
+                        let mut d = doc_menu.borrow_mut();
+                        *d = Doc::new_chart(&spec);
+                        let dref = &*d;
+                        sync_grid(dref, &state_menu, &panel_menu);
+                        // Как python new_project: озвучить «Новая цифровка: <название>».
+                        let spk = spk_menu.borrow();
+                        spk.speak(&format!("Новая цифровка: {}", spec.title));
+                        frame_menu.set_status_text(
+                            &format!("Такт {} из {}", dref.cursor, dref.last_measure()),
+                            0,
+                        );
+                    }
+                    refresh_title(&doc_menu, &frame_menu);
                 }
-                refresh_title(&doc_menu, &frame_menu);
             }
             ID_OPEN => {
                 if let Some(path) = pick_open_path(&frame_menu) {
@@ -1177,47 +1356,9 @@ fn main() {
                 }
             }
             ID_SAVE => {
-                // Клонируем путь из Ref явно (у RefCell::Ref свой Clone —
-                // голый .clone() склонировал бы обёртку, а не Option).
-                let cur = {
-                    let cf = current_menu.borrow();
-                    (*cf).clone()
-                };
-                if let Some(path) = cur {
-                    // Текущий файл есть — пишем прямо в него (как python save()).
-                    let name = path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let res = {
-                        let d = doc_menu.borrow();
-                        write_to_path(&path, &d)
-                    };
-                    match res {
-                        Ok(()) => {
-                            {
-                                let mut d = doc_menu.borrow_mut();
-                                d.mark_clean();
-                            }
-                            spk_menu.borrow().speak(&format!("Сохранено: {name}"));
-                            frame_menu.set_status_text(&format!("Сохранено: {name}"), 0);
-                            refresh_title(&doc_menu, &frame_menu);
-                        }
-                        Err(e) => {
-                            spk_menu
-                                .borrow()
-                                .speak(&format!("Не удалось сохранить: {e}"));
-                        }
-                    }
-                } else {
-                    // Файла ещё нет — как python save() → save_as().
-                    save_as_progression(
-                        &doc_menu,
-                        &spk_menu,
-                        &current_menu,
-                        &frame_menu,
-                    );
-                }
+                // Сохранить в текущий файл, а если его нет — «Сохранить как».
+                // Возврат (успех/неудача) сейчас не важен — результат озвучен.
+                let _ = save_current_or_as(&doc_menu, &spk_menu, &current_menu, &frame_menu);
             }
             ID_SAVE_AS => {
                 save_as_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
@@ -1423,7 +1564,11 @@ fn main() {
                     0,
                 )
             }
-            ID_EXIT => frame_menu.close(true),
+            // «Выход»/Ctrl+Q идёт через то же закрытие окна, что X / Alt+F4
+            // (python `_on_quit` → `self._frame.Close()` без force): EVT_CLOSE
+            // попадает в on_close ниже, где стоит вопрос о несохранённых правках
+            // и можно отменить (veto). force=true этого бы не позволил.
+            ID_EXIT => frame_menu.close(false),
             _ => {}
         });
 
@@ -1448,6 +1593,54 @@ fn main() {
             let p_k = grid_panel.clone();
             grid_panel.on_key_down(move |event| {
                 handle_key(event, &doc_k, &spk_k, &st_k, &f_k, &p_k);
+            });
+        }
+
+        // --- Закрытие окна: подтверждение несохранённых изменений (slice 8) ---
+        // Калька python `_on_close_window` (EVT_CLOSE): сюда приходит и крестик /
+        // Alt+F4, и «Выход»/Ctrl+Q (меню выше шлёт frame.close(false)). Если есть
+        // несохранённые правки — модальный вопрос Сохранить/Не сохранять/Отмена;
+        // «Отмена» или неудача сохранения — veto (окно остаётся). Флаг `closing`
+        // глушит повторный вопрос, когда после одобрения приходит ещё одно
+        // close-событие (например от force-закрытия).
+        let closing = Rc::new(Cell::new(false));
+        {
+            let doc_c = doc.clone();
+            let spk_c = speaker.clone();
+            let cf_c = current_file.clone();
+            let f_c = frame.clone();
+            let closing_c = closing.clone();
+            frame.on_close(move |event| {
+                if closing_c.get() {
+                    event.skip(true);
+                    return;
+                }
+                let (dirty, title) = {
+                    let d = doc_c.borrow();
+                    (d.dirty, d.cp.title.clone())
+                };
+                if dirty {
+                    let message = format!(
+                        "«{title}» содержит несохранённые изменения.\n\nСохранить перед закрытием?"
+                    );
+                    match ask_unsaved(&f_c, &message) {
+                        UnsavedChoice::Save => {
+                            // Ошибка/отмена сохранения (save_as) — закрывать нельзя.
+                            if !save_current_or_as(&doc_c, &spk_c, &cf_c, &f_c) {
+                                veto_close(&event);
+                                return;
+                            }
+                        }
+                        // «Не сохранять» — как python: ничего не сохраняем и закрываем.
+                        UnsavedChoice::Discard => {}
+                        UnsavedChoice::Cancel => {
+                            veto_close(&event);
+                            return;
+                        }
+                    }
+                }
+                closing_c.set(true);
+                event.skip(true);
             });
         }
 
