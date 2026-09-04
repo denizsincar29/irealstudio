@@ -121,6 +121,11 @@ pub struct MeasureView {
     pub section: Option<String>,
     pub no_chord: bool,
     pub chords: Vec<ChordCell>,
+    /// Подпись повторного прохода (слайс 15, #53): у виртуальных копий тактов
+    /// повтора — «повторение 2», у реальной вольты 2 — «окончание 2». None —
+    /// обычный такт первого прохода. Читается в озвучке, копии тактов не
+    /// множат аккорды в `chords` — там аккорды их ПРООБРАЗА.
+    pub pass: Option<String>,
 }
 
 /// Диапазон допустимого BPM новой цифровки — как в python
@@ -359,9 +364,23 @@ impl Doc {
 
     /// Последний такт документа (не ниже 1). Длина песни — это `total_measures`
     /// (как в python): у новой цифровки с шаблоном такты есть, даже если они
-    /// пока пустые (метки/аккорды появятся при вводе).
+    /// пока пустые (метки/аккорды появятся при вводе). Плюс (слайс 15, #53)
+    /// полная структура повторов/вольт: у завершённой скобки виртуальные копии
+    /// второго прохода — это тоже «такты песни», по которым ходит курсор
+    /// (python в go-to-measure продлевает диапазон до `after_repeat_measure()-1`,
+    /// main.py:1504-1507). Так после повтора [1..8] сетка имеет такты 1..16,
+    /// и такт 9 озвучивается копией такта 1 (msg 1610).
     pub fn last_measure(&self) -> i32 {
-        self.cp.last_measure().max(self.cp.total_measures).max(1)
+        let mut mx = self.cp.last_measure().max(self.cp.total_measures).max(1);
+        // Продлеваем ТОЛЬКО обычные повторы (вторая запись не записана
+        // физически, копии должны быть достижимы). У вольты окончание 2
+        // записано своими тактами — длина уже покрыта сохранённым содержимым.
+        for vb in &self.cp.volta_brackets {
+            if vb.is_complete() && vb.is_repeat_only() {
+                mx = mx.max(vb.after_repeat_measure() - 1);
+            }
+        }
+        mx
     }
 
     /// Курсор вправо по тактам (Ctrl+→): линейный шаг на следующий такт,
@@ -415,19 +434,76 @@ impl Doc {
     /// Простая стрелка вправо — по-мьюзскоровски, по событиям (slice 11):
     /// на следующий аккорд (в том числе на второй аккорд того же такта), а если
     /// аккордов впереди нет — на следующий пустой такт «в такт» (хвост/пауза).
-    /// Возвращает true, если курсор сдвинулся. Калька python `navigate('right')`
-    /// (by_measure=False) без виртуальных зон (у нас сетка физическая).
+    /// Слайс 15 (#53): учитывает виртуальные копии повторов — из конца повтора
+    /// стрелка входит в копии второго прохода (такты 9..16 после повтора [1..8])
+    /// и ходит по ним аккорд-в-аккорд, как python `navigate('right')`
+    /// (main.py:1324-1364). Возвращает true, если курсор сдвинулся.
     pub fn go_chord_right(&mut self) -> bool {
         self.clamp_beat();
         let start_m = self.cursor;
         let start_b = self.beat;
-        let pos = Position::new(self.cursor, self.beat, self.cp.time_signature);
-        if let Some(next) = self.cp.find_next_chord_to_right(&pos) {
-            self.cursor = next.position.measure;
-            self.beat = next.position.beat;
-        } else if self.cursor < self.last_measure() {
-            self.cursor += 1;
-            self.beat = 1;
+        let ts = self.cp.time_signature;
+        if self.cp.is_in_virtual_range(self.cursor) {
+            // В копии: следующий аккорд ищем в ПРООБРАЗЕ и мапим обратно тем же
+            // смещением прохода; за пределами копий — шаг «в такт» (+1), чтобы
+            // выйти из повтора к следующему реальному такту.
+            let pm = self.cp.resolve_virtual_measure(self.cursor);
+            let offset = self.cursor - pm;
+            let ppos = Position::new(pm, self.beat, ts);
+            let vc = self.cp.get_virtual_context(self.cursor);
+            let mut dest: Option<(i32, i32)> = None;
+            if let Some(nxt) = self.cp.find_next_chord_to_right(&ppos) {
+                let vm = nxt.position.measure + offset;
+                if let Some((_, ve)) = vc {
+                    if vm <= ve {
+                        dest = Some((vm, nxt.position.beat));
+                    }
+                }
+            }
+            match dest {
+                Some((m, b)) => {
+                    self.cursor = m;
+                    self.beat = b;
+                }
+                None => {
+                    self.cursor += 1;
+                    self.beat = 1;
+                }
+            }
+        } else {
+            let pos = Position::new(self.cursor, self.beat, ts);
+            let nxt = self.cp.find_next_chord_to_right(&pos);
+            // Войти в ближайший виртуальный блок между курсором и следующим
+            // сохранённым аккордом (python main.py:1366-1400).
+            let mut entry: Option<i32> = None;
+            for vb in &self.cp.volta_brackets {
+                if !vb.is_complete() {
+                    continue;
+                }
+                if vb.is_repeat_only() {
+                    if let Some((vs, _)) = vb.plain_virtual_range() {
+                        let reachable = nxt.is_none() || vs <= nxt.unwrap().position.measure;
+                        if self.cursor < vs && reachable {
+                            entry = Some(entry.map_or(vs, |e: i32| e.min(vs)));
+                        }
+                    }
+                } else if let Some((hs, _he)) = vb.hidden_range() {
+                    let reachable = nxt.is_none() || hs <= nxt.unwrap().position.measure;
+                    if self.cursor < hs && reachable {
+                        entry = Some(entry.map_or(hs, |e: i32| e.min(hs)));
+                    }
+                }
+            }
+            if let Some(vs) = entry {
+                self.cursor = vs;
+                self.beat = 1;
+            } else if let Some(next) = nxt {
+                self.cursor = next.position.measure;
+                self.beat = next.position.beat;
+            } else if self.cursor < self.last_measure() {
+                self.cursor += 1;
+                self.beat = 1;
+            }
         }
         self.cursor != start_m || self.beat != start_b
     }
@@ -436,25 +512,89 @@ impl Doc {
     /// аккорд (в том числе на первый аккорд того же такта). Из ПУСТОГО такта
     /// (ушли вправо по паузам) — шаг ровно на один такт назад, а не «магнит»
     /// к последнему аккорду за километр (msg 1607): право-влево по пустому
-    /// хвосту ходит обратимо, по такту за нажатие.
+    /// хвосту ходит обратимо, по такту за нажатие. Слайс 15 (#53): из
+    /// виртуальной копии повтора идёт по прообразу (как python main.py:1401-1425);
+    /// из реального такта за копиями входит в них справа (правая граница блока).
     pub fn go_chord_left(&mut self) -> bool {
         let start_m = self.cursor;
         let start_b = self.beat;
-        // Пустой такт — на предыдущий такт (как «обратная» правая стрелка).
-        if self.cp.find_chords_in_measure(self.cursor).is_empty() {
+        let ts = self.cp.time_signature;
+        if self.cp.is_in_virtual_range(self.cursor) {
+            // В копии: предыдущий аккорд прообраза → обратно в ту же копию;
+            // если прообраза левее нет — выход из копий к реальному аккорду.
+            let pm = self.cp.resolve_virtual_measure(self.cursor);
+            let offset = self.cursor - pm;
+            let ppos = Position::new(pm, self.beat, ts);
+            let vc = self.cp.get_virtual_context(self.cursor);
+            let mut dest: Option<(i32, i32)> = None;
+            if let Some(prv) = self.cp.find_last_chord_to_left(&ppos) {
+                let vm = prv.position.measure + offset;
+                if let Some((vs, _)) = vc {
+                    if vm >= vs {
+                        dest = Some((vm, prv.position.beat));
+                    }
+                }
+            }
+            match dest {
+                Some((m, b)) => {
+                    self.cursor = m;
+                    self.beat = b;
+                }
+                None => {
+                    let pos = Position::new(self.cursor, self.beat, ts);
+                    match self.cp.find_last_chord_to_left(&pos) {
+                        Some(e) => {
+                            self.cursor = e.position.measure;
+                            self.beat = e.position.beat;
+                        }
+                        None => {
+                            if self.cursor > 1 {
+                                self.cursor -= 1;
+                                self.beat = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if self.cp.find_chords_in_measure(self.cursor).is_empty() {
+            // Пустой не-виртуальный такт — шаг на один такт назад (#47).
             if self.cursor > 1 {
                 self.cursor -= 1;
                 self.beat = 1;
             }
-            return self.cursor != start_m || self.beat != start_b;
-        }
-        let pos = Position::new(self.cursor, self.beat, self.cp.time_signature);
-        if let Some(prev) = self.cp.find_last_chord_to_left(&pos) {
-            self.cursor = prev.position.measure;
-            self.beat = prev.position.beat;
-        } else if self.cursor > 1 {
-            self.cursor -= 1;
-            self.beat = 1;
+        } else {
+            let pos = Position::new(self.cursor, self.beat, ts);
+            let prv = self.cp.find_last_chord_to_left(&pos);
+            // Войти в самый правый виртуальный блок между прошлым аккордом и
+            // курсором (python main.py:1427-1456): левее него аккордов нет.
+            let mut exit: Option<i32> = None;
+            for vb in &self.cp.volta_brackets {
+                if !vb.is_complete() {
+                    continue;
+                }
+                let before = prv.map_or(0, |p| p.position.measure);
+                if vb.is_repeat_only() {
+                    if let Some((vs, ve)) = vb.plain_virtual_range() {
+                        if vs <= ve && before < vs && vs <= self.cursor {
+                            exit = Some(exit.map_or(ve, |e: i32| e.max(ve)));
+                        }
+                    }
+                } else if let Some((hs, he)) = vb.hidden_range() {
+                    if hs <= he && before < hs && hs <= self.cursor {
+                        exit = Some(exit.map_or(he, |e: i32| e.max(he)));
+                    }
+                }
+            }
+            if let Some(ve) = exit {
+                self.cursor = ve;
+                self.beat = 1;
+            } else if let Some(prev) = prv {
+                self.cursor = prev.position.measure;
+                self.beat = prev.position.beat;
+            } else if self.cursor > 1 {
+                self.cursor -= 1;
+                self.beat = 1;
+            }
         }
         self.cursor != start_m || self.beat != start_b
     }
@@ -496,13 +636,59 @@ impl Doc {
         self.cursor != m0 || self.beat != b0
     }
 
-    /// Содержимое такта *measure*.
+    /// Виртуальное разрешение такта (слайс 15, #53): вернуть (прообраз,
+    /// подпись прохода), если такт — виртуальная копия тактов повтора или
+    /// реальная вольта 2; иначе (сам такт, None). Калька python
+    /// `resolve_virtual_measure` + подпись из `_announce_position`
+    /// (main.py:1588-1617). Первая подошедшая скобка — как в core.
+    fn virtual_resolution(&self, measure: i32) -> (i32, Option<String>) {
+        for vb in &self.cp.volta_brackets {
+            if !vb.is_complete() {
+                continue;
+            }
+            if vb.is_repeat_only() {
+                // Виртуальные копии plain-повтора: [re+1 .. re+body*(n-1)].
+                if let Some((vs, ve)) = vb.plain_virtual_range() {
+                    if vs <= measure && measure <= ve {
+                        let body = vb.ending1_end - vb.repeat_start + 1;
+                        let pass = (measure - vb.repeat_start) / body + 1; // 1-based
+                        let src = vb.repeat_start + (measure - vb.repeat_start) % body;
+                        return (src, Some(format!("повторение {pass}")));
+                    }
+                }
+            } else {
+                // Вольта: скрытое тело повтора — копия первого прохода.
+                if let Some((hs, he)) = vb.hidden_range() {
+                    if hs <= measure && measure <= he {
+                        let src = measure - (vb.ending1_end - vb.repeat_start + 1);
+                        return (src, Some("повторение 2".to_string()));
+                    }
+                }
+                // Реальная вольта 2 — свои такты, помечаем проход «окончание 2».
+                if vb.ending2_start <= measure && measure < vb.after_repeat_measure() {
+                    return (measure, Some("окончание 2".to_string()));
+                }
+            }
+        }
+        (measure, None)
+    }
+
+    /// Содержимое такта *measure*. Виртуальные копии (такты второго прохода
+    /// повтора, скрытое тело вольты) показывают аккорды своего ПРООБРАЗА с
+    /// физическим номером такта и подписью прохода в `pass` (msg 1610).
     pub fn measure_view(&self, measure: i32) -> MeasureView {
-        let section = self.cp.get_section_mark(measure).map(|s| s.to_string());
-        let no_chord = self.cp.is_no_chord(measure);
+        let (src, pass) = self.virtual_resolution(measure);
+        let copied = src != measure;
+        let section = self
+            .cp
+            .get_section_mark(measure)
+            .or_else(|| if copied { self.cp.get_section_mark(src) } else { None })
+            .map(|s| s.to_string());
+        let no_chord =
+            self.cp.is_no_chord(measure) || (copied && self.cp.is_no_chord(src));
         let chords = self
             .cp
-            .find_chords_in_measure(measure)
+            .find_chords_in_measure(src)
             .into_iter()
             .map(|it| {
                 let name = it.chord.name();
@@ -515,7 +701,7 @@ impl Doc {
                 ChordCell { beat: it.position.beat, symbol, spoken }
             })
             .collect();
-        MeasureView { number: measure, section, no_chord, chords }
+        MeasureView { number: measure, section, no_chord, chords, pass }
     }
 
     /// Строка для ячейки сетки (рисуется в on_paint): напр. `1  B-7 E-7`.
@@ -554,7 +740,10 @@ impl Doc {
         }
     }
 
-    /// Озвучка такта целиком — то, что произносится при навигации.
+    /// Озвучка такта целиком — то, что произносится при навигации. У виртуальной
+    /// копии такта повтора к аккордам прообраза добавляется подпись прохода:
+    /// «такт 9. си минор 7, ми минор 7, повторение 2» (msg 1610, python
+    /// `_announce_position` добавляет 'repeat {n}').
     pub fn announce_measure(&self, measure: i32) -> String {
         let v = self.measure_view(measure);
         let mut parts: Vec<String> = Vec::new();
@@ -572,6 +761,9 @@ impl Doc {
             }
         } else {
             parts.push("пустой такт".to_string());
+        }
+        if let Some(p) = &v.pass {
+            parts.push(p.clone());
         }
         format!("такт {}. {}", measure, parts.join(", "))
     }
@@ -591,10 +783,16 @@ impl Doc {
         if v.no_chord {
             return self.announce_measure(self.cursor);
         }
-        if let Some(c) = v.chords.iter().find(|c| c.beat == self.beat) {
+        let base = if let Some(c) = v.chords.iter().find(|c| c.beat == self.beat) {
             format!("{} такт {} доля {}", c.spoken.trim(), self.cursor, self.beat)
         } else {
             format!("такт {} доля {} пусто", self.cursor, self.beat)
+        };
+        // В виртуальной копии повтора добавляем подпись прохода — слепой
+        // музыкант сразу слышит, что это второй проход (msg 1610).
+        match &v.pass {
+            Some(p) => format!("{base}, {p}"),
+            None => base,
         }
     }
 
@@ -3049,5 +3247,128 @@ mod volta_tests {
         assert_eq!(vb.ending2_start, 11);
         // Аккорд на такте 11 (начало вольты 2) не удаляется — он вне скрытого.
         assert_eq!(count_items(&d.cp, 11, 11), 1);
+    }
+}
+
+#[cfg(test)]
+mod virtual_tests {
+    //! Слайс 15 (#53): такты после повторов — виртуальные копии прообраза.
+    //! Озвучка/сетка показывают копию (msg 1610), навигация стрелкой ходит по
+    //! копиям, как python `navigate` (main.py:1324-1425).
+    use super::*;
+
+    /// Простая цифровка: 8 тактов по одному аккорду + повтор [1..8]. После
+    /// повтора длина сетки — 16 тактов (8 реальных + 8 виртуальных копий).
+    fn repeat_doc() -> Doc {
+        let ts = TimeSignature::new(4, 4);
+        let mut cp = ChordProgression::new("virtual", ts, "C", "Swing");
+        let names = ["C", "G7", "A-7", "D7", "B-7", "E-7", "G-7", "C7"];
+        for (i, n) in names.iter().enumerate() {
+            cp.add_chord_by_name(n, (i + 1) as i32, 1, "");
+        }
+        cp.add_repeat_bracket(1, 8);
+        Doc {
+            cp,
+            cursor: 1,
+            beat: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
+            dirty: false,
+            pending_repeat_start: None,
+            pending_repeat_end: None,
+            selection: None,
+            sel_clipboard: None,
+        }
+    }
+
+    #[test]
+    fn repeat_extends_document_through_virtual_copies() {
+        let d = repeat_doc();
+        // Сетка/статус живут до конца виртуальных копий: после повтора [1..8]
+        // это такты 1..16 (python go-to-measure продлевает до after-1).
+        assert_eq!(d.last_measure(), 16);
+        assert_eq!(d.grid_cells().len(), 16);
+    }
+
+    #[test]
+    fn virtual_measures_announce_primary_copies_with_pass() {
+        let d = repeat_doc();
+        // Такт 9 — копия такта 1 (аккорд C) с пометкой второго прохода.
+        let v9 = d.measure_view(9);
+        assert_eq!(v9.number, 9);
+        let syms: Vec<String> = v9.chords.iter().map(|c| c.symbol.clone()).collect();
+        assert_eq!(syms, vec!["C"], "копия содержит аккорды прообраза такта 1");
+        assert_eq!(v9.pass.as_deref(), Some("повторение 2"));
+        assert_eq!(d.announce_measure(9), "такт 9. до, повторение 2");
+        // Такт 10 — копия такта 2 (G7).
+        assert_eq!(d.announce_measure(10), "такт 10. соль 7, повторение 2");
+        // Такт 16 — копия такта 8 (C7), последняя копия.
+        assert_eq!(d.announce_measure(16), "такт 16. до 7, повторение 2");
+        // Первичный такт подписи не несёт.
+        assert_eq!(d.announce_measure(1), "такт 1. до");
+        assert_eq!(d.measure_view(1).pass, None);
+    }
+
+    #[test]
+    fn grid_text_of_copy_matches_primary() {
+        let d = repeat_doc();
+        assert_eq!(d.grid_cell_text(9), "C");
+        assert_eq!(d.grid_cell_text(9), d.grid_cell_text(1));
+        assert_eq!(d.grid_cell_text(10), d.grid_cell_text(2));
+    }
+
+    #[test]
+    fn beat_cell_in_copy_announces_pass() {
+        let mut d = repeat_doc();
+        d.cursor = 9;
+        d.beat = 1;
+        assert_eq!(
+            d.announce_beat_cell(),
+            "до такт 9 доля 1, повторение 2"
+        );
+    }
+
+    #[test]
+    fn right_arrow_walks_into_and_out_of_copies() {
+        let mut d = repeat_doc();
+        d.cursor = 8;
+        d.beat = 1;
+        // Из конца повтора стрелка входит в копии (такт 9 = 2-й проход такта 1).
+        assert!(d.go_chord_right());
+        assert_eq!((d.cursor, d.beat), (9, 1), "вход в виртуальную копию");
+        // По копиям — аккорд-в-аккорд, как по реальным тактам.
+        assert!(d.go_chord_right());
+        assert_eq!((d.cursor, d.beat), (10, 1), "копия такта 2");
+        // До последней копии (16) — через каждую.
+        for m in 11..=16 {
+            assert!(d.go_chord_right(), "копия такта {m}");
+            assert_eq!(d.cursor, m);
+        }
+        // За последней копией шаг выводит на следующий реальный такт (17).
+        assert!(d.go_chord_right());
+        assert_eq!((d.cursor, d.beat), (17, 1), "выход из повтора в реальный такт");
+        // Дальше идти некуда — длина 16.
+        assert!(!d.go_chord_right(), "за тактом 17 шага нет");
+    }
+
+    #[test]
+    fn left_arrow_walks_back_through_copies() {
+        let mut d = repeat_doc();
+        d.cursor = 17;
+        d.beat = 1;
+        // С реального такта 17 влево — вход в правую границу копий (16).
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (16, 1), "вход в копии справа");
+        // По копиям влево до такта 9.
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (15, 1));
+        d.cursor = 10;
+        d.beat = 1;
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (9, 1));
+        // Из первой копии (9) влево — выход к последнему реальному такту 8.
+        assert!(d.go_chord_left());
+        assert_eq!((d.cursor, d.beat), (8, 1), "выход из копий влево к прообразу");
     }
 }
