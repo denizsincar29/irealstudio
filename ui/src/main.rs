@@ -70,6 +70,8 @@ const ID_SM_Q: i32 = 3018;
 const ID_GOTO_MEASURE: i32 = 3019;
 // Меню «Настройки»: свойства цифровки.
 const ID_PROJ_SETTINGS: i32 = 4001;
+// Меню «Справка»: клавиатурные сокращения (F1).
+const ID_HELP: i32 = 4002;
 
 /// Состояние панели тактов: короткие строки-ячейки + курсор.
 struct GridState {
@@ -682,6 +684,97 @@ fn veto_close(event: &WindowEventData) {
     }
 }
 
+// --- Диалог «Клавиатурные сокращения» (F1, slice 9) ---
+//
+// Калька python `_show_keyboard_shortcuts` (app_io.py:521): read-only
+// многострочный текст со всеми хоткеями и одно «ОК». Текст в поле с начальным
+// фокусом — NVDA читает его с открытия (тот же урок, что в ask_unsaved).
+// Слайс аддитивный: новое меню и диалог, поведение пунктов 1–84 не меняется.
+
+/// Справка построчно (join в диалоге). Сверена с реальными биндингами:
+/// акселераторы из меток пунктов меню (\t) + клавиши в handle_key.
+const HELP_LINES: &[&str] = &[
+    "Файл",
+    "Ctrl+N — новая цифровка",
+    "Ctrl+O — открыть из файла .ips",
+    "Ctrl+S — сохранить (нет файла — откроется «Сохранить как»)",
+    "Файл → Сохранить как — сохранить в новый файл",
+    "Ctrl+E — экспорт в iReal Pro",
+    "Ctrl+Q — выход (при правках спросит подтверждение)",
+    "",
+    "Правка",
+    "Ctrl+Z — отменить, Ctrl+Y — повторить",
+    "Ctrl+X — вырезать аккорд, Ctrl+C — копировать, Ctrl+V — вставить",
+    "Ctrl+T — транспонировать всю цифровку",
+    "",
+    "Вставка",
+    "Ctrl+Enter — добавить аккорд в текущий такт",
+    "F2 — изменить аккорд под курсором",
+    "N — без аккорда (N.C.) на текущем такте",
+    "V — вольта / окончание",
+    "[ — начало повтора, ] — конец повтора",
+    "Метка части (подменю «Вставка»):",
+    "Ctrl+Shift+A/B/C/D — Части A, B, C, D",
+    "Ctrl+Shift+V — Куплет, Ctrl+Shift+I — Вступление",
+    "Ctrl+Shift+S — Сеньо, Ctrl+Shift+Q — Кода",
+    "Басовая нота — «Вставка → Басовая нота…»",
+    "",
+    "Песня",
+    "← / → — предыдущий / следующий такт",
+    "Alt+← / Alt+→ — в начало / конец секции",
+    "Home — первый такт, End — последний такт",
+    "Del / Backspace — удалить аккорд",
+    "Ctrl+Del / Ctrl+Backspace — удалить только метку / повтор / N.C.",
+    "F5 — озвучить текущий такт, F6 — озвучить всю цифровку",
+    "Ctrl+F — перейти к такту по номеру",
+    "",
+    "Настройки",
+    "Ctrl+P — настройки цифровки (название, темп, тональность и др.)",
+    "",
+    "Справка",
+    "F1 — этот список клавиш",
+    "",
+    "В диалогах: Enter — подтвердить (кнопка по умолчанию), Esc — отмена.",
+];
+
+/// Показать модальный диалог со списком горячих клавиш.
+fn show_help_dialog(parent: &Frame) {
+    let dialog = Dialog::builder(parent, "Клавиатурные сокращения — irealstudio")
+        .with_style(DialogStyle::DefaultDialogStyle | DialogStyle::ResizeBorder)
+        .build();
+    let panel = Panel::builder(&dialog).build();
+    let text = HELP_LINES.join("\n");
+    let text_ctrl = TextCtrl::builder(&panel)
+        .with_value(&text)
+        .with_style(TextCtrlStyle::MultiLine | TextCtrlStyle::ReadOnly)
+        .with_size(Size::new(600, 440))
+        .build();
+
+    let ok_button = Button::builder(&panel)
+        .with_id(ID_OK)
+        .with_label("ОК")
+        .build();
+    ok_button.set_default();
+    let d_ok = dialog;
+    ok_button.on_click(move |_| d_ok.end_modal(ID_OK));
+
+    let col = BoxSizer::builder(Orientation::Vertical).build();
+    col.add(&text_ctrl, 1, SizerFlag::Expand, 4);
+    col.add_spacer(4);
+    let buttons = BoxSizer::builder(Orientation::Horizontal).build();
+    buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
+    panel.set_sizer(col, true);
+    let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
+    dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
+    dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    // Начальный фокус в текст — иначе NVDA на открытии диалога молчит.
+    text_ctrl.set_focus();
+    let _ = dialog.show_modal();
+    dialog.destroy();
+}
+
 // --- Форма «Новая цифровка» (Ctrl+N) ---
 //
 // Калька python `_NewProjectDlg` (dialogs.py:240) в реальный wxDialog: NVDA
@@ -1238,6 +1331,12 @@ fn main() {
             .build();
 
         let help_menu = Menu::builder()
+            .append_item(
+                ID_HELP,
+                "Клавиатурные &сокращения\tF1",
+                "Все горячие клавиши программы",
+            )
+            .append_separator()
             .append_item(ID_ABOUT, "О &программе", "Информация о сборке")
             .build();
 
@@ -1557,6 +1656,10 @@ fn main() {
                     sync_grid(dref, &state_menu, &panel_menu);
                     announce(dref, &**spk_menu.borrow(), &frame_menu);
                 }
+            }
+            ID_HELP => {
+                // «Клавиатурные сокращения» (F1 и Справка → пункт меню).
+                show_help_dialog(&frame_menu);
             }
             ID_ABOUT => {
                 frame_menu.set_status_text(
