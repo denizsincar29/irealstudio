@@ -5,7 +5,8 @@
 // (только видна, в дерево доступности не попадает); навигация озвучивается
 // через irealwx_speech (NVDA ControllerClient) и дублируется в статус-строку.
 //
-// Сборка на Windows (см. README): cargo build -p irealwx_ui.
+// Сборка на любом хосте с тулчейном wxDragon (см. README): cargo build -p irealwx_ui.
+// Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
 // Данные — Doc из lib.rs (демо-цифровка поверх ChordProgression core).
 
 use std::cell::RefCell;
@@ -209,8 +210,10 @@ fn handle_key(
 }
 
 fn main() {
-    // wx без манифеста показывает на старте предупреждение — глушим (манифест
-    // добавим в релизной сборке через build.rs).
+    // wx без манифеста на MSW показывает на старте предупреждение — глушим
+    // (манифест добавим в релизной сборке через build.rs). На gtk/cocoa опция
+    // не нужна и безопасно не устанавливается.
+    #[cfg(target_os = "windows")]
     SystemOptions::set_option_by_int("msw.no-manifest-check", 1);
 
     let _ = wxdragon::main(|_app| {

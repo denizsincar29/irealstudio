@@ -1,13 +1,17 @@
 //! irealwx_speech — вывод речи в скринридер, «аутпут через prism».
 //!
-//! Сегодня в irealstudio это `accessible_output3.Auto()` (NVDA ControllerClient)
-//! за хелпером `self.speak()` в main.py. Сюда переносим ровно этот механизм:
-//! тонкий трейт `Speak` + реализация через NVDA ControllerClient (FFI/с-крейт).
+//! В irealstudio это `accessible_output3.Auto()` (main.py) — кроссплатформенный
+//! автодиспетчер: на Windows говорит через активный скринридер (у Дениза NVDA →
+//! nvdaControllerClient.dll), на Linux — Speech Dispatcher, на macOS — VoiceOver.
+//! Здесь тот же узор: тонкий трейт `Speak` + `default_speak()`, который по ОС
+//! возвращает живой бэкенд, а если его нет/не запущен — молчание (`SilentSpeak`).
+//! Реализованы: Windows — NVDA ControllerClient (FFI, динамическая загрузка DLL,
+//! как у accessible_output3); Linux/macOS — системный CLI (`spd-say` из
+//! speech-dispatcher / `say`) без C-линковки. Ни один вызов не паникует.
 //!
 //! Границы крейта:
 //! - Принимает строки «для озвучки» (уже готовый текст, числа прописью).
 //! - Ничего не знает о GUI: панель тактов и меню зовут его снаружи.
-//! - На не-Windows хостах — no-op реализация, чтобы всё собиралось.
 
 /// Контракт речевого вывода.
 pub trait Speak {
@@ -21,6 +25,36 @@ pub struct SilentSpeak;
 
 impl Speak for SilentSpeak {
     fn speak(&self, _text: &str) {}
+}
+
+/// Бэкенд через системный CLI — путь без C-линковки для Linux/macOS:
+/// Linux — `spd-say` из speech-dispatcher (речь в Orca/др. идёт как раз через
+/// speech-dispatcher), macOS — `say`. Если команды нет или она не запустилась —
+/// молчание (вызов никогда не падает и не блокирует: процесс не ждём).
+pub struct CliSpeak {
+    bin: &'static str,
+}
+
+impl CliSpeak {
+    pub fn new(bin: &'static str) -> Self {
+        CliSpeak { bin }
+    }
+}
+
+impl Speak for CliSpeak {
+    fn speak(&self, text: &str) {
+        use std::process::{Command, Stdio};
+        let Ok(_child) = Command::new(self.bin)
+            .arg(text)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            return;
+        };
+        // Child дропается: процесс продолжает говорить сам, мы ничего не ждём.
+    }
 }
 
 /// Активный вывод. Под Windows реальная реализация идёт через
@@ -101,13 +135,23 @@ impl Speak for NvdaSpeak {
     }
 }
 
-/// Выбрать активный вывод: NVDA под Windows, тишина на остальных.
+/// Выбрать активный вывод по ОС — как `accessible_output3.Auto()` в python:
+/// Windows → NVDA ControllerClient, Linux → Speech Dispatcher (`spd-say`),
+/// macOS → `say`. На хостах, где инструмента нет, бэкенд молчит.
 pub fn default_speak() -> Box<dyn Speak> {
     #[cfg(target_os = "windows")]
     {
         Box::new(NvdaSpeak)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(CliSpeak::new("spd-say"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(CliSpeak::new("say"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         Box::new(SilentSpeak)
     }
@@ -121,5 +165,18 @@ mod tests {
     fn silent_never_panics() {
         let s = default_speak();
         s.speak("тест озвучки");
+    }
+
+    #[test]
+    fn cli_missing_bin_is_silent() {
+        // Бинарника нет ни на одной ОС — вызов обязан просто ничего не сделать.
+        let s = CliSpeak::new("irealwx-no-such-speech-binary-xyz");
+        s.speak("тест озвучки");
+    }
+
+    #[test]
+    fn cli_never_panics_on_empty_text() {
+        let s = CliSpeak::new("irealwx-no-such-speech-binary-xyz");
+        s.speak("");
     }
 }

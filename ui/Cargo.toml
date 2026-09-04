@@ -2,22 +2,33 @@
 name = "irealwx_ui"
 version = "0.1.0"
 edition = "2021"
-description = "GUI: wxDragon (Windows). Окно без a11y-контролов, альт-меню, панель тактов (on_paint), форма создания цифровки."
+description = "GUI: wxDragon. Окно без a11y-контролов, альт-меню, панель тактов (on_paint), форма создания цифровки."
 
 # Этап 2, slice 1: ui-shell — окно + альт-меню + панель тактов (on_paint)
 # + навигация стрелками с озвучкой. Чистая логика — в lib.rs (тестируется
 # в контейнере); wx-оболочка — в src/main.rs.
 #
-# wxDragon подключается ТОЛЬКО под Windows (cfg): на остальных хостах пакет
-# собирается без wx — lib-тесты зелёные где угодно. Сама программа Windows-only:
-#   cargo build -p irealwx_ui   (из "x64 Native Tools Command Prompt for VS 2022")
-# Первая сборка долгая — wxdragon-sys статически собирает wxWidgets 3.3.3.
+# wxDragon НЕ завязан на cfg(windows): он кроссплатформенный (wxWidgets —
+# Windows/Win32, macOS/Cocoa, Linux/GTK), просто для компиляции нужен
+# нативный C++-тулчейн платформы (см. README wxDragon: на Linux gtk-девы,
+# на macOS Xcode). Зависимость включена фичей `gui`, которая в default:
+#   cargo build -p irealwx_ui        # любой хост с тулчейном wx
+# Без фичи (--no-default-features) собирается только lib — логика документа;
+# это нужно контейнерным тестам, чтобы не пересобирать wxWidgets на прогон.
 
 [dependencies]
 irealwx_core = { path = "../core" }
 irealwx_speech = { path = "../speech" }
+wxdragon = { version = "0.9.21", optional = true }
 
-[target.'cfg(windows)'.dependencies]
-wxdragon = "0.9.21"
+[features]
+default = ["gui"]
+gui = ["dep:wxdragon"]
+
+[[bin]]
+name = "irealwx_ui"
+path = "src/main.rs"
+# Без фичи `gui` bin просто пропускается (нет wxdragon → нет `use wxdragon`).
+required-features = ["gui"]
 
 [dev-dependencies]

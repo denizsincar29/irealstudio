@@ -13,19 +13,25 @@ irealstudio — ~13k строк wxPython-приложения Дениза дл�
 | `core` | Чистая логика: irealb-кодек, гармония, модель | `irealb.py`, `chords.py` | любой хост |
 | `audio` | Метроном/клик (cpal) | `sound.py` | Windows |
 | `midi` | MIDI-выход (midir) | `midi_handler.py` | Windows |
-| `speech` | Речь в скринридер (NVDA ControllerClient) | `accessible_output3` в `main.py` | Windows (no-op иначе) |
+| `speech` | Речь в скринридер: автодиспетчер как python `accessible_output.Auto()` — Windows NVDA, Linux speech-dispatcher, macOS say | `accessible_output3` в `main.py` | любой хост |
 | `ui` | wxDragon GUI: окно, альт-меню, панель тактов, форма цифровки | `main.py`, `app_menu.py`, `dialogs.py`, `app_keys.py` | Windows — целевая (wxDragon кроссплатформенный: Win/macOS/Linux-GTK) |
 
 `cargo test` гоняет default-members (core/audio/midi/speech) на любом хосте — без wx.
-Крейт `ui` тянет wxDragon; сборка цели — **Windows** (`cargo build -p irealwx_ui`).
-wxDragon не «только Windows»: это кроссплатформенная обёртка wxWidgets
-(официально Windows/macOS/Linux-GTK), и окно в `ui/src/main.rs` — обычный
-wx-код без Win32-специфики: под GTK/Cocoa он соберётся, поменяется лишь слой
-речи (в `speech` под не-Windows no-op). В `Cargo.toml` зависимость wxdragon
-стоит под `cfg(windows)` не по принципу, а чтобы контейнерные тесты чистых
-крейтов не пересобирали wxWidgets (CMake, 10–30 мин) на каждый прогон.
-Собранный exe сам находит `nvdaControllerClient.dll` (рядом с exe / в каталогах
-NVDA / в PATH) — речь работает без доустановки.
+wxDragon — кроссплатформенная обёртка wxWidgets (официально Windows/macOS/
+Linux-GTK), и окно в `ui/src/main.rs` — обычный wx-код без Win32-специфики.
+Он подключён **не** под `cfg(windows)`, а опциональной фичей `gui` (в default):
+`cargo build -p irealwx_ui` соберёт приложение на любом хосте, где есть тулчейн
+wxDragon (Windows — MSVC, Linux — gtk-девы, macOS — Xcode). Без фичи
+(`--no-default-features`) собирается только lib — логика документа; так
+контейнерные тесты не пересобирают wxWidgets (CMake, 10–30 мин) на прогон.
+Слой речи — не «Windows-only»: `irealwx_speech` повторяет узор python
+`accessible_output3.Auto()` (в irealstudio это `main.py: Auto()`), который сам
+по себе кроссплатформенный: Windows — NVDA, Linux — speech-dispatcher, macOS —
+VoiceOver. В Rust `default_speak()` так же выбирает бэкенд по ОС: Windows — NVDA
+ControllerClient (`nvdaControllerClient.dll`, exe сам находит DLL рядом с собой /
+в каталогах NVDA / в PATH), Linux — `spd-say` из speech-dispatcher (речь Orca
+идёт через него же), macOS — `say`; где инструмента нет — молчание. Все бэкенды
+за одним трейтом `Speak`, добавляются/подменяются независимо.
 
 ## Slice 1 (ui-shell) — что собрать и проверить на Windows
 
