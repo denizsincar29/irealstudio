@@ -8,6 +8,7 @@ pub mod notes;
 pub mod progression;
 pub mod transpose;
 pub mod voicing;
+pub mod export;
 
 pub use identify::identify_chord_name;
 pub use ireal::chord_name_to_ireal;

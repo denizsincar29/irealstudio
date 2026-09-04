@@ -92,6 +92,11 @@ def snapshot(cp):
         'structural': cp.structural_marker_measures(),
         'last_measure': cp.last_measure(),
         'key': cp.key,
+        # Экспорт-URL: python-эталон для порта to_ireal_url/to_irealb_url.
+        'url': cp.to_ireal_url(True),
+        'url_raw': cp.to_ireal_url(False),
+        'irealb': cp.to_irealb_url(True),
+        'irealb_raw': cp.to_irealb_url(False),
     }
 
 
@@ -186,12 +191,13 @@ def emit(scenarios):
     L.append('pub struct ItemFlat { pub chord: &\'static str, pub m: i32, pub b: i32, pub bass: &\'static str }')
     L.append('pub struct SecFlat { pub m: i32, pub mark: &\'static str }')
     L.append('pub struct RowFlat { pub m: i32, pub vc0: i32, pub vc1: i32, pub down: i32, pub up: i32, pub inv: i32, pub hid: i32, pub pv: i32, pub res: i32, pub rep: i32, pub vb: i32, pub skip: i32 }')
-    L.append('pub struct ProgGolden { pub name: &\'static str, pub ops: &\'static [OpFlat], pub brackets: &\'static [BracketFlat], pub items: &\'static [ItemFlat], pub sections: &\'static [SecFlat], pub nochord: &\'static [i32], pub structural: &\'static [i32], pub last_measure: i32, pub key: &\'static str, pub scan_end: i32, pub rows: &\'static [RowFlat] }')
+    L.append('pub struct ProgGolden { pub name: &\'static str, pub title: &\'static str, pub ops: &\'static [OpFlat], pub brackets: &\'static [BracketFlat], pub items: &\'static [ItemFlat], pub sections: &\'static [SecFlat], pub nochord: &\'static [i32], pub structural: &\'static [i32], pub last_measure: i32, pub key: &\'static str, pub url: &\'static str, pub url_raw: &\'static str, pub irealb: &\'static str, pub irealb_raw: &\'static str, pub scan_end: i32, pub rows: &\'static [RowFlat] }')
     L.append('')
     L.append('pub const ALL: &[ProgGolden] = &[')
     for name, cp, ops, snap, scan_end, rows in scenarios:
         L.append(f'  ProgGolden {{')
         L.append(f'    name: "{name}",')
+        L.append(f'    title: "{cp.title}",')
         L.append('    ops: &[')
         for op in ops:
             L.append(f'      OpFlat {{ op: "{op[0]}", a: {op[1]}, b: {op[2]}, c: {op[3]}, s: "{op[4]}", t: "{op[5]}" }},')
@@ -212,6 +218,10 @@ def emit(scenarios):
         L.append('    structural: &[' + ', '.join(str(x) for x in snap['structural']) + '],')
         L.append(f'    last_measure: {snap["last_measure"]},')
         L.append(f'    key: "{snap["key"]}",')
+        L.append(f'    url: "{snap["url"]}",')
+        L.append(f'    url_raw: "{snap["url_raw"]}",')
+        L.append(f'    irealb: "{snap["irealb"]}",')
+        L.append(f'    irealb_raw: "{snap["irealb_raw"]}",')
         L.append(f'    scan_end: {scan_end},')
         L.append('    rows: &[')
         for row in rows:

@@ -7,11 +7,12 @@ pub struct BracketFlat { pub rs: i32, pub e1s: i32, pub e1e: i32, pub e2s: i32, 
 pub struct ItemFlat { pub chord: &'static str, pub m: i32, pub b: i32, pub bass: &'static str }
 pub struct SecFlat { pub m: i32, pub mark: &'static str }
 pub struct RowFlat { pub m: i32, pub vc0: i32, pub vc1: i32, pub down: i32, pub up: i32, pub inv: i32, pub hid: i32, pub pv: i32, pub res: i32, pub rep: i32, pub vb: i32, pub skip: i32 }
-pub struct ProgGolden { pub name: &'static str, pub ops: &'static [OpFlat], pub brackets: &'static [BracketFlat], pub items: &'static [ItemFlat], pub sections: &'static [SecFlat], pub nochord: &'static [i32], pub structural: &'static [i32], pub last_measure: i32, pub key: &'static str, pub scan_end: i32, pub rows: &'static [RowFlat] }
+pub struct ProgGolden { pub name: &'static str, pub title: &'static str, pub ops: &'static [OpFlat], pub brackets: &'static [BracketFlat], pub items: &'static [ItemFlat], pub sections: &'static [SecFlat], pub nochord: &'static [i32], pub structural: &'static [i32], pub last_measure: i32, pub key: &'static str, pub url: &'static str, pub url_raw: &'static str, pub irealb: &'static str, pub irealb_raw: &'static str, pub scan_end: i32, pub rows: &'static [RowFlat] }
 
 pub const ALL: &[ProgGolden] = &[
   ProgGolden {
     name: "plain",
+    title: "Plain",
     ops: &[
       OpFlat { op: "section", a: 1, b: 0, c: 0, s: "*A", t: "" },
       OpFlat { op: "chord", a: 2, b: 1, c: 0, s: "C", t: "" },
@@ -41,6 +42,10 @@ pub const ALL: &[ProgGolden] = &[
     structural: &[1, 2],
     last_measure: 14,
     key: "C",
+    url: "irealbook://Plain=Unknown=Rock=C=n=%2AA%5BT44x%2C%20%2C%20%2C%20%7C%7BC%2C%20%2C%20%2C%20%7CF%2C%20%2CA%2C%20%7CG%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7Dx%2C%20%2C%20%2C%20%7CC7%2C%20%2C%20%2C%20%7C%20%2C%20%2CF%2C%20%7Cx%2C%20%2C%20%2C%20%7CY%7Cn%2C%20%2C%20%2C%20Z",
+    url_raw: "irealbook://Plain=Unknown=Rock=C=n=*A[T44x, , , |{C, , , |F, ,A, |G, , , |x, , , }x, , , |C7, , , | , ,F, |x, , , |Y|n, , , Z",
+    irealb: "irealb://Plain%3DUnknown%3D%3DRock%3DC%3D%3D1r34LbKcu7%20%2Cx%7D%204x%2C%20%2CxZL%2C%20%2C%20%2CGZL%2CA%2C%2C%20FZL%2C%20%2C%20%2CC%7BZL%2C%20%2C%20%2C%20%2C4T%5BA*%2C%20%2CLZC7%2C%20%2C%20%2CLZ%20%2C%20%2CF%2CLZx%2C%20%2C%20%2CLZY%7Cn%2C%20%2C%20%2C%20Z%3D%3D120%3D0",
+    irealb_raw: "irealb://Plain=Unknown==Rock=C==1r34LbKcu7 ,x} 4x, ,xZL, , ,GZL,A,, FZL, , ,C{ZL, , , ,4T[A*, ,LZC7, , ,LZ , ,F,LZx, , ,LZY|n, , , Z==120=0",
     scan_end: 22,
     rows: &[
       RowFlat { m: 1, vc0: -1, vc1: -1, down: -1, up: -1, inv: 0, hid: 0, pv: 0, res: 1, rep: 0, vb: 0, skip: 1 },
@@ -69,6 +74,7 @@ pub const ALL: &[ProgGolden] = &[
   },
   ProgGolden {
     name: "volta_explicit",
+    title: "VoltaEx",
     ops: &[
       OpFlat { op: "section", a: 1, b: 0, c: 0, s: "*A", t: "" },
       OpFlat { op: "chord", a: 2, b: 1, c: 0, s: "C", t: "" },
@@ -98,6 +104,10 @@ pub const ALL: &[ProgGolden] = &[
     structural: &[1, 2, 4, 8],
     last_measure: 10,
     key: "C",
+    url: "irealbook://VoltaEx=Unknown=Rock=C=n=%2AA%5BT44x%2C%20%2C%20%2C%20%7C%7BC%2C%20%2C%20%2C%20%7CF%2C%20%2C%20%2C%20%7CN1G%2C%20%2C%20%2C%20%7CA-%2C%20%2C%20%2C%20%7DN2D7%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7CG7%2C%20%2C%20%2C%20Z",
+    url_raw: "irealbook://VoltaEx=Unknown=Rock=C=n=*A[T44x, , , |{C, , , |F, , , |N1G, , , |A-, , , }N2D7, , , |x, , , |G7, , , Z",
+    irealb: "irealb://VoltaEx%3DUnknown%3D%3DRock%3DC%3D%3D1r34LbKcu7%7D%20%2C%20%2C4x%2C%20%2CL%2C%20%2C%20%2CG1NZL%2C%20%2C%2C%20FZL%2C%20%2C%20%2CC%7BZL%2C%20ZA-%2C%204T%5BA*N2D7%2C%20%2C%20%2CLZx%2C%20%2C%20%2CLZG7%2C%20%2C%20%2C%20Z%3D%3D120%3D0",
+    irealb_raw: "irealb://VoltaEx=Unknown==Rock=C==1r34LbKcu7} , ,4x, ,L, , ,G1NZL, ,, FZL, , ,C{ZL, ZA-, 4T[A*N2D7, , ,LZx, , ,LZG7, , , Z==120=0",
     scan_end: 22,
     rows: &[
       RowFlat { m: 1, vc0: -1, vc1: -1, down: -1, up: -1, inv: 0, hid: 0, pv: 0, res: 1, rep: 0, vb: 0, skip: 1 },
@@ -126,6 +136,7 @@ pub const ALL: &[ProgGolden] = &[
   },
   ProgGolden {
     name: "volta_section",
+    title: "VoltaSec",
     ops: &[
       OpFlat { op: "section", a: 1, b: 0, c: 0, s: "*A", t: "" },
       OpFlat { op: "section", a: 8, b: 0, c: 0, s: "*B", t: "" },
@@ -157,6 +168,10 @@ pub const ALL: &[ProgGolden] = &[
     structural: &[1, 4, 8, 11],
     last_measure: 15,
     key: "C",
+    url: "irealbook://VoltaSec=Unknown=Rock=C=n=%2AA%7BT44C%2C%20%2C%20%2C%20%7CF%2C%20%2C%20%2C%20%7CG%2C%20%2C%20%2C%20%7CN1x%2C%20%2C%20%2C%20%7CY%7Cx%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7DN2D7%2C%20%2C%20%2C%20%7CG7%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7CY%7CC%2C%20%2C%20%2C%20Z",
+    url_raw: "irealbook://VoltaSec=Unknown=Rock=C=n=*A{T44C, , , |F, , , |G, , , |N1x, , , |Y|x, , , |x, , , |x, , , }N2D7, , , |G7, , , |x, , , |x, , , |Y|C, , , Z",
+    irealb: "irealb://VoltaSec%3DUnknown%3D%3DRock%3DC%3D%3D1r34LbKcu7ZL%2C%20%2C4C%2C%20%2CZL%2C%20%2C%20%2Cx1NZL%2C%20%20%2C%2CGZL%2C%20%2C%20%2CFZL%2C%20Y%7Cx%2C%204T%7BA*%2C%20%2C%20%2C%2CLZx%2C%2C%20%2CxZL%2C%20%2C%20%2C7GZ%2CL%20%2C%20%2C7D2N%7D%20%2C%20%2C%20%20%2CLZx%20%2C%20%2CxLZY%7CC%2C%20%2C%20%2C%20Z%3D%3D120%3D0",
+    irealb_raw: "irealb://VoltaSec=Unknown==Rock=C==1r34LbKcu7ZL, ,4C, ,ZL, , ,x1NZL,  ,,GZL, , ,FZL, Y|x, 4T{A*, , ,,LZx,, ,xZL, , ,7GZ,L , ,7D2N} , ,  ,LZx , ,xLZY|C, , , Z==120=0",
     scan_end: 22,
     rows: &[
       RowFlat { m: 1, vc0: -1, vc1: -1, down: 8, up: -1, inv: 0, hid: 0, pv: 0, res: 1, rep: 0, vb: 1, skip: 1 },
@@ -185,6 +200,7 @@ pub const ALL: &[ProgGolden] = &[
   },
   ProgGolden {
     name: "replace",
+    title: "Replace",
     ops: &[
       OpFlat { op: "repeat", a: 2, b: 5, c: 0, s: "", t: "" },
       OpFlat { op: "volta", a: 2, b: 5, c: 4, s: "", t: "" },
@@ -202,6 +218,10 @@ pub const ALL: &[ProgGolden] = &[
     structural: &[2, 4, 8],
     last_measure: 4,
     key: "C",
+    url: "irealbook://Replace=Unknown=Rock=C=n=%5BT44x%2C%20%2C%20%2C%20%7C%7Bx%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7CN1D7%2C%20%2C%20%2C%20Z",
+    url_raw: "irealbook://Replace=Unknown=Rock=C=n=[T44x, , , |{x, , , |x, , , |N1D7, , , Z",
+    irealb: "irealb://Replace%3DUnknown%3D%3DRock%3DC%3D%3D1r34LbKcu7%5BT44x%2C%20%2C%20%2CLZ%7Bx%2C%20%2C%20%2CLZx%2C%20%2C%20%2CLZN1D7%2C%20%2C%20%2C%20Z%3D%3D120%3D0",
+    irealb_raw: "irealb://Replace=Unknown==Rock=C==1r34LbKcu7[T44x, , ,LZ{x, , ,LZx, , ,LZN1D7, , , Z==120=0",
     scan_end: 22,
     rows: &[
       RowFlat { m: 1, vc0: -1, vc1: -1, down: -1, up: -1, inv: 0, hid: 0, pv: 0, res: 1, rep: 0, vb: 0, skip: 1 },
@@ -230,6 +250,7 @@ pub const ALL: &[ProgGolden] = &[
   },
   ProgGolden {
     name: "transpose",
+    title: "Transpose",
     ops: &[
       OpFlat { op: "chord", a: 1, b: 1, c: 0, s: "C7", t: "" },
       OpFlat { op: "chord", a: 3, b: 1, c: 0, s: "F", t: "" },
@@ -250,6 +271,10 @@ pub const ALL: &[ProgGolden] = &[
     structural: &[],
     last_measure: 4,
     key: "Gb",
+    url: "irealbook://Transpose=Unknown=Rock=Gb=n=%5BT44F%237%2C%20%2C%20%2C%20%7Cx%2C%20%2C%20%2C%20%7CE%2C%20%2C%20%2C%20%7C%20%2C%20%2CC%23/F%2C%20Z",
+    url_raw: "irealbook://Transpose=Unknown=Rock=Gb=n=[T44F#7, , , |x, , , |E, , , | , ,C#/F, Z",
+    irealb: "irealb://Transpose%3DUnknown%3D%3DRock%3DGb%3D%3D1r34LbKcu7%5BT44F%237%2C%20%2C%20%2CLZx%2C%20%2C%20%2CLZE%2C%20%2C%20%2CLZ%20%2C%20%2CC%23/F%2C%20Z%3D%3D120%3D0",
+    irealb_raw: "irealb://Transpose=Unknown==Rock=Gb==1r34LbKcu7[T44F#7, , ,LZx, , ,LZE, , ,LZ , ,C#/F, Z==120=0",
     scan_end: 22,
     rows: &[
       RowFlat { m: 1, vc0: -1, vc1: -1, down: -1, up: -1, inv: 0, hid: 0, pv: 0, res: 1, rep: 0, vb: 0, skip: 1 },

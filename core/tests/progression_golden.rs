@@ -14,7 +14,7 @@ use data::*;
 
 fn replay(g: &ProgGolden) -> ChordProgression {
     let ts = TimeSignature::new(4, 4);
-    let mut cp = ChordProgression::new(g.name, ts, "C", "Rock");
+    let mut cp = ChordProgression::new(g.title, ts, "C", "Rock");
     for op in g.ops {
         match op.op {
             "section" => cp.add_section_mark(op.a, op.s),
@@ -109,6 +109,12 @@ fn progression_scenarios_match_python_reference() {
 
         assert_eq!(cp.last_measure(), g.last_measure, "{name}: last_measure");
         assert_eq!(cp.key, g.key, "{name}: key");
+
+        // Экспорт-URL (to_ireal_url / to_irealb_url) против python-эталона.
+        assert_eq!(cp.to_ireal_url(true), g.url, "{name}: irealbook url (encoded)");
+        assert_eq!(cp.to_ireal_url(false), g.url_raw, "{name}: irealbook url (raw)");
+        assert_eq!(cp.to_irealb_url(true), g.irealb, "{name}: irealb url (encoded)");
+        assert_eq!(cp.to_irealb_url(false), g.irealb_raw, "{name}: irealb url (raw)");
 
         // Свип навигации.
         for want in g.rows {
