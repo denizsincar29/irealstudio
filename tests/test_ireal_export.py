@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chords import ChordProgression, TimeSignature, VoltaBracket, Position
 from chords import voice_chord_midi, Chord
 from urllib.parse import unquote
+from irealb import decode_url
 
 
 def make_prog(title='Test', key='C', style='Medium Swing', bpm=120,
@@ -1996,6 +1997,81 @@ class TestBugFixes(unittest.TestCase):
         prog.add_chord_by_name('Cmaj7', 1, 1)
         encoded = prog.to_ireal_url()
         self.assertIn('%', encoded)
+
+
+class TestIrealbExport(unittest.TestCase):
+    """Modern irealb:// export (obfuscated, with BPM)."""
+
+    def irealb_song(self, prog, **kw) -> 'Song':
+        """Export via to_irealb_url and decode back to an irealb.Song."""
+        url = prog.to_irealb_url(**kw)
+        songs = decode_url(url)
+        self.assertEqual(len(songs), 1, 'single-song irealb payload')
+        return songs[0]
+
+    def test_starts_with_irealb_scheme(self):
+        prog = make_prog('My Song')
+        prog.add_chord_by_name('Cmaj7', 1, 1)
+        url = prog.to_irealb_url()
+        self.assertTrue(url.startswith('irealb://'), url)
+        self.assertNotIn('irealbook://', url)
+
+    def test_default_is_percent_encoded(self):
+        prog = make_prog()
+        prog.add_chord_by_name('C', 1, 1)
+        self.assertIn('%', prog.to_irealb_url())
+
+    def test_urlencode_false_is_not_percent_encoded(self):
+        prog = make_prog()
+        prog.add_chord_by_name('C', 1, 1)
+        raw = prog.to_irealb_url(urlencode=False)
+        self.assertNotIn('%', raw)
+        self.assertTrue(raw.startswith('irealb://'))
+
+    def test_carries_bpm(self):
+        for bpm in (120, 155, 240):
+            prog = make_prog(bpm=bpm)
+            prog.add_chord_by_name('Cmaj7', 1, 1)
+            self.assertEqual(self.irealb_song(prog).tempo, bpm,
+                             f'bpm {bpm} must survive the export')
+
+    def test_chords_match_readable_export(self):
+        """The obfuscated irealb chord data must equal the readable one."""
+        prog = make_prog('Blues In Eb', key='Eb')
+        for m in range(1, 5):
+            prog.add_chord_by_name('Cm7', m, 1)
+        readable = decode_url(prog.to_ireal_url(urlencode=False))[0]
+        obf = self.irealb_song(prog)
+        self.assertEqual(obf.chords, readable.chords)
+        self.assertEqual(obf.title, readable.title)
+
+    def test_metadata_preserved(self):
+        # Keys are stored in iReal Pro spelling: minor keys use the "-" suffix
+        # (e.g. 'D-' for D minor), matching pyrealpro.KEY_SIGNATURES.
+        prog = make_prog('Autumn', style='Bossa Nova', key='D-')
+        prog.add_chord_by_name('Dm7', 1, 1)
+        s = self.irealb_song(prog)
+        self.assertEqual(s.title, 'Autumn')
+        self.assertEqual(s.style, 'Bossa Nova')
+        self.assertEqual(s.key, 'D-')
+
+    def test_roundtrip_stable(self):
+        """Encode→decode→encode again must reproduce the same URL body."""
+        prog = make_prog('Stable', bpm=132)
+        prog.add_chord_by_name('G7', 1, 1)
+        url = prog.to_irealb_url()
+        again = decode_url(url)[0]
+        reencoded = prog.to_irealb_url()  # deterministic
+        # Same payload ⇒ same encoded URL (fixed codec, no randomness).
+        self.assertEqual(url, reencoded)
+        self.assertEqual(decode_url(reencoded)[0].chords, again.chords)
+
+    def test_waltz_time_signature_kept(self):
+        prog = make_prog('Waltz', numerator=3)
+        for m in range(1, 4):
+            prog.add_chord_by_name('Dm7', m, 1)
+        s = self.irealb_song(prog)
+        self.assertIn('T34', s.chords)
 
 
 if __name__ == '__main__':

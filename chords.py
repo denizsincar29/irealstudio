@@ -1792,6 +1792,25 @@ class ChordProgression:
 
         return song.url(urlencode=urlencode)
 
+    def to_irealb_url(self, urlencode: bool = True) -> str:
+        """Export to the modern iReal Pro "irealb" URL.
+
+        This is the current native iReal Pro sharing format.  Unlike the
+        classic readable ``irealbook://`` URL it carries the playback
+        metadata explicitly — most importantly the tempo (BPM) recorded in
+        the project — while the chord data itself is obfuscated.
+
+        The chord data is built by the same well-tested builder as
+        :meth:`to_ireal_url` (the chart grammar is identical in both
+        formats); only the URL envelope differs.
+        """
+        from irealb import irealbook_to_irealb
+
+        readable = self.to_ireal_url(urlencode=False)
+        return irealbook_to_irealb(readable, tempo=self.bpm,
+                                   actual_key='', actual_style='', repeats=0,
+                                   urlencode=urlencode)
+
     # -----------------------------------------------------------------------
     # Transpose helpers
     # -----------------------------------------------------------------------

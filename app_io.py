@@ -412,7 +412,8 @@ class IOMixin:
 
     def export_ireal(self) -> None:
         try:
-            url = self.progression.to_ireal_url()
+            # Modern native iReal Pro format (irealb://) — carries BPM.
+            url = self.progression.to_irealb_url()
         except Exception as e:
             self.speak(_("Export failed: {e}").format(e=e))
             return
@@ -468,7 +469,7 @@ class IOMixin:
             self.speak(_("QR code export requires the qrcode package (uv add qrcode)"))
             return
         try:
-            url = self.progression.to_ireal_url()
+            url = self.progression.to_irealb_url()
             # Use the default PIL/Pillow factory which produces a PNG image
             img = qrcode.make(url)
             buf = io.BytesIO()
