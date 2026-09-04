@@ -1,6 +1,6 @@
 # irealwx — переписывание irealstudio на Rust
 
-Статус: **этап 1 — порт чистого ядра**: irealb-кодек готов и сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии) и **экспорт-грамматика** (`core/src/chords/export.rs` — читаемый `irealbook://` + современный `irealb://` URL: pyrealpro Song/Measure/TimeSignature, `Y`-переносы строк, стили/тональности iReal Pro). Дальше: слой i18n/речи. GUI/wxDragon — этап 2.
+Статус: **этап 1 — порт чистого ядра**: irealb-кодек готов и сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs` — читаемый `irealbook://` + современный `irealb://` URL: pyrealpro Song/Measure/TimeSignature, `Y`-переносы строк, стили/тональности iReal Pro) и **озвучка аккордов по-русски** (`core/src/chords/spoken.rs` — `chord_name_to_spoken`, ru-каталог вендорен в `spoken_i18n.rs`). Дальше по этапу 1: JSON-персистентность (отдельный крейт хранения). GUI/wxDragon — этап 2.
 
 ## Зачем
 
@@ -38,6 +38,9 @@ irealstudio — ~13k строк wxPython-приложения Дениза дл�
   transpose): структура + свип навигации по 22 тактам + 4 экспорт-URL
   (`to_ireal_url`/`to_irealb_url`, кодированный и сырой) побайтово против
   python (`pyrealpro.py` + `irealb.py`).
+- `spoken_golden.rs` — 485 кейсов озвучки аккордов: `chord_name_to_spoken`
+  против chords.py под ru-каталогом irealstudio (ровно то, что слышит
+  пользователь). ru-переводы фраз вендорены в `core/src/chords/spoken_i18n.rs`.
 
 Генераторы: `core/tests/gen_*_golden.py` (запуск из папки тестов при эталоне
 `irealstudio/` рядом с workspace).
