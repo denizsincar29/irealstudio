@@ -1,15 +1,19 @@
-// irealwx — этап 2, slice 1: живое ядро в окне wxDragon (Windows).
+// irealwx — этап 2: живое ядро в окне wxDragon (Windows).
 //
 // А11y-модель (решение Дениза): главное окно БЕЗ a11y-контролов. Весь ввод —
 // через альт-меню (нативный HMENU) и хоткеи; панель тактов рисуется в on_paint
 // (только видна, в дерево доступности не попадает); навигация озвучивается
 // через irealwx_speech (NVDA ControllerClient) и дублируется в статус-строку.
+// Обычные wx-контролы — только в формах: «Новая цифровка» (Ctrl+N) и файловые
+// диалоги открыть/сохранить .ips (Ctrl+O / Ctrl+S).
 //
 // Сборка на любом хосте с тулчейном wxDragon (см. README): cargo build -p irealwx_ui.
 // Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
 // Данные — Doc из lib.rs (демо-цифровка поверх ChordProgression core).
 
 use std::cell::RefCell;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use wxdragon::dc::{AutoBufferedPaintDC, BrushStyle, PenStyle};
@@ -22,6 +26,9 @@ use irealwx_ui::{BPM_MAX, BPM_MIN, Doc, NewChart};
 
 // --- ID пунктов меню (кроме ID_EXIT/ID_ABOUT из прелюда) ---
 const ID_NEW: i32 = 1001;
+const ID_OPEN: i32 = 1002;
+const ID_SAVE: i32 = 1003;
+const ID_SAVE_AS: i32 = 1004;
 const ID_SPEAK: i32 = 2001;
 const ID_SPEAK_ALL: i32 = 2002;
 const ID_GOTO_START: i32 = 2003;
@@ -150,6 +157,112 @@ fn announce(doc: &Doc, speaker: &dyn Speak, frame: &Frame) {
         &format!("Такт {} из {}", doc.cursor, doc.last_measure()),
         0,
     );
+}
+
+// --- Открыть/сохранить (.ips = progression.to_json()) ---
+//
+// Калька python IOMixin (app_io.py): `.ips` — это ровно JSON цифровки
+// (`ChordProgression.to_json`), пишется UTF-8. Имя по умолчанию при сохранении —
+// `title.replace(' ','_') + ".ips"`. Озвучка как в python: «Открыто: <название>»,
+// «Сохранено: <имя файла>»; ошибки — «Не удалось открыть/сохранить: <причина>».
+
+/// Фильтр файлов — тот же wildcard, что python save_as/open_file.
+const IPS_WILDCARD: &str = "IReal Studio files (*.ips)|*.ips|All files (*.*)|*.*";
+
+/// Диалог «Открыть цифровку» (wxFileDialog) → путь; None — отмена.
+fn pick_open_path(parent: &Frame) -> Option<PathBuf> {
+    let dlg = FileDialog::builder(parent)
+        .with_message("Открыть цифровку")
+        .with_wildcard(IPS_WILDCARD)
+        .with_style(FileDialogStyle::Open | FileDialogStyle::FileMustExist)
+        .build();
+    if dlg.show_modal() == ID_OK {
+        dlg.get_path().map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// Диалог «Сохранить цифровку как» → путь; None — отмена. Имя по умолчанию —
+/// из названия цифровки (как python app_io.save_as).
+fn pick_save_path(parent: &Frame, default_name: &str) -> Option<PathBuf> {
+    let dlg = FileDialog::builder(parent)
+        .with_message("Сохранить цифровку")
+        .with_default_file(default_name)
+        .with_wildcard(IPS_WILDCARD)
+        .with_style(FileDialogStyle::Save | FileDialogStyle::OverwritePrompt)
+        .build();
+    if dlg.show_modal() == ID_OK {
+        dlg.get_path().map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// Заменить документ на загруженный и привести интерфейс в соответствие
+/// (курсор уже на такте 1 — как python _apply_loaded_progression → Position(1,1)).
+/// Путь запоминается как текущий файл.
+fn install_loaded(
+    loaded: Doc,
+    path: PathBuf,
+    doc: &Rc<RefCell<Doc>>,
+    spk: &Rc<RefCell<Box<dyn Speak>>>,
+    state: &Rc<RefCell<GridState>>,
+    panel: &Panel,
+    current_file: &Rc<RefCell<Option<PathBuf>>>,
+    frame: &Frame,
+) {
+    let title = loaded.cp.title.clone();
+    *doc.borrow_mut() = loaded;
+    *current_file.borrow_mut() = Some(path);
+    let d = doc.borrow();
+    sync_grid(&d, state, panel);
+    let msg = format!("Открыто: {title}");
+    spk.borrow().speak(&msg);
+    frame.set_status_text(
+        &format!("{msg}. Такт {} из {}", d.cursor, d.last_measure()),
+        0,
+    );
+}
+
+/// Написать цифровку в файл `.ips` — как python `_save_to_path` (UTF-8 JSON).
+fn write_to_path(path: &Path, doc: &Doc) -> Result<(), String> {
+    fs::write(path, doc.to_json()).map_err(|e| e.to_string())
+}
+
+/// «Сохранить как» — калька python `app_io.save_as`: диалог с именем по умолчанию
+/// `title.replace(' ','_') + ".ips"`, запись, запоминание пути как текущего файла,
+/// озвучка «Сохранено: <имя файла>».
+fn save_as_progression(
+    doc: &Rc<RefCell<Doc>>,
+    spk: &Rc<RefCell<Box<dyn Speak>>>,
+    current_file: &Rc<RefCell<Option<PathBuf>>>,
+    frame: &Frame,
+) {
+    let default_name = {
+        let d = doc.borrow();
+        format!("{}.ips", d.cp.title.replace(' ', "_"))
+    };
+    if let Some(path) = pick_save_path(frame, &default_name) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let res = {
+            let d = doc.borrow();
+            write_to_path(&path, &d)
+        };
+        match res {
+            Ok(()) => {
+                *current_file.borrow_mut() = Some(path);
+                spk.borrow().speak(&format!("Сохранено: {name}"));
+                frame.set_status_text(&format!("Сохранено: {name}"), 0);
+            }
+            Err(e) => {
+                spk.borrow().speak(&format!("Не удалось сохранить: {e}"));
+            }
+        }
+    }
 }
 
 // --- Форма «Новая цифровка» (Ctrl+N) ---
@@ -454,20 +567,27 @@ fn main() {
     SystemOptions::set_option_by_int("msw.no-manifest-check", 1);
 
     let _ = wxdragon::main(|_app| {
-        // --- Документ и озвучка (общие для меню и клавиатуры) ---
+        // --- Документ, озвучка и текущий файл (общие для меню и клавиатуры) ---
         let doc: Rc<RefCell<Doc>> = Rc::new(RefCell::new(Doc::new_demo()));
         let speaker: Rc<RefCell<Box<dyn Speak>>> =
             Rc::new(RefCell::new(default_speak()));
+        // Путь открытого/сохранённого .ips — None, пока цифровка не связана
+        // с файлом (как python `self._current_file`).
+        let current_file: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
 
         // --- Главное окно ---
         let frame = Frame::builder()
-            .with_title("irealstudio — Rust (slice 2: окно, меню, панель тактов, форма Ctrl+N)")
+            .with_title("irealstudio — Rust (форма Ctrl+N, открыть/сохранить .ips)")
             .with_size(Size::new(920, 640))
             .build();
 
         // --- Менюбар ---
         let file_menu = Menu::builder()
             .append_item(ID_NEW, "&Новая цифровка…\tCtrl+N", "Создать новую цифровку")
+            .append_separator()
+            .append_item(ID_OPEN, "&Открыть…\tCtrl+O", "Открыть цифровку из файла .ips")
+            .append_item(ID_SAVE, "&Сохранить\tCtrl+S", "Сохранить цифровку в файл .ips")
+            .append_item(ID_SAVE_AS, "Сохранить &как…", "Сохранить цифровку в новый файл")
             .append_separator()
             .append_item(ID_EXIT, "&Выход", "Закрыть программу")
             .build();
@@ -499,7 +619,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Стрелки — по тактам, Home/End — края, Alt+стрелки — по секциям.",
+                "irealstudio (Rust). Ctrl+N — новая цифровка, Ctrl+O — открыть, Ctrl+S — сохранить. Стрелки — по тактам, Alt+стрелки — по секциям.",
             )
             .build();
 
@@ -516,10 +636,14 @@ fn main() {
         let state_menu = grid_state.clone();
         let frame_menu = frame.clone();
         let panel_menu = grid_panel.clone();
+        let current_menu = current_file.clone();
         frame.on_menu_selected(move |event| match event.get_id() {
             ID_NEW => {
                 // Модальная форма (wxDialog). None — пользователь нажал Отмена.
                 if let Some(spec) = show_new_chart_dialog(&frame_menu) {
+                    // Новая цифровка не связана с файлом — как python new_project:
+                    // self._current_file = None (дальше Ctrl+S предложит «Сохранить как»).
+                    *current_menu.borrow_mut() = None;
                     let mut d = doc_menu.borrow_mut();
                     *d = Doc::new_chart(&spec);
                     let dref = &*d;
@@ -532,6 +656,71 @@ fn main() {
                         0,
                     );
                 }
+            }
+            ID_OPEN => {
+                if let Some(path) = pick_open_path(&frame_menu) {
+                    let res = fs::read_to_string(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|json| Doc::from_json(&json));
+                    match res {
+                        Ok(loaded) => install_loaded(
+                            loaded,
+                            path,
+                            &doc_menu,
+                            &spk_menu,
+                            &state_menu,
+                            &panel_menu,
+                            &current_menu,
+                            &frame_menu,
+                        ),
+                        Err(e) => {
+                            spk_menu
+                                .borrow()
+                                .speak(&format!("Не удалось открыть: {e}"));
+                        }
+                    }
+                }
+            }
+            ID_SAVE => {
+                // Клонируем путь из Ref явно (у RefCell::Ref свой Clone —
+                // голый .clone() склонировал бы обёртку, а не Option).
+                let cur = {
+                    let cf = current_menu.borrow();
+                    (*cf).clone()
+                };
+                if let Some(path) = cur {
+                    // Текущий файл есть — пишем прямо в него (как python save()).
+                    let name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let res = {
+                        let d = doc_menu.borrow();
+                        write_to_path(&path, &d)
+                    };
+                    match res {
+                        Ok(()) => {
+                            spk_menu.borrow().speak(&format!("Сохранено: {name}"));
+                            frame_menu.set_status_text(&format!("Сохранено: {name}"), 0);
+                        }
+                        Err(e) => {
+                            spk_menu
+                                .borrow()
+                                .speak(&format!("Не удалось сохранить: {e}"));
+                        }
+                    }
+                } else {
+                    // Файла ещё нет — как python save() → save_as().
+                    save_as_progression(
+                        &doc_menu,
+                        &spk_menu,
+                        &current_menu,
+                        &frame_menu,
+                    );
+                }
+            }
+            ID_SAVE_AS => {
+                save_as_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
             }
             ID_SPEAK => {
                 let d = doc_menu.borrow();
@@ -559,7 +748,7 @@ fn main() {
             }
             ID_ABOUT => {
                 frame_menu.set_status_text(
-                    "irealstudio (Rust), slice 2 — wxDragon 0.9.21 / wxWidgets 3.3.3",
+                    "irealstudio (Rust) — wxDragon 0.9.21 / wxWidgets 3.3.3",
                     0,
                 )
             }

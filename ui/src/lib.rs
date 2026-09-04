@@ -220,6 +220,21 @@ impl Doc {
         Doc { cp, cursor: 1 }
     }
 
+    /// Сохранить цифровку в строку файла `.ips`/`.ipst` — как python
+    /// `progression.to_json()` (app_io.py:160). Сам JSON печатает core
+    /// (`persist.rs`, байтово сверен с python json.dumps).
+    pub fn to_json(&self) -> String {
+        self.cp.to_json()
+    }
+
+    /// Загрузить цифровку из строки файла `.ips`/`.ipst` — как python
+    /// `ChordProgression.from_json` при открытии (app_io.py:223).
+    /// Курсор — на такт 1 (python ставит Position(1,1)).
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let cp = ChordProgression::from_json(json)?;
+        Ok(Doc { cp, cursor: 1 })
+    }
+
     /// Последний такт документа (не ниже 1). Длина песни — это `total_measures`
     /// (как в python): у новой цифровки с шаблоном такты есть, даже если они
     /// пока пустые (метки/аккорды появятся при вводе).
@@ -543,5 +558,47 @@ mod tests {
         let d = Doc::new_chart(&s);
         let a1 = d.announce_measure(1);
         assert!(a1.contains("секция A"), "озвучка метки секции: {a1}");
+    }
+
+    // --- Открыть/сохранить (.ips = progression.to_json()): калька python
+    // app_io.py open_file/_save_to_path. Документ целиком уходит в строку и
+    // возвращается из неё без потерь; курсор после загрузки — такт 1. ---
+
+    #[test]
+    fn open_save_roundtrip_keeps_song() {
+        let d = Doc::new_demo();
+        let json = d.to_json();
+        assert!(json.contains("Rhythm Changes"), "в JSON есть название: {json}");
+        let loaded = Doc::from_json(&json).expect("валидный JSON загружается");
+        // Вся цифровка вернулась без потерь — озвучка идентична.
+        assert_eq!(loaded.announce_song(), d.announce_song());
+        assert_eq!(loaded.last_measure(), d.last_measure());
+        assert_eq!(loaded.cp.title, "Rhythm Changes (демо)");
+        assert_eq!(loaded.cp.key, "B-");
+        assert_eq!(loaded.cursor, 1, "после открытия курсор на такте 1");
+    }
+
+    #[test]
+    fn from_json_does_not_carry_old_cursor() {
+        // Курсор в JSON не хранится: даже если текущий документ был в середине,
+        // загрузка файла ставит курсор на такт 1 (python: Position(1,1)).
+        let mut d = Doc::new_demo();
+        for _ in 0..6 {
+            d.go_right();
+        }
+        assert_eq!(d.cursor, 7);
+        let json = d.to_json();
+        let loaded = Doc::from_json(&json).unwrap();
+        assert_eq!(loaded.cursor, 1);
+    }
+
+    #[test]
+    fn from_invalid_json_errors() {
+        assert!(Doc::from_json("не json").is_err(), "мусор не грузится");
+        assert!(Doc::from_json("").is_err(), "пустой файл не грузится");
+        assert!(
+            Doc::from_json("{\"title\": 42}").is_err(),
+            "структура не той формы — ошибка"
+        );
     }
 }
