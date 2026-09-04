@@ -9,7 +9,9 @@
 //! ровно то, что слышит пользователь. Сетка отдаёт на каждый такт короткую
 //! строку символов аккордов (для отрисовки панели тактов в `on_paint`).
 
-use irealwx_core::{chord_name_to_spoken, ChordProgression, Position, TimeSignature};
+use irealwx_core::{
+    chord_name_to_spoken, ChordProgression, Position, TimeSignature, VoltaBracket,
+};
 
 /// Потолок стека undo — как python `_UNDO_MAX = 50` (main.py).
 pub const UNDO_MAX: usize = 50;
@@ -39,6 +41,11 @@ pub struct Doc {
     pub clipboard: Option<ClipboardItem>,
     /// Цифровка менялась после последнего сохранения (для «*» в заголовке).
     pub dirty: bool,
+    /// Маркеры повтора «[»/«]» (slice 7) — временное состояние между нажатиями,
+    /// как python `_pending_repeat_start/_end` (main.py:410). Живут в документе,
+    /// но не входят в undo-снимок (как в python) и сбрасываются на undo/redo.
+    pub pending_repeat_start: Option<i32>,
+    pub pending_repeat_end: Option<i32>,
 }
 
 /// Один аккорд такта — что рисуем и что озвучиваем.
@@ -231,6 +238,8 @@ impl Doc {
             redo_stack: Vec::new(),
             clipboard: None,
             dirty: false,
+            pending_repeat_start: None,
+            pending_repeat_end: None,
         }
     }
 
@@ -254,6 +263,8 @@ impl Doc {
             redo_stack: Vec::new(),
             clipboard: None,
             dirty: false,
+            pending_repeat_start: None,
+            pending_repeat_end: None,
         }
     }
 
@@ -276,6 +287,8 @@ impl Doc {
             redo_stack: Vec::new(),
             clipboard: None,
             dirty: false,
+            pending_repeat_start: None,
+            pending_repeat_end: None,
         })
     }
 
@@ -461,6 +474,45 @@ pub fn section_display_name(mark: &str) -> String {
     }
 }
 
+/// Суффикс «(удалён N скрытый аккорд)» после создания вольты — как python
+/// ngettext (chords.py): когда скрытый диапазон (тело повтора) содержал
+/// аккорды, они удаляются, и это озвучивается. `cleared == 0` → пусто.
+/// Русская плюрализация по правилам gettext (locales/ru/.../irealstudio.po):
+/// 1 → «удалён 1 скрытый аккорд», 2–4 → «удалено 2 скрытых аккорда»,
+/// 5+ → «удалено 5 скрытых аккордов».
+fn hidden_removed_suffix(cleared: usize) -> String {
+    if cleared == 0 {
+        return String::new();
+    }
+    let n = cleared as i64;
+    let n10 = n % 10;
+    let n100 = n % 100;
+    let word = if n10 == 1 && n100 != 11 {
+        "скрытый аккорд"
+    } else if (2..=4).contains(&n10) && !(12..=14).contains(&n100) {
+        "скрытых аккорда"
+    } else {
+        "скрытых аккордов"
+    };
+    let verb = if n10 == 1 && n100 != 11 {
+        "удалён"
+    } else {
+        "удалено"
+    };
+    format!(" ({verb} {n} {word})")
+}
+
+/// Озвучка созданной вольты: «Реприза с такта {rs}, вольта 1: {vs}–{e1e},
+/// вольта 2 начинается с такта {e2s}» + суффикс об удалённых скрытых аккордах
+/// — как python _() из chords.py (add_volta_start/add_volta_bracket).
+fn repeat_from_message(rs: i32, vs: i32, e1e: i32, e2s: i32, cleared: usize) -> String {
+    let mut msg = format!(
+        "Реприза с такта {rs}, вольта 1: {vs}–{e1e}, вольта 2 начинается с такта {e2s}"
+    );
+    msg.push_str(&hidden_removed_suffix(cleared));
+    msg
+}
+
 /// Допустимые написания басовой ноты (слэш-бас). Шире python `NOTE_NAMES`
 /// (там только натуральные/бемольные): принимаем все хроматические написания —
 /// диезные тоже, чтобы диалог не отклонял осмысленный ввод.
@@ -622,6 +674,9 @@ impl Doc {
         }
         let last = self.cp.last_measure().max(1);
         self.cursor = self.cursor.min(last).max(1);
+        // python undo() сбрасывает pending-маркеры повтора (main.py:759).
+        self.pending_repeat_start = None;
+        self.pending_repeat_end = None;
         self.dirty = true;
         "Отменено".to_string()
     }
@@ -636,6 +691,9 @@ impl Doc {
         if let Ok(cp) = ChordProgression::from_json(&snapshot) {
             self.cp = cp;
         }
+        // python redo() тоже сбрасывает pending-маркеры повтора (main.py:770).
+        self.pending_repeat_start = None;
+        self.pending_repeat_end = None;
         self.dirty = true;
         "Повторено".to_string()
     }
@@ -860,6 +918,116 @@ impl Doc {
             section_display_name(mark),
             self.cursor
         )
+    }
+
+    // -------------------------------------------------------------------
+    // Создание вольт / повторов (slice 7) — клавиши [, ] и V.
+    // -------------------------------------------------------------------
+    //
+    // Калька python (main.py:1667-1712 + chords.py add_repeat_bracket/
+    // add_volta_bracket/add_volta_start):
+    //   [  — отметить начало повтора на текущем такте (сброс старого конца);
+    //   ]  — отметить конец и сразу создать обычный повтор [start–end];
+    //   V  — вольта: если заданы и начало, и конец — превратить повтор в
+    //        вольту с окончаниями (вольта 1 = такты с vs по repeat_end),
+    //        иначе — legacy-режим: координаты выводятся из меток секций.
+    // Тексты озвучки сверены с locales/ru/LC_MESSAGES/irealstudio.po.
+
+    /// Отметить текущий такт как начало повтора («[») — как python
+    /// `set_repeat_start` (main.py:1667). Само по себе цифровку не меняет:
+    /// ни undo-снимка, ни dirty (маркер — временное состояние).
+    pub fn set_repeat_start(&mut self) -> String {
+        let m = self.cursor;
+        self.pending_repeat_start = Some(m);
+        self.pending_repeat_end = None; // переустановка начала сбрасывает конец
+        format!("Начало повтора задано на такте {m}")
+    }
+
+    /// Отметить текущий такт как конец повтора («]») и создать обычный повтор
+    /// — как python `set_repeat_end` (main.py:1673): ошибка, если начала нет
+    /// или конец не после начала; иначе undo-снимок + `add_repeat_bracket`.
+    pub fn set_repeat_end(&mut self) -> String {
+        let Some(rs) = self.pending_repeat_start else {
+            return "Сначала задайте начало повтора клавишей [".to_string();
+        };
+        let re = self.cursor;
+        if re <= rs {
+            return "Конец повтора должен быть после начала".to_string();
+        }
+        self.pending_repeat_end = Some(re);
+        self.push_undo();
+        self.cp.add_repeat_bracket(rs, re);
+        self.dirty = true;
+        format!("Повтор задан: {rs}–{re}. Если нужны окончания, перейдите к окончанию 1 и нажмите V.")
+    }
+
+    /// Вольта/окончание («V») — как python `add_volta` (main.py:1692).
+    /// При заданных «[» и «]» создаёт вольту с окончаниями (маркеры
+    /// сбрасываются); без них — legacy `add_volta_start` по меткам секций.
+    /// Undo-снимок и dirty ставятся всегда, даже при неверных маркерах
+    /// (python делает то же).
+    pub fn add_volta(&mut self) -> String {
+        self.push_undo();
+        let msg = match (self.pending_repeat_start, self.pending_repeat_end) {
+            (Some(rs), Some(re)) => {
+                let vs = self.cursor;
+                // Маркеры сбрасываются после создания вольты (python:1706).
+                self.pending_repeat_start = None;
+                self.pending_repeat_end = None;
+                if !(rs < vs && vs <= re) {
+                    format!("Неверные маркеры вольты: начало {rs}, вольта {vs}, конец {re}")
+                } else {
+                    let ending2_start = re + (vs - rs) + 1;
+                    let cleared = self.count_hidden_chords(VoltaBracket {
+                        repeat_start: rs,
+                        ending1_start: vs,
+                        ending1_end: re,
+                        ending2_start,
+                        num_repeats: 2,
+                    });
+                    self.cp.add_volta_bracket(rs, re, vs);
+                    repeat_from_message(rs, vs, re, ending2_start, cleared)
+                }
+            }
+            _ => {
+                // Legacy V без маркеров: границы вольты выводятся из секций
+                // (chords.py add_volta_start). Расчёт повторяет core 1-в-1,
+                // чтобы озвучить готовый результат до вызова мутации.
+                let m = self.cursor;
+                let rs = self.cp.find_section_start(m);
+                let next = self.cp.find_next_section_start(m);
+                let ending_length = (next - m).max(1);
+                let ending1_end = m + ending_length - 1;
+                let ending2_start = next + (m - rs);
+                let cleared = self.count_hidden_chords(VoltaBracket {
+                    repeat_start: rs,
+                    ending1_start: m,
+                    ending1_end,
+                    ending2_start,
+                    num_repeats: 2,
+                });
+                self.cp.add_volta_start(m);
+                repeat_from_message(rs, m, ending1_end, ending2_start, cleared)
+            }
+        };
+        self.dirty = true;
+        msg
+    }
+
+    /// Сколько аккордов попадёт в скрытый диапазон вольты (между окончанием 1
+    /// и окончанием 2) — они будут удалены при создании скобки (как python
+    /// «hidden chord(s) removed»). Считаем по геометрии новой скобки до
+    /// мутации core: hidden_range у одноимённой фиктивной скобки.
+    fn count_hidden_chords(&self, probe: VoltaBracket) -> usize {
+        match probe.hidden_range() {
+            None => 0,
+            Some((hs, he)) => self
+                .cp
+                .items
+                .iter()
+                .filter(|i| i.position.measure >= hs && i.position.measure <= he)
+                .count(),
+        }
     }
 
     /// Транспонировать всю цифровку — как python `_on_transpose`
@@ -1595,5 +1763,225 @@ mod settings_tests {
         assert_eq!(d.cp.time_signature.to_string(), "4/4", "мусор не применился");
         assert!(d.dirty, "python всё равно ставит dirty и undo");
         assert_eq!(d.undo_stack.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod volta_tests {
+    use super::*;
+
+    /// Документ с по одному аккорду C в каждом такте 1..=last.
+    fn filled_doc(last: i32) -> Doc {
+        let mut d = Doc::new_chart(&NewChart::defaults());
+        for m in 1..=last {
+            d.cursor = m;
+            d.insert_chord("C", "");
+        }
+        d.cursor = 1;
+        d
+    }
+
+    fn count_items(cp: &ChordProgression, lo: i32, hi: i32) -> usize {
+        cp.items
+            .iter()
+            .filter(|i| i.position.measure >= lo && i.position.measure <= hi)
+            .count()
+    }
+
+    #[test]
+    fn start_marker_does_not_touch_doc() {
+        let mut d = Doc::new_demo();
+        d.cursor = 3;
+        assert_eq!(d.set_repeat_start(), "Начало повтора задано на такте 3");
+        assert!(!d.dirty, "маркер не меняет цифровку");
+        assert!(d.undo_stack.is_empty(), "маркер не открывает undo");
+        assert!(d.cp.volta_brackets.is_empty());
+    }
+
+    #[test]
+    fn end_without_start_is_error() {
+        let mut d = Doc::new_demo();
+        assert_eq!(
+            d.set_repeat_end(),
+            "Сначала задайте начало повтора клавишей ["
+        );
+        assert!(!d.dirty);
+        assert!(d.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn end_not_after_start_is_error() {
+        let mut d = Doc::new_demo();
+        d.cursor = 5;
+        assert_eq!(d.set_repeat_start(), "Начало повтора задано на такте 5");
+        d.cursor = 3;
+        assert_eq!(d.set_repeat_end(), "Конец повтора должен быть после начала");
+        assert!(!d.dirty, "ошибка не открывает undo/dirty");
+        assert!(d.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn start_remarks_reset_previous_end() {
+        let mut d = Doc::new_demo();
+        d.cursor = 2;
+        d.set_repeat_start();
+        d.cursor = 4;
+        d.set_repeat_end();
+        assert_eq!(d.pending_repeat_start, Some(2));
+        assert_eq!(d.pending_repeat_end, Some(4));
+        // Повторная пометка начала сбрасывает конец; старый повтор 2–4 остаётся.
+        d.cursor = 6;
+        d.set_repeat_start();
+        assert_eq!(d.pending_repeat_start, Some(6));
+        assert_eq!(d.pending_repeat_end, None);
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        assert!(d.cp.volta_brackets[0].is_repeat_only());
+    }
+
+    #[test]
+    fn plain_repeat_created_by_brackets() {
+        let mut d = filled_doc(8);
+        d.cursor = 2;
+        assert_eq!(d.set_repeat_start(), "Начало повтора задано на такте 2");
+        let undo_before = d.undo_stack.len();
+        d.cursor = 5;
+        let msg = d.set_repeat_end();
+        assert_eq!(
+            msg,
+            "Повтор задан: 2–5. Если нужны окончания, перейдите к окончанию 1 и нажмите V."
+        );
+        assert!(d.dirty);
+        assert_eq!(d.undo_stack.len(), undo_before + 1, "один снимок на скобку");
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        let vb = &d.cp.volta_brackets[0];
+        assert_eq!(vb.repeat_start, 2);
+        assert_eq!(vb.ending1_start, 6);
+        assert_eq!(vb.ending1_end, 5);
+        assert_eq!(vb.ending2_start, 2);
+        assert!(vb.is_repeat_only(), "обычный повтор без окончаний N1/N2");
+        // У обычного повтора ничего не удаляется.
+        assert_eq!(count_items(&d.cp, 1, 8), 8);
+    }
+
+    #[test]
+    fn undo_after_repeat_clears_bracket_and_markers() {
+        let mut d = filled_doc(8);
+        d.cursor = 2;
+        d.set_repeat_start();
+        d.cursor = 5;
+        d.set_repeat_end();
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        assert_eq!(d.undo(), "Отменено");
+        assert!(d.cp.volta_brackets.is_empty(), "снимок вернул документ без скобки");
+        assert_eq!(d.pending_repeat_start, None, "undo сбрасывает маркеры");
+        assert_eq!(d.pending_repeat_end, None);
+        // После undo клавиша ] без [ снова даёт ошибку — маркеры реально сброшены.
+        assert_eq!(d.set_repeat_end(), "Сначала задайте начало повтора клавишей [");
+    }
+
+    #[test]
+    fn volta_from_markers_removes_hidden_and_reports() {
+        let mut d = filled_doc(12);
+        d.cursor = 2;
+        d.set_repeat_start();
+        d.cursor = 7;
+        d.set_repeat_end(); // простой повтор 2–7
+        d.cursor = 5; // vs — первая мера окончания 1
+        let msg = d.add_volta();
+        assert_eq!(
+            msg,
+            "Реприза с такта 2, вольта 1: 5–7, вольта 2 начинается с такта 11 (удалено 3 скрытых аккорда)"
+        );
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        let vb = &d.cp.volta_brackets[0];
+        assert_eq!(vb.repeat_start, 2);
+        assert_eq!(vb.ending1_start, 5);
+        assert_eq!(vb.ending1_end, 7);
+        assert_eq!(vb.ending2_start, 11);
+        assert!(!vb.is_repeat_only());
+        assert_eq!(count_items(&d.cp, 8, 10), 0, "скрытое тело повтора очищено");
+        assert_eq!(count_items(&d.cp, 1, 12), 9);
+        // Маркеры сброшены после создания вольты.
+        assert_eq!(d.pending_repeat_start, None);
+        assert_eq!(d.pending_repeat_end, None);
+    }
+
+    #[test]
+    fn volta_single_hidden_uses_singular() {
+        let mut d = filled_doc(8);
+        d.cursor = 2;
+        d.set_repeat_start();
+        d.cursor = 4;
+        d.set_repeat_end();
+        d.cursor = 3; // body_length = 1 → один скрытый такт 5
+        let msg = d.add_volta();
+        assert_eq!(
+            msg,
+            "Реприза с такта 2, вольта 1: 3–4, вольта 2 начинается с такта 6 (удалён 1 скрытый аккорд)"
+        );
+        assert_eq!(count_items(&d.cp, 5, 5), 0);
+    }
+
+    #[test]
+    fn volta_empty_hidden_no_suffix() {
+        // Такты только 1–3: скрытый диапазон (4–4) не содержит аккордов —
+        // вольта создаётся без суффикса об удалении.
+        let mut d = Doc::new_chart(&NewChart::defaults());
+        for m in [1, 2, 3] {
+            d.cursor = m;
+            d.insert_chord("C", "");
+        }
+        d.cursor = 1;
+        d.set_repeat_start();
+        d.cursor = 3;
+        d.set_repeat_end(); // простой повтор 1–3
+        d.cursor = 2; // vs — вольта 1 = 2–3
+        let msg = d.add_volta();
+        assert_eq!(
+            msg,
+            "Реприза с такта 1, вольта 1: 2–3, вольта 2 начинается с такта 5"
+        );
+        assert_eq!(count_items(&d.cp, 4, 4), 0, "в скрытом такте не было аккордов");
+    }
+
+    #[test]
+    fn volta_invalid_markers_reports_and_resets() {
+        let mut d = filled_doc(12);
+        d.cursor = 2;
+        d.set_repeat_start();
+        d.cursor = 7;
+        d.set_repeat_end();
+        let undone_before = d.undo_stack.len();
+        d.cursor = 2; // vs == rs — вольта 1 обязана начинаться после повтора
+        let msg = d.add_volta();
+        assert_eq!(msg, "Неверные маркеры вольты: начало 2, вольта 2, конец 7");
+        assert_eq!(d.pending_repeat_start, None, "маркеры сброшены и при ошибке");
+        assert_eq!(d.pending_repeat_end, None);
+        // python всё равно пушит снимок и ставит dirty на неверной вольте.
+        assert_eq!(d.undo_stack.len(), undone_before + 1);
+        assert!(d.dirty);
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        assert!(d.cp.volta_brackets[0].is_repeat_only(), "повтор 2–7 не тронут");
+    }
+
+    #[test]
+    fn legacy_volta_from_section_marks() {
+        // Демо: секции *A(1), *B(9), *A(11). V на такте 9 → вольта по границам
+        // секции B: rs=9, вольта 1 = 9–10, вольта 2 начинается с 11.
+        let mut d = Doc::new_demo();
+        d.cursor = 9;
+        let msg = d.add_volta();
+        assert_eq!(
+            msg,
+            "Реприза с такта 9, вольта 1: 9–10, вольта 2 начинается с такта 11"
+        );
+        assert_eq!(d.cp.volta_brackets.len(), 1);
+        let vb = &d.cp.volta_brackets[0];
+        assert_eq!(vb.repeat_start, 9);
+        assert_eq!(vb.ending1_start, 9);
+        assert_eq!(vb.ending1_end, 10);
+        assert_eq!(vb.ending2_start, 11);
+        // Аккорд на такте 11 (начало вольты 2) не удаляется — он вне скрытого.
+        assert_eq!(count_items(&d.cp, 11, 11), 1);
     }
 }

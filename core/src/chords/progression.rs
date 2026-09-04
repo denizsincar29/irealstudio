@@ -228,7 +228,11 @@ impl ChordProgression {
     // Вольты / повторы
     // -------------------------------------------------------------------
 
-    fn find_section_start(&self, measure: i32) -> i32 {
+    /// Первый такт секции, в которой находится *measure* (последняя метка ≤ него;
+    /// без меток — такт 1). Открыт для ui-слоя: legacy `V` (add_volta_start)
+    /// считает координаты вольты по секциям, и ui-слой повторяет этот расчёт
+    /// для текста озвучки.
+    pub fn find_section_start(&self, measure: i32) -> i32 {
         let mut marks_before: Vec<i32> = self
             .section_marks
             .iter()
@@ -239,7 +243,8 @@ impl ChordProgression {
         marks_before.last().copied().unwrap_or(1)
     }
 
-    fn find_next_section_start(&self, from_measure: i32) -> i32 {
+    /// Первый такт следующей секции после *from_measure* (или конец контента + 1).
+    pub fn find_next_section_start(&self, from_measure: i32) -> i32 {
         let mut marks_after: Vec<i32> = self
             .section_marks
             .iter()

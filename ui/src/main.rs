@@ -50,11 +50,12 @@ const ID_CUT: i32 = 3003;
 const ID_COPY: i32 = 3004;
 const ID_PASTE: i32 = 3005;
 const ID_TRANSPOSE: i32 = 3006;
-// Меню «Вставка» (Insert): аккорд, правка, N.C., бас, метки частей.
+// Меню «Вставка» (Insert): аккорд, правка, N.C., бас, метки частей, вольта.
 const ID_INS_CHORD: i32 = 3007;
 const ID_EDIT_CHORD: i32 = 3008;
 const ID_INS_NC: i32 = 3009;
 const ID_INS_BASS: i32 = 3010;
+const ID_INS_VOLTA: i32 = 3020;
 // Подменю «Метка части» — Ctrl+Shift+буква (как python, без Fine: его
 // iReal-смысл python оставил «на уточнение», пункт в меню скрыт).
 const ID_SM_A: i32 = 3011;
@@ -466,17 +467,16 @@ fn modal_text(parent: &Frame, title: &str, label: &str, initial: &str) -> Option
     let buttons = BoxSizer::builder(Orientation::Horizontal).build();
     buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
     buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    col.add_sizer(
-        &buttons,
-        0,
-        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
-        8,
-    );
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
 
     panel.set_sizer(col, true);
     let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
     dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
     dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    // Начальный фокус — в поле (как python `SetFocus` на первом контроле):
+    // без него фокус не уходит в диалог и NVDA молчит на открытии.
+    ctrl.set_focus();
 
     let result = dialog.show_modal();
     let value = if result == ID_OK { Some(ctrl.get_value()) } else { None };
@@ -519,18 +519,14 @@ fn modal_spin(
     let buttons = BoxSizer::builder(Orientation::Horizontal).build();
     buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
     buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    col.add_sizer(
-        &buttons,
-        0,
-        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
-        8,
-    );
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
 
     panel.set_sizer(col, true);
     let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
     dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
     dialog.set_sizer_and_fit(dialog_sizer, true);
 
+    spin.set_focus();
     let result = dialog.show_modal();
     let value = if result == ID_OK { Some(spin.value()) } else { None };
     dialog.destroy();
@@ -608,9 +604,13 @@ const TEMPLATE_KEYS: [&str; 6] = ["", "Blues", "AABA", "ABAC", "ABAB", "ABCD"];
 fn add_labeled_row<W: WxWidget>(col: &BoxSizer, panel: &Panel, label: &str, ctrl: &W) {
     let row = BoxSizer::builder(Orientation::Horizontal).build();
     let lab = StaticText::builder(panel).with_label(label).build();
-    row.add(&lab, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 8);
-    row.add(ctrl, 1, SizerFlag::Expand | SizerFlag::AlignCenterVertical, 0);
-    col.add_sizer(&row, 0, SizerFlag::Expand | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top, 4);
+    // Без конфликта wxEXPAND с флагами выравнивания: в box-sizer wxEXPAND сам
+    // задаёт кросс-ось, комбинация с wxALIGN_* даёт debug-assert «wxEXPAND
+    // overrides alignment flags in box sizers» (sizer.cpp). Поле тянется по
+    // ширине ряда (пропорция 1), ряд — по ширине колонки (wxEXPAND).
+    row.add(&lab, 0, SizerFlag::AlignCenterVertical, 8);
+    row.add(ctrl, 1, SizerFlag::Expand, 0);
+    col.add_sizer(&row, 0, SizerFlag::Expand, 4);
 }
 
 /// Модальный диалог новой цифровки. Возвращает `NewChart` при OK,
@@ -696,17 +696,16 @@ fn show_new_chart_dialog(parent: &Frame) -> Option<NewChart> {
     let buttons = BoxSizer::builder(Orientation::Horizontal).build();
     buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
     buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    col.add_sizer(
-        &buttons,
-        0,
-        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
-        8,
-    );
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
 
     panel.set_sizer(col, true);
     let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
     dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
     dialog.set_sizer_and_fit(dialog_sizer, true);
+
+    // Начальный фокус в первое поле — иначе NVDA на открытии формы молчит
+    // (как python `list(self._ctrls.values())[0].SetFocus()` в _NewProjectDlg).
+    title_ctrl.set_focus();
 
     let result = dialog.show_modal();
     let spec = if result == ID_OK {
@@ -830,18 +829,14 @@ fn show_project_settings_dialog(
     let buttons = BoxSizer::builder(Orientation::Horizontal).build();
     buttons.add(&ok_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
     buttons.add(&cancel_button, 0, SizerFlag::AlignCenterVertical | SizerFlag::Right, 4);
-    col.add_sizer(
-        &buttons,
-        0,
-        SizerFlag::AlignRight | SizerFlag::Left | SizerFlag::Right | SizerFlag::Top | SizerFlag::Bottom,
-        8,
-    );
+    col.add_sizer(&buttons, 0, SizerFlag::AlignRight | SizerFlag::Top, 8);
 
     panel.set_sizer(col, true);
     let dialog_sizer = BoxSizer::builder(Orientation::Vertical).build();
     dialog_sizer.add(&panel, 1, SizerFlag::Expand, 0);
     dialog.set_sizer_and_fit(dialog_sizer, true);
 
+    title_ctrl.set_focus();
     let result = dialog.show_modal();
     let spec = if result == ID_OK {
         // Читаем значения ПОСЛЕ закрытия модального цикла, но ДО destroy.
@@ -885,7 +880,8 @@ fn handle_key(
         let mut changed = false;
         // Результат правки (строка для озвучки; пустая = молчание). Меню
         // «Правка/Вставка» идёт через on_menu_selected, сюда — только горячие
-        // клавиши без пунктов меню: Del/Backspace и N (N.C.), как python.
+        // клавиши без пунктов меню: Del/Backspace, N (N.C.), V/[ / ] (вольта и
+        // повторы), как python.
         let mut edited: Option<String> = None;
         match code {
             WXK_LEFT if !alt && !ctrl => {
@@ -926,6 +922,18 @@ fn handle_key(
             // 'N' — переключение N.C. (клавиша отдаётся прописной ASCII, 78).
             78 if !ctrl && !alt && !shift => {
                 edited = Some(d.toggle_no_chord());
+            }
+            // 'V' (86) — вольта/повтор; '[' (91) / ']' (93) — маркеры начала и
+            // конца повтора — как python app_keys.py: V без гейта, [ и ] как
+            // set_repeat_start/set_repeat_end (в python тоже на IDLE-рекордера).
+            86 if !ctrl && !alt && !shift => {
+                edited = Some(d.add_volta());
+            }
+            91 if !ctrl && !alt && !shift => {
+                edited = Some(d.set_repeat_start());
+            }
+            93 if !ctrl && !alt && !shift => {
+                edited = Some(d.set_repeat_end());
             }
             _ => {}
         }
@@ -1035,6 +1043,12 @@ fn main() {
             "Репетиционные метки (Ctrl+Shift+буква)",
         );
         insert_menu.append(
+            ID_INS_VOLTA,
+            "&Вольта / Окончание\tV",
+            "Вольта/повтор: [ — начало, ] — конец, V — на первом такте окончания 1",
+            ItemKind::Normal,
+        );
+        insert_menu.append(
             ID_INS_NC,
             "&Без аккорда (N.C.)",
             "Переключить N.C. на текущем такте (клавиша N)",
@@ -1092,7 +1106,7 @@ fn main() {
             .with_fields_count(1)
             .add_initial_text(
                 0,
-                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт, Ctrl+P — настройки цифровки. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор.",
+                "irealstudio (Rust). Ctrl+N — новая, Ctrl+O — открыть, Ctrl+S — сохранить, Ctrl+E — экспорт, Ctrl+P — настройки цифровки. Стрелки — по тактам, Alt+стрелки — по секциям. Ctrl+Enter — аккорд, F2 — правка, Del — удалить, Ctrl+Z/Y — отмена/повтор. Вольта/повтор: [ — начало, ] — конец, V — окончание 1.",
             )
             .build();
 
@@ -1340,6 +1354,13 @@ fn main() {
                     };
                     commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
                 }
+            }
+            ID_INS_VOLTA => {
+                let msg = {
+                    let mut d = doc_menu.borrow_mut();
+                    d.add_volta()
+                };
+                commit_edit(&msg, &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu);
             }
             // Метки частей — Ctrl+Shift+буква (a/b/c/d/v/i/s/q).
             ID_SM_A => add_section_mark_menu('a', &doc_menu, &spk_menu, &state_menu, &panel_menu, &frame_menu),
