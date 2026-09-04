@@ -72,21 +72,31 @@ mod nvda {
     use std::ffi::c_void;
     use std::sync::OnceLock;
 
-    type Hmodule = *mut c_void;
-
     #[link(name = "Kernel32")]
     extern "system" {
-        fn LoadLibraryW(lp_file_name: *const u16) -> Hmodule;
-        fn GetProcAddress(h_module: Hmodule, lp_proc_name: *const u8) -> *mut c_void;
+        fn LoadLibraryW(lp_file_name: *const u16) -> *mut c_void;
+        fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const u8) -> *mut c_void;
     }
 
     type SpeakTextFn = unsafe extern "system" fn(*const u16) -> i32;
+
+    /// Opaque-хендл загруженной DLL (HMODULE). Никогда не разыменовывается —
+    /// только хранится и отдаётся обратно в WinAPI, поэтому Send+Sync обёртка
+    /// звукобезопасна (общий контракт Windows-хендлов). Сырой `*mut c_void` в
+    /// `static` легально не положить: он !Send/!Sync, а static требует Sync.
+    #[derive(Copy, Clone)]
+    struct DllHandle(*mut c_void);
+    // SAFETY: DllHandle — opaque-хендл; единственное использование — аргумент
+    // GetProcAddress/LoadLibraryW. Дереференса нет, передача между потоками
+    // безопасна, как и для любого Windows HANDLE.
+    unsafe impl Send for DllHandle {}
+    unsafe impl Sync for DllHandle {}
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    fn load() -> Option<Hmodule> {
+    fn load() -> Option<DllHandle> {
         let mut candidates: Vec<String> = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
@@ -103,22 +113,22 @@ mod nvda {
             let w = wide(c);
             let m = unsafe { LoadLibraryW(w.as_ptr()) };
             if !m.is_null() {
-                return Some(m);
+                return Some(DllHandle(m));
             }
         }
         None
     }
 
-    static DLL: OnceLock<Option<Hmodule>> = OnceLock::new();
+    static DLL: OnceLock<Option<DllHandle>> = OnceLock::new();
 
-    fn dll() -> Option<Hmodule> {
+    fn dll() -> Option<DllHandle> {
         *DLL.get_or_init(load)
     }
 
     pub fn speak(text: &str) {
         let Some(module) = dll() else { return };
         let name = b"nvdaController_speakText\0";
-        let proc = unsafe { GetProcAddress(module, name.as_ptr()) };
+        let proc = unsafe { GetProcAddress(module.0, name.as_ptr()) };
         if proc.is_null() {
             return;
         }
