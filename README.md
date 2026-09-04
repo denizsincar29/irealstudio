@@ -1,6 +1,6 @@
 # irealwx — переписывание irealstudio на Rust
 
-Статус: **этап 1 (порт чистого ядра) закрыт, идёт этап 2 (wxDragon GUI)**. Ядро: irealb-кодек сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs`), **озвучка аккордов по-русски** (`core/src/chords/spoken.rs`) и **JSON-персистентность** (`core/src/chords/persist.rs`, 6 сценариев байтово против python, без serde). GUI: **slice 1 (ui-shell) готов к сборке на Windows** — окно + нативное альт-меню + рисованная панель тактов (`on_paint`) + навигация стрелками с озвучкой через NVDA ControllerClient; чистая логика документа в `ui/src/lib.rs` (тесты в контейнере), wxDragon-оболочка в `ui/src/main.rs` (Windows-only).
+Статус: **этап 1 (порт чистого ядра) закрыт, идёт этап 2 (wxDragon GUI)**. Ядро: irealb-кодек сверен с python-эталоном; гармония (`core/src/chords/`) полностью портирована — распознавание аккордов, модель, ireal-перевод, транспонирование, вокализация в MIDI, `ChordProgression` (секции, вольты/повторы, виртуальная навигация, N.C., транспонирование прогрессии), **экспорт-грамматика** (`core/src/chords/export.rs`), **озвучка аккордов по-русски** (`core/src/chords/spoken.rs`) и **JSON-персистентность** (`core/src/chords/persist.rs`, 6 сценариев байтово против python, без serde). GUI: **slice 1 (ui-shell) готов к сборке** — окно + нативное альт-меню + рисованная панель тактов (`on_paint`) + навигация стрелками с озвучкой через NVDA ControllerClient; чистая логика документа в `ui/src/lib.rs` (тесты в контейнере), wxDragon-оболочка в `ui/src/main.rs`. Целевая сборка — **Windows** (там NVDA читает нативное Win32-меню), но сам wxDragon кроссплатформенный (Windows/macOS/Linux-GTK), окно пишется обычным wx-кодом.
 
 ## Зачем
 
@@ -14,12 +14,18 @@ irealstudio — ~13k строк wxPython-приложения Дениза дл�
 | `audio` | Метроном/клик (cpal) | `sound.py` | Windows |
 | `midi` | MIDI-выход (midir) | `midi_handler.py` | Windows |
 | `speech` | Речь в скринридер (NVDA ControllerClient) | `accessible_output3` в `main.py` | Windows (no-op иначе) |
-| `ui` | wxDragon GUI: окно, альт-меню, панель тактов, форма цифровки | `main.py`, `app_menu.py`, `dialogs.py`, `app_keys.py` | Windows (wxDragon сам CMake-собирает wxWidgets) |
+| `ui` | wxDragon GUI: окно, альт-меню, панель тактов, форма цифровки | `main.py`, `app_menu.py`, `dialogs.py`, `app_keys.py` | Windows — целевая (wxDragon кроссплатформенный: Win/macOS/Linux-GTK) |
 
-`cargo test` гоняет default-members (core/audio/midi/speech) на любом хосте.
-`ui` тянет wxDragon → собирается на Windows: `cargo build -p irealwx_ui`.
-Собранный exe рядом со скринридером NVDA сам находит `nvdaControllerClient.dll`
-(рядом с exe / в каталогах NVDA / в PATH) — речь работает без доустановки.
+`cargo test` гоняет default-members (core/audio/midi/speech) на любом хосте — без wx.
+Крейт `ui` тянет wxDragon; сборка цели — **Windows** (`cargo build -p irealwx_ui`).
+wxDragon не «только Windows»: это кроссплатформенная обёртка wxWidgets
+(официально Windows/macOS/Linux-GTK), и окно в `ui/src/main.rs` — обычный
+wx-код без Win32-специфики: под GTK/Cocoa он соберётся, поменяется лишь слой
+речи (в `speech` под не-Windows no-op). В `Cargo.toml` зависимость wxdragon
+стоит под `cfg(windows)` не по принципу, а чтобы контейнерные тесты чистых
+крейтов не пересобирали wxWidgets (CMake, 10–30 мин) на каждый прогон.
+Собранный exe сам находит `nvdaControllerClient.dll` (рядом с exe / в каталогах
+NVDA / в PATH) — речь работает без доустановки.
 
 ## Slice 1 (ui-shell) — что собрать и проверить на Windows
 
