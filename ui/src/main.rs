@@ -4,8 +4,9 @@
 // через альт-меню (нативный HMENU) и хоткеи; панель тактов рисуется в on_paint
 // (только видна, в дерево доступности не попадает); навигация озвучивается
 // через irealwx_speech (NVDA ControllerClient) и дублируется в статус-строку.
-// Обычные wx-контролы — только в формах: «Новая цифровка» (Ctrl+N) и файловые
-// диалоги открыть/сохранить .ips (Ctrl+O / Ctrl+S).
+// Обычные wx-контролы — только в формах: «Новая цифровка» (Ctrl+N), файловые
+// диалоги открыть/сохранить .ips (Ctrl+O / Ctrl+S) и экспорт в iReal Pro
+// (Ctrl+E — HTML/текст с irealb-ссылкой).
 //
 // Сборка на любом хосте с тулчейном wxDragon (см. README): cargo build -p irealwx_ui.
 // Целевая платформа проекта — Windows (NVDA); сам wx-код кроссплатформенный.
@@ -22,13 +23,16 @@ use wxdragon::keycode::{WXK_END, WXK_HOME, WXK_LEFT, WXK_RIGHT};
 use wxdragon::prelude::*;
 
 use irealwx_speech::{default_speak, Speak};
-use irealwx_ui::{BPM_MAX, BPM_MIN, Doc, NewChart};
+use irealwx_ui::{
+    export_ireal_html, safe_file_base, BPM_MAX, BPM_MIN, Doc, NewChart,
+};
 
 // --- ID пунктов меню (кроме ID_EXIT/ID_ABOUT из прелюда) ---
 const ID_NEW: i32 = 1001;
 const ID_OPEN: i32 = 1002;
 const ID_SAVE: i32 = 1003;
 const ID_SAVE_AS: i32 = 1004;
+const ID_EXPORT: i32 = 1005;
 const ID_SPEAK: i32 = 2001;
 const ID_SPEAK_ALL: i32 = 2002;
 const ID_GOTO_START: i32 = 2003;
@@ -260,6 +264,77 @@ fn save_as_progression(
             }
             Err(e) => {
                 spk.borrow().speak(&format!("Не удалось сохранить: {e}"));
+            }
+        }
+    }
+}
+
+// --- Экспорт в iReal Pro (Ctrl+E) ---
+//
+// Калька python `app_io.export_ireal`: сохраняет HTML с авто-редиректом на
+// `irealb://` URL (открыв его на устройстве с iReal Pro, цифровка импортируется
+// с темпом). Расширение `.txt` — отладочный вариант: сырой не-URL-encoded
+// `irealbook://` URL без HTML-обёртки. Имя по умолчанию — `title + ".html"`
+// рядом с текущим файлом (как python `_safe_filename`).
+
+/// Диалог «Экспорт в iReal Pro» (сохранить HTML/текст) → путь; None — отмена.
+fn pick_export_path(parent: &Frame, default_name: &str, default_dir: &str) -> Option<PathBuf> {
+    let dlg = FileDialog::builder(parent)
+        .with_message("Экспорт в iReal Pro")
+        .with_default_dir(default_dir)
+        .with_default_file(default_name)
+        .with_wildcard("HTML files (*.html)|*.html|Text files (*.txt)|*.txt|All files (*.*)|*.*")
+        .with_style(FileDialogStyle::Save | FileDialogStyle::OverwritePrompt)
+        .build();
+    if dlg.show_modal() == ID_OK {
+        dlg.get_path().map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// Экспорт текущей цифровки в HTML/текст — как python export_ireal.
+fn export_progression(
+    doc: &Rc<RefCell<Doc>>,
+    spk: &Rc<RefCell<Box<dyn Speak>>>,
+    current_file: &Rc<RefCell<Option<PathBuf>>>,
+    frame: &Frame,
+) {
+    // Диалог открываем без живого borrow документа (модальный цикл wx).
+    let default_dir = {
+        let cf = current_file.borrow();
+        cf.as_ref()
+            .and_then(|p| p.parent().map(|x| x.to_string_lossy().into_owned()))
+            .unwrap_or_default()
+    };
+    let (title, url, default_name) = {
+        let d = doc.borrow();
+        let url = d.cp.to_irealb_url(true);
+        let base = safe_file_base(&d.cp.title);
+        (d.cp.title.clone(), url, format!("{base}.html"))
+    };
+    if let Some(path) = pick_export_path(frame, &default_name, &default_dir) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // `.txt` — отладочный экспорт: сырой irealbook URL без HTML.
+        let is_txt = path
+            .extension()
+            .map(|e| e.to_string_lossy().eq_ignore_ascii_case("txt"))
+            .unwrap_or(false);
+        let content = if is_txt {
+            doc.borrow().cp.to_ireal_url(false)
+        } else {
+            export_ireal_html(&title, &url)
+        };
+        match fs::write(&path, content) {
+            Ok(()) => {
+                spk.borrow().speak(&format!("Экспортировано: {name}"));
+                frame.set_status_text(&format!("Экспортировано: {name}"), 0);
+            }
+            Err(e) => {
+                spk.borrow().speak(&format!("Экспорт не удался: {e}"));
             }
         }
     }
@@ -577,7 +652,7 @@ fn main() {
 
         // --- Главное окно ---
         let frame = Frame::builder()
-            .with_title("irealstudio — Rust (форма Ctrl+N, открыть/сохранить .ips)")
+            .with_title("irealstudio — Rust (форма Ctrl+N, файлы .ips, экспорт в iReal Pro)")
             .with_size(Size::new(920, 640))
             .build();
 
@@ -588,6 +663,12 @@ fn main() {
             .append_item(ID_OPEN, "&Открыть…\tCtrl+O", "Открыть цифровку из файла .ips")
             .append_item(ID_SAVE, "&Сохранить\tCtrl+S", "Сохранить цифровку в файл .ips")
             .append_item(ID_SAVE_AS, "Сохранить &как…", "Сохранить цифровку в новый файл")
+            .append_separator()
+            .append_item(
+                ID_EXPORT,
+                "Экспорт в &iReal Pro…\tCtrl+E",
+                "Сохранить HTML/текст с irealb-ссылкой для iReal Pro",
+            )
             .append_separator()
             .append_item(ID_EXIT, "&Выход", "Закрыть программу")
             .build();
@@ -721,6 +802,9 @@ fn main() {
             }
             ID_SAVE_AS => {
                 save_as_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
+            }
+            ID_EXPORT => {
+                export_progression(&doc_menu, &spk_menu, &current_menu, &frame_menu);
             }
             ID_SPEAK => {
                 let d = doc_menu.borrow();

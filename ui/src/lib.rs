@@ -372,6 +372,36 @@ impl Doc {
     }
 }
 
+/// Безопасное имя файла из названия цифровки — калька python
+/// `_safe_filename` (app_settings.py:84): вырезает запрещённые для Windows
+/// символы и слэши, пробелы → `_`, режет краевые `.`/`_`, пусто → "export".
+/// Используется для имени по умолчанию при экспорте/сохранении.
+pub fn safe_file_base(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .filter(|c| !matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    let underscored = cleaned.replace(' ', "_");
+    let trimmed = underscored.trim_matches(|c| c == '.' || c == '_');
+    if trimmed.is_empty() {
+        "export".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// HTML-обёртка экспорта в iReal Pro — побайтово калька python
+/// `export_ireal` (app_io.py:413): авто-редирект на `irealb://` URL через
+/// `<script>window.location.href`, плюс ссылка-фолбэк. Так iReal Pro
+/// открывает цифровку, когда страницу открывают на устройстве с ним.
+pub fn export_ireal_html(title: &str, url: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n<html>\n<head><title>{title}</title></head>\n<body>\n\
+         <p>Opening in iReal Pro...</p>\n<p><a href=\"{url}\">{title}</a></p>\n\
+         <script>window.location.href = \"{url}\";</script>\n</body>\n</html>"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,5 +630,43 @@ mod tests {
             Doc::from_json("{\"title\": 42}").is_err(),
             "структура не той формы — ошибка"
         );
+    }
+
+    // --- Экспорт в iReal Pro (Ctrl+E): чистые хелперы сверены с python
+    // `_safe_filename` (app_settings.py) и HTML-обёрткой `export_ireal`
+    // (app_io.py). ---
+
+    #[test]
+    fn safe_file_base_matches_python() {
+        assert_eq!(safe_file_base("My Song"), "My_Song");
+        assert_eq!(safe_file_base("Rush E."), "Rush_E", "краевые точки срезаются");
+        assert_eq!(safe_file_base("a/b:c*?\"<>|"), "abc", "запрещённые символы вырезаются");
+        assert_eq!(safe_file_base("  ._.  "), "export", "после чистки пусто → export");
+        assert_eq!(safe_file_base("."), "export");
+        assert_eq!(safe_file_base("Капли дождя"), "Капли_дождя");
+    }
+
+    #[test]
+    fn export_html_matches_python() {
+        let expected = "<!DOCTYPE html>\n<html>\n<head><title>My Song</title></head>\n\
+            <body>\n<p>Opening in iReal Pro...</p>\n<p><a href=\"irealb://dXzY\">My Song</a></p>\n\
+            <script>window.location.href = \"irealb://dXzY\";</script>\n</body>\n</html>";
+        assert_eq!(export_ireal_html("My Song", "irealb://dXzY"), expected);
+    }
+
+    #[test]
+    fn demo_builds_irealb_url_and_html() {
+        // Сквозной путь Ctrl+E: из демо-документа строится irealb URL, а
+        // HTML-обёртка несёт авто-редирект на него.
+        let d = Doc::new_demo();
+        let url = d.cp.to_irealb_url(true);
+        assert!(!url.is_empty(), "URL строится для демо");
+        assert!(url.len() > 20, "в URL есть обфусцированные данные: {url}");
+        let html = export_ireal_html(&d.cp.title, &url);
+        assert!(html.contains("window.location.href"));
+        assert!(html.contains(&d.cp.title));
+        // Текстовый («debug») экспорт — сырой не-URL-encoded irealbook.
+        let raw = d.cp.to_ireal_url(false);
+        assert!(raw.starts_with("irealbook://"), "{raw}");
     }
 }
