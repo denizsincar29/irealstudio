@@ -76,6 +76,7 @@ mod nvda {
     extern "system" {
         fn LoadLibraryW(lp_file_name: *const u16) -> *mut c_void;
         fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const u8) -> *mut c_void;
+        fn GetLastError() -> u32;
     }
 
     type SpeakTextFn = unsafe extern "system" fn(*const u16) -> i32;
@@ -96,7 +97,14 @@ mod nvda {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    fn load() -> Option<DllHandle> {
+    static DLL: OnceLock<Result<DllHandle, String>> = OnceLock::new();
+
+    /// Загрузить DLL, кешируя результат вместе с причиной отказа (для дебага).
+    fn load() -> &'static Result<DllHandle, String> {
+        DLL.get_or_init(try_load)
+    }
+
+    fn try_load() -> Result<DllHandle, String> {
         let mut candidates: Vec<String> = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
@@ -109,32 +117,71 @@ mod nvda {
         candidates.push("C:\\Program Files\\NVDA\\nvdaControllerClient.dll".to_string());
         // Голое имя: Windows ищет в каталоге приложения и в PATH.
         candidates.push("nvdaControllerClient.dll".to_string());
+        let mut present_failed: Option<(String, u32)> = None;
+        let mut absent: Vec<String> = Vec::new();
         for c in &candidates {
+            let on_disk = std::fs::metadata(c.as_str()).is_ok();
             let w = wide(c);
             let m = unsafe { LoadLibraryW(w.as_ptr()) };
             if !m.is_null() {
-                return Some(DllHandle(m));
+                return Ok(DllHandle(m));
+            }
+            let code = unsafe { GetLastError() };
+            if on_disk {
+                present_failed = Some((c.clone(), code));
+            } else {
+                absent.push(c.clone());
             }
         }
-        None
+        if let Some((path, code)) = present_failed {
+            Err(format!(
+                "DLL есть на диске, но не загрузилась: {path}, код ошибки {code}. \
+                 Частая причина — разрядность DLL (32/64) не совпадает с разрядностью exe."
+            ))
+        } else {
+            Err(format!(
+                "NVDA ControllerClient DLL не найдена. Искал: {}",
+                absent.join("; ")
+            ))
+        }
     }
 
-    static DLL: OnceLock<Option<DllHandle>> = OnceLock::new();
-
-    fn dll() -> Option<DllHandle> {
-        *DLL.get_or_init(load)
-    }
-
-    pub fn speak(text: &str) {
-        let Some(module) = dll() else { return };
+    /// Вызвать `nvdaController_speakText`; Ok(код возврата) — вызов передан в DLL.
+    fn call(module: DllHandle, text: &str) -> Result<i32, String> {
         let name = b"nvdaController_speakText\0";
         let proc = unsafe { GetProcAddress(module.0, name.as_ptr()) };
         if proc.is_null() {
-            return;
+            return Err(
+                "DLL загружена, но в ней нет экспорта nvdaController_speakText".to_string(),
+            );
         }
         let f: SpeakTextFn = unsafe { std::mem::transmute(proc) };
         let w = wide(text);
-        unsafe { f(w.as_ptr()) };
+        Ok(unsafe { f(w.as_ptr()) })
+    }
+
+    /// Fire-and-forget для трейта `Speak`: молчит при любой ошибке (как раньше).
+    pub fn speak(text: &str) {
+        if let Ok(module) = load() {
+            let _ = call(*module, text);
+        }
+    }
+
+    /// Проговорить с диагностикой: Err(причина) — если озвучить не удалось.
+    pub fn speak_diag(text: &str) -> Result<(), String> {
+        match load() {
+            Err(reason) => Err(reason.clone()),
+            Ok(module) => {
+                let code = call(*module, text)?;
+                if code != 0 {
+                    Err(format!(
+                        "nvdaController_speakText вернул код {code} — обычно NVDA не запущен"
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
@@ -164,6 +211,41 @@ pub fn default_speak() -> Box<dyn Speak> {
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         Box::new(SilentSpeak)
+    }
+}
+
+/// Проговорить *text* и вернуть диагноз: Ok — текст передан в работающий вывод;
+/// Err(причина) — почему озвучить не вышло (используется дебаг-клавишей D в UI).
+/// На Windows проходит через NVDA ControllerClient и сообщает, если DLL не
+/// найдена/не загрузилась или NVDA не запущен.
+pub fn speak_diagnose(text: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        nvda::speak_diag(text)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        cli_diag("spd-say", text)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        cli_diag("say", text)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err("речевой вывод на этой ОС не реализован".to_string())
+    }
+}
+
+/// Запустить системный речевой CLI и сообщить, если его нет в системе.
+fn cli_diag(bin: &str, text: &str) -> Result<(), String> {
+    use std::process::Command;
+    match Command::new(bin).arg(text).spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(format!("не найден {bin} (системный речевой диспетчер недоступен)"))
+        }
+        Err(e) => Err(format!("не удалось запустить {bin}: {e}")),
     }
 }
 

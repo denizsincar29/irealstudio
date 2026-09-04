@@ -27,7 +27,7 @@ use wxdragon::keycode::{WXK_BACK, WXK_DELETE, WXK_END, WXK_HOME, WXK_LEFT, WXK_R
 use wxdragon::menus::ItemKind;
 use wxdragon::prelude::*;
 
-use irealwx_speech::{default_speak, Speak};
+use irealwx_speech::{default_speak, speak_diagnose, Speak};
 use irealwx_ui::{
     export_ireal_html, key_from_root_mode, key_to_root_mode, safe_file_base,
     BPM_MAX, BPM_MIN, Doc, NewChart, ProjectSettings, KEY_ROOTS,
@@ -196,6 +196,22 @@ fn announce(doc: &Doc, speaker: &dyn Speak, frame: &Frame) {
         &format!("Такт {} из {}", doc.cursor, doc.last_measure()),
         0,
     );
+}
+
+/// Диагностика дебаг-клавиши D: строка в консоль (eprintln) и в файл
+/// `irealwx_speech_debug.txt` рядом с exe (fallback — системный temp), чтобы
+/// причина «NVDA молчит» была видна и без консольного окна.
+fn debug_log(line: &str) {
+    eprintln!("[debug] {line}");
+    use std::io::Write;
+    let base = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(std::env::temp_dir);
+    let path = base.join("irealwx_speech_debug.txt");
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{line}");
+    }
 }
 
 /// Заголовок окна: «irealstudio — <название цифровки>», звёздочка спереди —
@@ -734,6 +750,10 @@ const HELP_LINES: &[&str] = &[
     "Справка",
     "F1 — этот список клавиш",
     "",
+    "Отладка",
+    "D — проверка озвучки (NVDA): проговорит тест; при сбое причина — в консоль",
+    "и файл irealwx_speech_debug.txt рядом с программой",
+    "",
     "В диалогах: Enter — подтвердить (кнопка по умолчанию), Esc — отмена.",
 ];
 
@@ -1176,6 +1196,25 @@ fn handle_key(
             }
             93 if !ctrl && !alt && !shift => {
                 edited = Some(d.set_repeat_end());
+            }
+            // 'D' (68) — проверка озвучки (дебаг). Проговаривает контрольную
+            // фразу тем же путём, что и обычные объявления (NVDA ControllerClient);
+            // при сбое причина пишется в консоль и файл irealwx_speech_debug.txt
+            // рядом с exe и показывается в статус-строке.
+            68 if !ctrl && !alt && !shift => {
+                let text = format!("Проверка озвучки. {}", d.announce_current());
+                match speak_diagnose(&text) {
+                    Ok(()) => {
+                        frame.set_status_text("Озвучка NVDA: работает (текст принят)", 0);
+                        debug_log("OK: озвучка NVDA приняла текст");
+                    }
+                    Err(reason) => {
+                        let line = format!("NVDA молчит: {reason}");
+                        debug_log(&line);
+                        frame.set_status_text(&line, 0);
+                    }
+                }
+                handled = true;
             }
             _ => {}
         }
