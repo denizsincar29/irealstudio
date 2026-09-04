@@ -2074,5 +2074,49 @@ class TestIrealbExport(unittest.TestCase):
         self.assertIn('T34', s.chords)
 
 
+class TestSectionRowBreaks(unittest.TestCase):
+    """A section mark must always begin on a fresh row (Y line break)."""
+
+    def test_section_starting_mid_row_forces_new_line(self):
+        # 2-bar intro, then *A at bar 3 (mid-row) and *B at bar 9.
+        prog = make_prog('MidRow')
+        prog.add_section_mark(1, '*i')
+        for m in range(1, 3):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_section_mark(3, '*A')
+        for m in range(3, 9):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_section_mark(9, '*B')
+        for m in range(9, 13):
+            prog.add_chord_by_name('Fmaj7', m, 1)
+        body = url_body(prog)
+        # *A lands mid-row; the exporter must break the line right before it.
+        self.assertIn('Y|*A', body)
+        self.assertIn('Y|*B', body)
+
+    def test_section_at_row_boundary_single_break(self):
+        # 4-bar A section then *B at bar 5: the natural 4-per-row break already
+        # puts *B on a fresh row — no second Y may be added.
+        prog = make_prog('Boundary')
+        for m in range(1, 5):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        prog.add_section_mark(5, '*B')
+        for m in range(5, 9):
+            prog.add_chord_by_name('Fmaj7', m, 1)
+        body = url_body(prog)
+        self.assertEqual(body.count('Y'), 1)
+        self.assertIn('Y|*B', body)
+
+    def test_first_measure_section_mark_needs_no_break(self):
+        # A mark on the very first measure must not produce a leading Y.
+        prog = make_prog('StartMark')
+        prog.add_section_mark(1, '*A')
+        for m in range(1, 5):
+            prog.add_chord_by_name('Cmaj7', m, 1)
+        body = url_body(prog)
+        self.assertNotIn('Y', body.split('*A', 1)[0])
+        self.assertIn('*A', body)
+
+
 if __name__ == '__main__':
     unittest.main()

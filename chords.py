@@ -1743,6 +1743,10 @@ class ChordProgression:
             # Decide whether to append Y after this measure's barline.
             # Emit Y if:
             #   - we've filled a row (row_measure_count == measures_per_row)
+            #   - the *next* measure opens a new section: force a row break so
+            #     a section mark always starts on a fresh line even when it
+            #     falls mid-row (iReal Pro keeps writing on the current row
+            #     unless told otherwise)
             #   - the barline for this measure is a plain | (not structural)
             #   - this is not the last measure in the song
             want_row_break = (
@@ -1750,6 +1754,17 @@ class ChordProgression:
                 and not is_structural_close
                 and idx < len(measures_to_write) - 1
             )
+            if not want_row_break and idx < len(measures_to_write) - 1:
+                # Look ahead: if the next written measure carries a section
+                # mark, start it on a fresh row.  Skip when this measure ends
+                # in a structural barline (}] or Z) — iReal begins a new row
+                # there on its own, so a forced Y would only add a gap.
+                next_num = measures_to_write[idx + 1]
+                if self.get_section_mark(next_num):
+                    want_row_break = (
+                        not is_structural_close
+                        and row_measure_count > 0
+                    )
 
             # Apply Y by appending it to the barline_close so the URL string
             # becomes ...chord|Y|nextchord... which is valid iReal Pro syntax.
